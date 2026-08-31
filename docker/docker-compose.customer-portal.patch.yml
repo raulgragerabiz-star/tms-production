@@ -1,0 +1,30 @@
+# ============================================================================
+# Añadir este servicio a tu docker-compose.yml raíz, junto a `backoffice`,
+# `carrier-portal` y `app-conductor` ya existentes. No modifica ningún
+# servicio existente.
+# ============================================================================
+
+  customer-portal:
+    build:
+      context: ./apps/customer-portal
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-org}/tms-customer-portal:${IMAGE_TAG:-latest}
+    ports:
+      - "5176:80"
+    depends_on:
+      - backend
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+# ----------------------------------------------------------------------------
+# Codespaces (desarrollo, no Docker): añadir también al .devcontainer o al
+# script de arranque manual, junto a los otros tres `npm run dev`:
+#
+#   cd apps/customer-portal && npm install && npm run dev
+#
+# Y marcar el puerto 5176 como "Public" en la pestaña Ports de Codespaces,
+# exactamente igual que se hizo con el 4000 (backend) y los puertos 5173-5175.
+# ----------------------------------------------------------------------------
