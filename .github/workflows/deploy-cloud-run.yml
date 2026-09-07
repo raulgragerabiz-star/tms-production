@@ -82,12 +82,19 @@ jobs:
       - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
 
       - name: Build y push (backoffice)
+        env:
+          # Pasar los secretos por env de step (no interpolarlos directamente dentro del
+          # script de bash con ${{ secrets.X }}) evita que un caracter raro (comilla,
+          # salto de linea) que pueda tener el valor del secreto rompa la sintaxis del
+          # script -- bash siempre lo trata como una unica variable, pase lo que pase dentro.
+          VITE_GOOGLE_MAPS_API_KEY_VALUE: ${{ secrets.VITEGOOGLEMAPSAPIKEY }}
+          BACKEND_URL_VALUE: ${{ needs.deploy-backend.outputs.url }}
         run: |
           set -e
           IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-backoffice:${{ github.sha }}"
           docker build -f frontend/Dockerfile.prod \
-            --build-arg VITE_API_URL="${{ needs.deploy-backend.outputs.url }}/api" \
-            --build-arg VITE_GOOGLE_MAPS_API_KEY="${{ secrets.VITEGOOGLEMAPSAPIKEY }}" \
+            --build-arg VITE_API_URL="${BACKEND_URL_VALUE}/api" \
+            --build-arg VITE_GOOGLE_MAPS_API_KEY="${VITE_GOOGLE_MAPS_API_KEY_VALUE}" \
             -t "$IMAGE" frontend
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
