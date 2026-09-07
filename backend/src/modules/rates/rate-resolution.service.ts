@@ -176,7 +176,15 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
 
   return {
     estimatedCost: final.totalAmount,
-    breakdown: { baseRateId: baseRateId!, base: baseBreakdown!, surcharges: final.surcharges.items },
+    breakdown: {
+      baseRateId: baseRateId!,
+      base: baseBreakdown!,
+      // SurchargeLineResult[] tampoco es un InputJsonValue estructural para TS (un
+      // array de una interfaz con propiedades fijas no trae índice de tipo string),
+      // aunque sus campos son todos escalares JSON-seguros (string/number) — mismo
+      // caso que baseBreakdown más arriba, mismo cast.
+      surcharges: final.surcharges.items as unknown as Prisma.InputJsonValue,
+    },
   };
 }
 
