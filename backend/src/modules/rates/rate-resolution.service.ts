@@ -28,7 +28,7 @@
 //                                        decisión de negocio.
 // ============================================================================
 import { prisma } from "@/lib/prisma";
-import { ServiceType } from "@prisma/client";
+import { Prisma, ServiceType } from "@prisma/client";
 
 const FULL_TRUCK_SEGMENTS: ServiceType[] = [ServiceType.gran_volumen];
 const PALLET_SEGMENTS: ServiceType[] = [ServiceType.paleteria, ServiceType.paleteria_pesada];
@@ -70,10 +70,15 @@ export interface ResolveShipmentCostParams {
 
 export interface ResolvedShipmentCost {
   estimatedCost: number;
+  // Prisma.InputJsonValue (no Record<string, unknown>/unknown): esto se escribe
+  // tal cual en la columna Json de settlement_line (billing.routes.ts) — con los
+  // tipos genéricos anteriores, TypeScript rechazaba esa escritura porque
+  // Record<string, unknown> no es estructuralmente un InputJsonValue válido,
+  // aunque en tiempo de ejecución el contenido siempre es JSON-serializable.
   breakdown: {
     baseRateId: string;
-    base: Record<string, unknown>;
-    surcharges: unknown;
+    base: Prisma.InputJsonValue;
+    surcharges: Prisma.InputJsonValue;
   };
 }
 
@@ -90,7 +95,7 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
   // 1. by_customer (prioridad máxima)
   let baseRateId: string | undefined;
   let baseAmount: number | undefined;
-  let baseBreakdown: Record<string, unknown> | undefined;
+  let baseBreakdown: Prisma.InputJsonValue | undefined;
 
   if (params.customerId) {
     const rows = await prisma.customerRate.findMany({

@@ -147,7 +147,9 @@ ratesRouter.post(
   asyncHandler(async (req, res) => {
     const data = surchargeSchema.parse(req.body);
     await assertCarrierBelongsToCompany(data.carrierId, req.auth!.companyId);
-    const surcharge = await prisma.rateSurcharge.create({ data });
+    // companyId es obligatorio en RateSurcharge pero no venía en el payload del
+    // formulario (el transportista ya identifica la empresa vía assertCarrierBelongsToCompany).
+    const surcharge = await prisma.rateSurcharge.create({ data: { ...data, companyId: req.auth!.companyId } });
     res.status(201).json(surcharge);
   })
 );

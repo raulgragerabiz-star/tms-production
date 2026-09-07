@@ -24,8 +24,47 @@ model Company {
   routes                  Route[]
   ServiceSegmentationRule ServiceSegmentationRule[]
   warehouses              Warehouse[]
+  HolidayCalendar         HolidayCalendar[]
+  FuelIndexReading        FuelIndexReading[]
 
   @@map("company")
+}
+
+// Festivos (Fase 9, motor de suplementos): un día es festivo para una provincia si
+// hay una fila con esa provincia o una fila nacional (province = NULL) para esa
+// fecha. Estaba documentado en schema.delta.prisma §9 (nunca mergeado en el schema
+// real) y ya tiene seed de ejemplo en migrations_manual/v1_1_advanced_rates.sql,
+// pero sin este modelo Prisma Client no conocía la tabla y el build de producción
+// fallaba (`Property 'holidayCalendar' does not exist on type 'PrismaClient'`).
+model HolidayCalendar {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  company   Company  @relation(fields: [companyId], references: [id])
+  date      DateTime @db.Date
+  label     String
+  province  String? // NULL = festivo nacional, aplica a todas las provincias
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([companyId, date, province])
+  @@index([companyId, date])
+  @@map("holiday_calendar")
+}
+
+// Índice de combustible (Fase 9, suplemento "fuel"): mismo caso que HolidayCalendar
+// — documentado en schema.delta.prisma §9 y con seed en
+// migrations_manual/v1_1_advanced_rates.sql, pero nunca añadido al schema real.
+model FuelIndexReading {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id])
+  effectiveOn DateTime @map("effective_on") @db.Date
+  indexValue  Decimal  @map("index_value") @db.Decimal(8, 4) // ej. €/litro gasóleo, referencia CORES/Boletín Petrolero
+  source      String   @default("manual") // manual | cores_api (futuro)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([companyId, effectiveOn])
+  @@index([companyId, effectiveOn])
+  @@map("fuel_index_reading")
 }
 
 model Warehouse {
