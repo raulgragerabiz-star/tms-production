@@ -1,0 +1,240 @@
+name: Deploy a Cloud Run
+
+# Este workflow es lo que hace que backend + los 4 frontends sigan funcionando
+# aunque el Codespace esté parado: en cada push a main construye las imágenes
+# Docker (los Dockerfile.prod que ya existían en el repo) y las despliega como
+# 5 servicios de Cloud Run, que corren de forma independiente y permanente en
+# Google Cloud. La base de datos sigue siendo la misma de Neon (DATABASE_URL),
+# no se crea ningún Postgres nuevo.
+#
+# Requiere que antes se haya hecho, UNA SOLA VEZ, la configuración manual de GCP
+# (repositorio de Artifact Registry + cuenta de servicio) y que existan estos
+# secretos en GitHub (Settings → Secrets and variables → Actions). Sin guion bajo
+# a propósito (el signo "_" dio problemas al crear el secreto GCP_SA_KEY):
+#   GCPPROJECTID, GCPSAKEY, DATABASEURL, JWTSECRET, VITEGOOGLEMAPSAPIKEY
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  REGION: europe-west1
+  REPO: tms
+
+jobs:
+  deploy-backend:
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y push de la imagen del backend
+        run: |
+          set -e
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-backend:${{ github.sha }}"
+          docker build -f backend/Dockerfile.prod -t "$IMAGE" backend
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Despliegue en Cloud Run
+        run: |
+          # --update-env-vars (no --set-env-vars): en el primer despliegue da igual, pero en
+          # los siguientes evita borrar el CORS_ORIGIN real que fija el último job de este
+          # mismo workflow (update-backend-cors) — con --set-env-vars cada redeploy resetearía
+          # el backend a los orígenes de desarrollo por defecto hasta que ese job volviera a
+          # correr al final.
+          gcloud run deploy tms-backend \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --image="$IMAGE" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=8080 \
+            --update-env-vars="NODE_ENV=production,JWT_EXPIRES_IN=8h,DATABASE_URL=${{ secrets.DATABASEURL }},JWT_SECRET=${{ secrets.JWTSECRET }}"
+
+      - name: Leer la URL pública asignada
+        id: describe
+        run: |
+          URL=$(gcloud run services describe tms-backend --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-backoffice:
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y push (backoffice)
+        run: |
+          set -e
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-backoffice:${{ github.sha }}"
+          docker build -f frontend/Dockerfile.prod \
+            --build-arg VITE_API_URL="${{ needs.deploy-backend.outputs.url }}/api" \
+            --build-arg VITE_GOOGLE_MAPS_API_KEY="${{ secrets.VITEGOOGLEMAPSAPIKEY }}" \
+            -t "$IMAGE" frontend
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Despliegue en Cloud Run
+        run: |
+          gcloud run deploy tms-backoffice \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --image="$IMAGE" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=80
+
+      - id: describe
+        run: |
+          URL=$(gcloud run services describe tms-backoffice --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-carrier-portal:
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y push (carrier-portal)
+        run: |
+          set -e
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-carrier-portal:${{ github.sha }}"
+          docker build -f apps/carrier-portal/Dockerfile.prod \
+            --build-arg VITE_API_URL="${{ needs.deploy-backend.outputs.url }}/api" \
+            -t "$IMAGE" apps/carrier-portal
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Despliegue en Cloud Run
+        run: |
+          gcloud run deploy tms-carrier-portal \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --image="$IMAGE" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=80
+
+      - id: describe
+        run: |
+          URL=$(gcloud run services describe tms-carrier-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-driver-app:
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y push (driver-app)
+        run: |
+          set -e
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-driver-app:${{ github.sha }}"
+          docker build -f apps/driver-app/Dockerfile.prod \
+            --build-arg VITE_API_URL="${{ needs.deploy-backend.outputs.url }}/api" \
+            -t "$IMAGE" apps/driver-app
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Despliegue en Cloud Run
+        run: |
+          gcloud run deploy tms-driver-app \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --image="$IMAGE" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=80
+
+      - id: describe
+        run: |
+          URL=$(gcloud run services describe tms-driver-app --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  deploy-customer-portal:
+    needs: deploy-backend
+    runs-on: ubuntu-latest
+    outputs:
+      url: ${{ steps.describe.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Build y push (customer-portal)
+        run: |
+          set -e
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-customer-portal:${{ github.sha }}"
+          # OJO: este cliente usa VITE_API_BASE_URL (sin sufijo /api, ver
+          # apps/customer-portal/src/api/client.ts) — es distinto al resto de apps.
+          docker build -f apps/customer-portal/Dockerfile.prod \
+            --build-arg VITE_API_BASE_URL="${{ needs.deploy-backend.outputs.url }}" \
+            -t "$IMAGE" apps/customer-portal
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Despliegue en Cloud Run
+        run: |
+          gcloud run deploy tms-customer-portal \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --image="$IMAGE" \
+            --platform=managed \
+            --allow-unauthenticated \
+            --port=80
+
+      - id: describe
+        run: |
+          URL=$(gcloud run services describe tms-customer-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+  update-backend-cors:
+    needs: [deploy-backend, deploy-backoffice, deploy-carrier-portal, deploy-driver-app, deploy-customer-portal]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCPSAKEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Actualizar CORS_ORIGIN del backend con las 4 URLs reales
+        run: |
+          ORIGINS="${{ needs.deploy-backoffice.outputs.url }},${{ needs.deploy-carrier-portal.outputs.url }},${{ needs.deploy-driver-app.outputs.url }},${{ needs.deploy-customer-portal.outputs.url }}"
+          gcloud run services update tms-backend \
+            --project="${{ secrets.GCPPROJECTID }}" \
+            --region="${{ env.REGION }}" \
+            --update-env-vars="CORS_ORIGIN=$ORIGINS"

@@ -1,0 +1,26 @@
+# El repo no tenía .gitignore, lo que ha hecho que node_modules/ y los .env con
+# secretos reales llevaran toda la sesión apareciendo como "untracked" por pura
+# suerte (nadie había hecho todavía un `git add -A` / `git add .`). Sin este
+# archivo, cualquier `git add -A` futuro los metería en el historial de git.
+
+# Dependencias (se reinstalan con npm install, no deben versionarse)
+node_modules/
+
+# Secretos reales de cada entorno — solo se versionan los .env.example
+.env
+.env.*
+!.env.example
+!.env*.example
+backend/.env.save
+
+# Credenciales de cuentas de servicio de Google Cloud descargadas en local
+*-key.json
+github-deployer-key.json
+
+# Builds
+dist/
+build/
+
+# Logs y temporales
+*.log
+.DS_Store
