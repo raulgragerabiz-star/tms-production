@@ -65,7 +65,19 @@ jobs:
       - name: Leer la URL pública asignada
         id: describe
         run: |
-          URL=$(gcloud run services describe tms-backend --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
+          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
+          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
+          for i in 1 2 3 4 5; do
+            URL=$(gcloud run services describe tms-backend --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+            if [ -n "$URL" ]; then break; fi
+            echo "URL todavia vacia, esperando 5s (intento $i)..."
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no se pudo obtener la URL de tms-backend tras varios intentos"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   deploy-backoffice:
@@ -111,7 +123,19 @@ jobs:
 
       - id: describe
         run: |
-          URL=$(gcloud run services describe tms-backoffice --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
+          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
+          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
+          for i in 1 2 3 4 5; do
+            URL=$(gcloud run services describe tms-backoffice --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+            if [ -n "$URL" ]; then break; fi
+            echo "URL todavia vacia, esperando 5s (intento $i)..."
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no se pudo obtener la URL de tms-backoffice tras varios intentos"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   deploy-carrier-portal:
@@ -149,7 +173,19 @@ jobs:
 
       - id: describe
         run: |
-          URL=$(gcloud run services describe tms-carrier-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
+          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
+          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
+          for i in 1 2 3 4 5; do
+            URL=$(gcloud run services describe tms-carrier-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+            if [ -n "$URL" ]; then break; fi
+            echo "URL todavia vacia, esperando 5s (intento $i)..."
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no se pudo obtener la URL de tms-carrier-portal tras varios intentos"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   deploy-driver-app:
@@ -187,7 +223,19 @@ jobs:
 
       - id: describe
         run: |
-          URL=$(gcloud run services describe tms-driver-app --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
+          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
+          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
+          for i in 1 2 3 4 5; do
+            URL=$(gcloud run services describe tms-driver-app --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+            if [ -n "$URL" ]; then break; fi
+            echo "URL todavia vacia, esperando 5s (intento $i)..."
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no se pudo obtener la URL de tms-driver-app tras varios intentos"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   deploy-customer-portal:
@@ -227,7 +275,19 @@ jobs:
 
       - id: describe
         run: |
-          URL=$(gcloud run services describe tms-customer-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
+          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
+          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
+          for i in 1 2 3 4 5; do
+            URL=$(gcloud run services describe tms-customer-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+            if [ -n "$URL" ]; then break; fi
+            echo "URL todavia vacia, esperando 5s (intento $i)..."
+            sleep 5
+          done
+          if [ -z "$URL" ]; then
+            echo "ERROR: no se pudo obtener la URL de tms-customer-portal tras varios intentos"
+            exit 1
+          fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   update-backend-cors:
