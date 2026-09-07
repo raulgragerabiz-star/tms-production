@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "outDir": "dist",
+    "rootDir": "src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "sourceMap": true,
+    "baseUrl": "src",
+    "paths": {
+      "@/*": ["*"]
+    }
+  },
+  "include": ["src", "src/app.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/tests",
+    "**/*.snippet.ts",
+    "src/modules/billing",
+    "src/modules/rates/rates.routes.ts",
+    "src/modules/routes"
+  ]
+}

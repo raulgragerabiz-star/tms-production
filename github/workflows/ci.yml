@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    name: Backend — typecheck, unit + integration tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tms
+          POSTGRES_PASSWORD: tms_password
+          POSTGRES_DB: tms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tms -d tms_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql://tms:tms_password@localhost:5432/tms_test?schema=public
+      TEST_DATABASE_URL: postgresql://tms:tms_password@localhost:5432/tms_test?schema=public
+      JWT_SECRET: ci_test_secret
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # NOTA: no se usa `cache: npm` de actions/setup-node porque requiere un
+      # package-lock.json ya commiteado. Si tu repo ya tiene lockfiles (recomendado:
+      # ejecuta `npm install` una vez en local y commitéalos), puedes reactivar el
+      # caché añadiendo `cache: npm` + `cache-dependency-path: backend/package-lock.json`
+      # aquí para acelerar builds sucesivos.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Unit tests (reglas de negocio puras)
+        run: npm test
+
+      - name: Push schema to test database
+        run: npx prisma db push --skip-generate --accept-data-loss
+
+      - name: Integration tests (Supertest + Postgres real)
+        run: npm run test:integration
+
+  frontend:
+    name: Frontend (backoffice) — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - name: Build (typecheck incluido vía tsc -b)
+        run: npm run build
+        env:
+          VITE_API_URL: http://localhost:4000/api
+          VITE_GOOGLE_MAPS_API_KEY: ""
+
+  carrier-portal:
+    name: Portal Transportista — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/carrier-portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run build
+        env:
+          VITE_API_URL: http://localhost:4000/api
+
+  driver-app:
+    name: App Conductor — typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/driver-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm run build
+        env:
+          VITE_API_URL: http://localhost:4000/api
+
+  docker-build:
+    name: Verifica que las imágenes Docker construyen
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, carrier-portal, driver-app]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: tms-backend:ci
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: false
+          tags: tms-frontend:ci
+      - name: Build carrier-portal image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/carrier-portal
+          push: false
+          tags: tms-carrier-portal:ci
+      - name: Build driver-app image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/driver-app
+          push: false
+          tags: tms-driver-app:ci

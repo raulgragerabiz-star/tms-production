@@ -1,0 +1,98 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: tms_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tms
+      POSTGRES_PASSWORD: tms_password
+      POSTGRES_DB: tms_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - tms_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tms -d tms_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: tms_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tms:tms_password@postgres:5432/tms_dev?schema=public
+      JWT_SECRET: change_this_secret_in_production
+      JWT_EXPIRES_IN: 8h
+      PORT: 4000
+      NODE_ENV: development
+      CORS_ORIGIN: http://localhost:5173,http://localhost:5174,http://localhost:5175
+    ports:
+      - "4000:4000"
+    volumes:
+      - ../backend:/app
+      - /app/node_modules
+    command: sh -c "npx prisma migrate deploy && npm run db:seed:safe && npm run dev"
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: tms_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:4000/api
+      VITE_GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    command: sh -c "npm run dev -- --host 0.0.0.0"
+
+  carrier-portal:
+    build:
+      context: ../apps/carrier-portal
+      dockerfile: Dockerfile
+    container_name: tms_carrier_portal
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:4000/api
+    ports:
+      - "5174:5174"
+    volumes:
+      - ../apps/carrier-portal:/app
+      - /app/node_modules
+    command: sh -c "npm run dev -- --host 0.0.0.0"
+
+  driver-app:
+    build:
+      context: ../apps/driver-app
+      dockerfile: Dockerfile
+    container_name: tms_driver_app
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_URL: http://localhost:4000/api
+    ports:
+      - "5175:5175"
+    volumes:
+      - ../apps/driver-app:/app
+      - /app/node_modules
+    command: sh -c "npm run dev -- --host 0.0.0.0"
+
+volumes:
+  tms_pg_data:

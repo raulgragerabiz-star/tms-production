@@ -1,0 +1,85 @@
+import "express-async-errors";
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import { env } from "@/config/env";
+import { errorHandler } from "@/middleware/error-handler";
+
+import { authRouter } from "@/modules/auth/auth.routes";
+import { customersRouter } from "@/modules/customers/customers.routes";
+import { deliveryPointsRouter } from "@/modules/delivery-points/delivery-points.routes";
+import { productsRouter } from "@/modules/products/products.routes";
+import { carriersRouter } from "@/modules/carriers/carriers.routes";
+import { vehiclesRouter } from "@/modules/vehicles/vehicles.routes";
+import { ratesRouter } from "@/modules/rates/rates.routes";
+import { ordersRouter } from "@/modules/orders/orders.routes";
+import { routesRouter } from "@/modules/routes/routes.routes";
+import { shipmentsRouter } from "@/modules/shipments/shipments.routes";
+import { returnsRouter } from "@/modules/returns/returns.routes";
+import { billingRouter } from "@/modules/billing/billing.routes";
+import { dashboardRouter } from "@/modules/dashboard/dashboard.routes";
+import { warehousesRouter } from "@/modules/warehouses/warehouses.routes";
+import { carrierPortalRouter } from "@/modules/portal/carrier-portal.routes";
+import { driverAppRouter } from "@/modules/portal/driver-app.routes";
+import { usersRouter } from "@/modules/users/users.routes";
+import { requireAuth, requireRole } from "@/middleware/auth";
+import { prisma } from "@/lib/prisma";
+
+export function createApp() {
+  const app = express();
+
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Sin origin (curl, health-checks, apps móviles nativas) siempre se permite.
+        if (!origin || env.corsOrigins.includes(origin)) return callback(null, true);
+        callback(new Error(`Origen no permitido por CORS: ${origin}`));
+      },
+      credentials: true,
+    })
+  );
+  app.use(express.json({ limit: "5mb" }));
+  app.use(morgan(env.nodeEnv === "development" ? "dev" : "combined"));
+
+  // Health-check de infraestructura: comprueba también la conexión a BD, para que un
+  // orquestador (Docker/K8s/balanceador) no marque el servicio como sano si Postgres
+  // no responde, aunque el proceso Node siga vivo.
+  app.get("/health", async (_req, res) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      res.json({ status: "ok", database: "connected", ts: new Date().toISOString() });
+    } catch (err) {
+      res.status(503).json({ status: "error", database: "disconnected", ts: new Date().toISOString() });
+    }
+  });
+
+  app.use("/api/auth", authRouter);
+
+  // Todo lo demás requiere autenticación.
+  app.use("/api/customers", requireAuth, customersRouter);
+  app.use("/api/delivery-points", requireAuth, deliveryPointsRouter);
+  app.use("/api/products", requireAuth, productsRouter);
+  app.use("/api/carriers", requireAuth, carriersRouter);
+  app.use("/api/vehicles", requireAuth, vehiclesRouter);
+  app.use("/api/rates", requireAuth, ratesRouter);
+  app.use("/api/orders", requireAuth, ordersRouter);
+  app.use("/api/routes", requireAuth, routesRouter);
+  app.use("/api/shipments", requireAuth, shipmentsRouter);
+  app.use("/api/returns", requireAuth, returnsRouter);
+  app.use("/api/billing", requireAuth, billingRouter);
+  app.use("/api/dashboard", requireAuth, dashboardRouter);
+  app.use("/api/warehouses", requireAuth, warehousesRouter);
+  app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
+
+  // Portales externos: autenticación independiente (mismo /api/auth/login, distinto
+  // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.
+  app.use("/api/carrier-portal", requireAuth, carrierPortalRouter);
+  app.use("/api/driver-app", requireAuth, driverAppRouter);
+
+  app.use((_req, res) => res.status(404).json({ message: "Not found" }));
+  app.use(errorHandler);
+
+  return app;
+}

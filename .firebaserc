@@ -1,0 +1,24 @@
+{
+  "projects": {
+    "default": "tms-prodution"
+  },
+  "targets": {
+    "tms-prodution": {
+      "hosting": {
+        "backoffice": [
+          "tms-backoffice-f3aa3"
+        ],
+        "carrier-portal": [
+          "tms-carrier-portal"
+        ],
+        "driver-app": [
+          "tms-driver-app-927c1"
+        ],
+        "customer-portal": [
+          "tms-customer-portal-5ccb6"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

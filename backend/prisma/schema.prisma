@@ -1,0 +1,803 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id                      String                    @id @default(uuid())
+  name                    String
+  taxId                   String                    @unique @map("tax_id")
+  active                  Boolean                   @default(true)
+  createdAt               DateTime                  @default(now()) @map("created_at")
+  updatedAt               DateTime                  @updatedAt @map("updated_at")
+  users                   AppUser[]
+  auditLogs               AuditLog[]
+  carriers                Carrier[]
+  customers               Customer[]
+  orders                  Order[]
+  products                Product[]
+  roles                   Role[]
+  routes                  Route[]
+  ServiceSegmentationRule ServiceSegmentationRule[]
+  warehouses              Warehouse[]
+
+  @@map("company")
+}
+
+model Warehouse {
+  id               String   @id @default(uuid())
+  companyId        String   @map("company_id")
+  name             String
+  address          String?
+  postalCode       String?  @map("postal_code")
+  city             String?
+  province         String?
+  country          String   @default("ES")
+  lat              Float?
+  lng              Float?
+  loadingHoursJson Json?    @map("loading_hours_json")
+  isCrossDock      Boolean  @default(false) @map("is_cross_dock")
+  externalCode     String?  @unique @map("external_code")
+  layoutJson       Json?    @map("layout_json")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  orders           Order[]
+  routes           Route[]
+  company          Company  @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, active])
+  @@map("warehouse")
+}
+
+model AppUser {
+  id           String     @id @default(uuid())
+  companyId    String     @map("company_id")
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  fullName     String     @map("full_name")
+  userType     UserType   @default(internal) @map("user_type")
+  carrierId    String?    @map("carrier_id")
+  customerId   String?    @map("customer_id")
+  driverId     String?    @map("driver_id")
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  company      Company    @relation(fields: [companyId], references: [id])
+  roles        UserRole[]
+
+  @@map("app_user")
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  companyId   String?          @map("company_id")
+  name        String
+  code        String           @unique
+  company     Company?         @relation(fields: [companyId], references: [id])
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("role")
+}
+
+model Permission {
+  id    String           @id @default(uuid())
+  code  String           @unique
+  roles RolePermission[]
+
+  @@map("permission")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id")
+  permissionId String     @map("permission_id")
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  role         Role       @relation(fields: [roleId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@map("role_permission")
+}
+
+model UserRole {
+  userId String  @map("user_id")
+  roleId String  @map("role_id")
+  role   Role    @relation(fields: [roleId], references: [id])
+  user   AppUser @relation(fields: [userId], references: [id])
+
+  @@id([userId, roleId])
+  @@map("user_role")
+}
+
+model AuditLog {
+  id         String      @id @default(uuid())
+  companyId  String?     @map("company_id")
+  userId     String?     @map("user_id")
+  entityName String      @map("entity_name")
+  entityId   String      @map("entity_id")
+  action     AuditAction
+  oldValue   Json?       @map("old_value")
+  newValue   Json?       @map("new_value")
+  createdAt  DateTime    @default(now()) @map("created_at")
+  company    Company?    @relation(fields: [companyId], references: [id])
+
+  @@index([entityName, entityId, createdAt])
+  @@map("audit_log")
+}
+
+model ProvinceCatalog {
+  id          Int    @id @default(autoincrement())
+  name        String @unique
+  countryCode String @default("ES") @map("country_code")
+
+  @@map("province_catalog")
+}
+
+model Customer {
+  id             String          @id @default(uuid())
+  companyId      String          @map("company_id")
+  businessCode   String          @map("business_code")
+  legalName      String          @map("legal_name")
+  commercialName String?         @map("commercial_name")
+  taxId          String?         @map("tax_id")
+  active         Boolean         @default(true)
+  deletedAt      DateTime?       @map("deleted_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  company        Company         @relation(fields: [companyId], references: [id])
+  customerRates  CustomerRate[]
+  deliveryPoints DeliveryPoint[]
+  orders         Order[]
+  returnItems    ReturnItem[]
+
+  @@unique([companyId, businessCode])
+  @@map("customer")
+}
+
+model DeliveryPoint {
+  id               String    @id @default(uuid())
+  customerId       String    @map("customer_id")
+  label            String?
+  address          String
+  postalCode       String?   @map("postal_code")
+  city             String?
+  province         String?
+  country          String    @default("ES")
+  lat              Float?
+  lng              Float?
+  unloadHoursJson  Json?     @map("unload_hours_json")
+  contactPhone     String?   @map("contact_phone")
+  contactEmail     String?   @map("contact_email")
+  exchangesPallets Boolean   @default(false) @map("exchanges_pallets")
+  active           Boolean   @default(true)
+  deletedAt        DateTime? @map("deleted_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  customer         Customer  @relation(fields: [customerId], references: [id])
+  orders           Order[]
+
+  @@index([customerId])
+  @@index([postalCode])
+  @@map("delivery_point")
+}
+
+model Product {
+  id                      String      @id @default(uuid())
+  companyId               String      @map("company_id")
+  sku                     String      @unique
+  description             String
+  salesUnit               String      @map("sales_unit")
+  unitsPerPallet          Int         @map("units_per_pallet")
+  grossWeightKg           Decimal     @map("gross_weight_kg") @db.Decimal(12, 4)
+  netWeightKg             Decimal?    @map("net_weight_kg") @db.Decimal(12, 4)
+  fullPalletWeightKg      Decimal     @map("full_pallet_weight_kg") @db.Decimal(12, 4)
+  requiresCold            Boolean     @default(false) @map("requires_cold")
+  isReturnable            Boolean     @default(true) @map("is_returnable")
+  carriageNoteDescription String?     @map("carriage_note_description")
+  active                  Boolean     @default(true)
+  deletedAt               DateTime?   @map("deleted_at")
+  createdAt               DateTime    @default(now()) @map("created_at")
+  updatedAt               DateTime    @updatedAt @map("updated_at")
+  orderLines              OrderLine[]
+  company                 Company     @relation(fields: [companyId], references: [id])
+
+  @@map("product")
+}
+
+model Carrier {
+  id                    String                @id @default(uuid())
+  companyId             String                @map("company_id")
+  legalName             String                @map("legal_name")
+  taxId                 String                @unique @map("tax_id")
+  city                  String?
+  province              String?
+  serviceType           CarrierServiceType    @default(both) @map("service_type")
+  ownsFleet             Boolean               @default(false) @map("owns_fleet")
+  temperatureCapability TemperatureCapability @default(ambient) @map("temperature_capability")
+  notes                 String?
+  active                Boolean               @default(true)
+  deletedAt             DateTime?             @map("deleted_at")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+  company               Company               @relation(fields: [companyId], references: [id])
+  settlements           CarrierSettlement[]
+  costSimulations       CostSimulation[]
+  customerRates         CustomerRate[]
+  drivers               Driver[]
+  fullTruckRates        FullTruckRate[]
+  palletRates           PalletRate[]
+  rateSurcharges        RateSurcharge[]
+  routes                Route[]
+  shipments             Shipment[]
+  vehicles              Vehicle[]
+  zoneRates             ZoneRate[]
+
+  @@map("carrier")
+}
+
+model VehicleType {
+  id                     String           @id @default(uuid())
+  name                   String
+  maxWeightKg            Decimal          @map("max_weight_kg") @db.Decimal(12, 4)
+  maxPallets             Int              @map("max_pallets")
+  allowsExceedingPallets Boolean          @default(false) @map("allows_exceeding_pallets")
+  costSimulations        CostSimulation[]
+  vehicles               Vehicle[]
+
+  @@map("vehicle_type")
+}
+
+model Vehicle {
+  id                 String                @id @default(uuid())
+  carrierId          String                @map("carrier_id")
+  vehicleTypeId      String                @map("vehicle_type_id")
+  plate              String                @unique
+  trailerPlate       String?               @map("trailer_plate")
+  workingTemperature TemperatureCapability @default(ambient) @map("working_temperature")
+  fuelType           String?               @map("fuel_type")
+  itvExpiry          DateTime?             @map("itv_expiry")
+  insuranceExpiry    DateTime?             @map("insurance_expiry")
+  active             Boolean               @default(true)
+  deletedAt          DateTime?             @map("deleted_at")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  routes             Route[]
+  shipments          Shipment[]
+  carrier            Carrier               @relation(fields: [carrierId], references: [id])
+  vehicleType        VehicleType           @relation(fields: [vehicleTypeId], references: [id])
+  driverAssignments  VehicleDriver[]
+
+  @@map("vehicle")
+}
+
+model Driver {
+  id                 String          @id @default(uuid())
+  carrierId          String          @map("carrier_id")
+  fullName           String          @map("full_name")
+  taxId              String          @unique @map("tax_id")
+  phone              String?
+  active             Boolean         @default(true)
+  carrier            Carrier         @relation(fields: [carrierId], references: [id])
+  shipments          Shipment[]
+  vehicleAssignments VehicleDriver[]
+
+  @@map("driver")
+}
+
+model VehicleDriver {
+  id        String    @id @default(uuid())
+  vehicleId String    @map("vehicle_id")
+  driverId  String    @map("driver_id")
+  validFrom DateTime  @map("valid_from")
+  validTo   DateTime? @map("valid_to")
+  driver    Driver    @relation(fields: [driverId], references: [id])
+  vehicle   Vehicle   @relation(fields: [vehicleId], references: [id])
+
+  @@map("vehicle_driver")
+}
+
+model FullTruckRate {
+  id           String    @id @default(uuid())
+  carrierId    String    @map("carrier_id")
+  validFrom    DateTime  @map("valid_from")
+  validTo      DateTime? @map("valid_to")
+  includedKm   Decimal   @map("included_km") @db.Decimal(12, 4)
+  extraStopFee Decimal   @map("extra_stop_fee") @db.Decimal(12, 4)
+  extraKmFee   Decimal   @map("extra_km_fee") @db.Decimal(12, 4)
+  currency     String    @default("EUR") @db.Char(3)
+  carrier      Carrier   @relation(fields: [carrierId], references: [id])
+
+  @@index([carrierId])
+  @@map("full_truck_rate")
+}
+
+model PalletRate {
+  id                   String    @id @default(uuid())
+  carrierId            String    @map("carrier_id")
+  validFrom            DateTime  @map("valid_from")
+  validTo              DateTime? @map("valid_to")
+  fixedFeePerNote      Decimal   @map("fixed_fee_per_note") @db.Decimal(12, 4)
+  looseItemFee         Decimal   @map("loose_item_fee") @db.Decimal(12, 4)
+  maxWeightPerPalletKg Decimal   @map("max_weight_per_pallet_kg") @db.Decimal(12, 4)
+  currency             String    @default("EUR") @db.Char(3)
+  carrier              Carrier   @relation(fields: [carrierId], references: [id])
+
+  @@index([carrierId])
+  @@map("pallet_rate")
+}
+
+model RateSurcharge {
+  id              String          @id @default(uuid())
+  carrierId       String          @map("carrier_id")
+  surchargeType   SurchargeType   @map("surcharge_type")
+  calculationMode CalculationMode @map("calculation_mode")
+  value           Decimal         @db.Decimal(12, 4)
+  validFrom       DateTime        @map("valid_from")
+  validTo         DateTime?       @map("valid_to")
+  companyId       String          @map("company_id")
+  carrier         Carrier         @relation(fields: [carrierId], references: [id])
+
+  @@map("rate_surcharge")
+}
+
+model CustomerRate {
+  id          String      @id @default(uuid())
+  carrierId   String      @map("carrier_id")
+  customerId  String      @map("customer_id")
+  serviceType ServiceType @map("service_type")
+  validFrom   DateTime    @map("valid_from")
+  validTo     DateTime?   @map("valid_to")
+  fixedAmount Decimal     @map("fixed_amount") @db.Decimal(12, 4)
+  currency    String      @default("EUR") @db.Char(3)
+  carrier     Carrier     @relation(fields: [carrierId], references: [id])
+  customer    Customer    @relation(fields: [customerId], references: [id])
+
+  @@map("customer_rate")
+}
+
+model ZoneRate {
+  id          String      @id @default(uuid())
+  carrierId   String      @map("carrier_id")
+  serviceType ServiceType @map("service_type")
+  zoneName    String      @map("zone_name")
+  validFrom   DateTime    @map("valid_from")
+  validTo     DateTime?   @map("valid_to")
+  fixedAmount Decimal     @map("fixed_amount") @db.Decimal(12, 4)
+  currency    String      @default("EUR") @db.Char(3)
+  carrier     Carrier     @relation(fields: [carrierId], references: [id])
+
+  @@map("zone_rate")
+}
+
+model Order {
+  id                     String            @id @default(uuid())
+  companyId              String            @map("company_id")
+  orderNumber            String            @unique @map("order_number")
+  customerId             String            @map("customer_id")
+  deliveryPointId        String            @map("delivery_point_id")
+  warehouseId            String            @map("warehouse_id")
+  status                 OrderStatus       @default(received)
+  priority               OrderPriority     @default(standard)
+  requestedDeliveryDate  DateTime          @map("requested_delivery_date")
+  deliveryTimeWindowFrom String?           @map("delivery_time_window_from")
+  deliveryTimeWindowTo   String?           @map("delivery_time_window_to")
+  notes                  String?
+  serviceType            ServiceType?      @map("service_type")
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+  invoices               CustomerInvoice[]
+  company                Company           @relation(fields: [companyId], references: [id])
+  customer               Customer          @relation(fields: [customerId], references: [id])
+  deliveryPoint          DeliveryPoint     @relation(fields: [deliveryPointId], references: [id])
+  warehouse              Warehouse         @relation(fields: [warehouseId], references: [id])
+  documents              OrderDocument[]
+  lines                  OrderLine[]
+  routeStops             RouteStop[]
+
+  @@index([companyId, status])
+  @@index([deliveryPointId])
+  @@index([requestedDeliveryDate])
+  @@map("order")
+}
+
+model ServiceSegmentationRule {
+  id                   String      @id @default(uuid())
+  companyId            String      @map("company_id")
+  segment              ServiceType
+  maxWeightKg          Decimal?    @map("max_weight_kg") @db.Decimal(12, 4)
+  maxPallets           Int?        @map("max_pallets")
+  maxWeightPerPalletKg Decimal?    @map("max_weight_per_pallet_kg") @db.Decimal(12, 4)
+  maxVolumeM3          Decimal?    @map("max_volume_m3") @db.Decimal(12, 4)
+  priority             Int
+  active               Boolean     @default(true)
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+  company              Company     @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, segment])
+  @@index([companyId, active, priority])
+  @@map("service_segmentation_rule")
+}
+
+model OrderLine {
+  id           String   @id @default(uuid())
+  orderId      String   @map("order_id")
+  productId    String   @map("product_id")
+  quantity     Decimal  @db.Decimal(12, 4)
+  unit         String
+  lineWeightKg Decimal? @map("line_weight_kg") @db.Decimal(12, 4)
+  status       String   @default("ok")
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product  @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_line")
+}
+
+model OrderDocument {
+  id           String       @id @default(uuid())
+  orderId      String       @map("order_id")
+  documentType DocumentType @map("document_type")
+  fileUrl      String       @map("file_url")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  order        Order        @relation(fields: [orderId], references: [id])
+
+  @@map("order_document")
+}
+
+model Route {
+  id              String           @id @default(uuid())
+  companyId       String           @map("company_id")
+  warehouseId     String           @map("warehouse_id")
+  routeDate       DateTime         @map("route_date")
+  status          RouteStatus      @default(draft)
+  serviceType     ServiceType      @map("service_type")
+  carrierId       String?          @map("carrier_id")
+  vehicleId       String?          @map("vehicle_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  costSimulations CostSimulation[]
+  loadPlan        LoadPlan?
+  carrier         Carrier?         @relation(fields: [carrierId], references: [id])
+  company         Company          @relation(fields: [companyId], references: [id])
+  vehicle         Vehicle?         @relation(fields: [vehicleId], references: [id])
+  warehouse       Warehouse        @relation(fields: [warehouseId], references: [id])
+  stops           RouteStop[]
+  shipment        Shipment?
+
+  @@map("route")
+}
+
+model RouteStop {
+  id        String           @id @default(uuid())
+  routeId   String           @map("route_id")
+  orderId   String           @map("order_id")
+  sequence  Int
+  eta       DateTime?
+  status    RouteStopStatus  @default(pending)
+  incidents Incident[]
+  pod       ProofOfDelivery?
+  order     Order            @relation(fields: [orderId], references: [id])
+  route     Route            @relation(fields: [routeId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, sequence])
+  @@map("route_stop")
+}
+
+model LoadPlan {
+  id                 String  @id @default(uuid())
+  routeId            String  @unique @map("route_id")
+  totalWeightKg      Decimal @default(0) @map("total_weight_kg") @db.Decimal(12, 4)
+  totalPallets       Decimal @default(0) @map("total_pallets") @db.Decimal(12, 4)
+  weightOccupancyPct Decimal @default(0) @map("weight_occupancy_pct") @db.Decimal(6, 4)
+  palletOccupancyPct Decimal @default(0) @map("pallet_occupancy_pct") @db.Decimal(6, 4)
+  route              Route   @relation(fields: [routeId], references: [id])
+
+  @@map("load_plan")
+}
+
+model CostSimulation {
+  id            String       @id @default(uuid())
+  routeId       String       @map("route_id")
+  carrierId     String       @map("carrier_id")
+  vehicleTypeId String?      @map("vehicle_type_id")
+  estimatedCost Decimal      @map("estimated_cost") @db.Decimal(12, 4)
+  costBreakdown Json?        @map("cost_breakdown")
+  isSelected    Boolean      @default(false) @map("is_selected")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  carrier       Carrier      @relation(fields: [carrierId], references: [id])
+  route         Route        @relation(fields: [routeId], references: [id])
+  vehicleType   VehicleType? @relation(fields: [vehicleTypeId], references: [id])
+
+  @@index([routeId, isSelected])
+  @@map("cost_simulation")
+}
+
+model Shipment {
+  id              String            @id @default(uuid())
+  routeId         String            @unique @map("route_id")
+  carrierId       String            @map("carrier_id")
+  vehicleId       String            @map("vehicle_id")
+  driverId        String?           @map("driver_id")
+  status          ShipmentStatus    @default(programmed)
+  departedAt      DateTime?         @map("departed_at")
+  finishedAt      DateTime?         @map("finished_at")
+  incidents       Incident[]
+  returnClaims    ReturnClaim[]
+  settlementLines SettlementLine[]
+  carrier         Carrier           @relation(fields: [carrierId], references: [id])
+  driver          Driver?           @relation(fields: [driverId], references: [id])
+  route           Route             @relation(fields: [routeId], references: [id])
+  vehicle         Vehicle           @relation(fields: [vehicleId], references: [id])
+  messages        ShipmentMessage[]
+  trackingEvents  TrackingEvent[]
+
+  @@map("shipment")
+}
+
+model TrackingEvent {
+  id         String            @id @default(uuid())
+  shipmentId String            @map("shipment_id")
+  eventType  TrackingEventType @map("event_type")
+  lat        Float?
+  lng        Float?
+  payload    Json?
+  occurredAt DateTime          @map("occurred_at")
+  shipment   Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, occurredAt])
+  @@map("tracking_event")
+}
+
+model Incident {
+  id           String         @id @default(uuid())
+  shipmentId   String         @map("shipment_id")
+  routeStopId  String?        @map("route_stop_id")
+  incidentType IncidentType   @map("incident_type")
+  description  String?
+  status       IncidentStatus @default(open)
+  reportedBy   String?        @map("reported_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  routeStop    RouteStop?     @relation(fields: [routeStopId], references: [id])
+  shipment     Shipment       @relation(fields: [shipmentId], references: [id])
+
+  @@map("incident")
+}
+
+model ProofOfDelivery {
+  id             String    @id @default(uuid())
+  routeStopId    String    @unique @map("route_stop_id")
+  signatureUrl   String?   @map("signature_url")
+  photoUrls      Json?     @map("photo_urls")
+  receivedByName String?   @map("received_by_name")
+  deliveredAt    DateTime  @map("delivered_at")
+  routeStop      RouteStop @relation(fields: [routeStopId], references: [id])
+
+  @@map("proof_of_delivery")
+}
+
+model ReturnItem {
+  id              String           @id @default(uuid())
+  customerId      String           @map("customer_id")
+  itemDescription String           @map("item_description")
+  pendingQuantity Decimal          @map("pending_quantity") @db.Decimal(12, 4)
+  notes           String?
+  status          ReturnItemStatus @default(pending)
+  claims          ReturnClaim[]
+  customer        Customer         @relation(fields: [customerId], references: [id])
+
+  @@map("return_item")
+}
+
+model ReturnClaim {
+  id                String            @id @default(uuid())
+  shipmentId        String            @map("shipment_id")
+  returnItemId      String            @map("return_item_id")
+  claimedQuantity   Decimal           @map("claimed_quantity") @db.Decimal(12, 4)
+  collectedQuantity Decimal?          @map("collected_quantity") @db.Decimal(12, 4)
+  status            ReturnClaimStatus @default(pending)
+  returnItem        ReturnItem        @relation(fields: [returnItemId], references: [id])
+  shipment          Shipment          @relation(fields: [shipmentId], references: [id])
+
+  @@map("return_claim")
+}
+
+model CarrierSettlement {
+  id          String           @id @default(uuid())
+  carrierId   String           @map("carrier_id")
+  periodFrom  DateTime         @map("period_from")
+  periodTo    DateTime         @map("period_to")
+  status      SettlementStatus @default(draft)
+  totalAmount Decimal          @default(0) @map("total_amount") @db.Decimal(12, 4)
+  carrier     Carrier          @relation(fields: [carrierId], references: [id])
+  lines       SettlementLine[]
+
+  @@map("carrier_settlement")
+}
+
+model SettlementLine {
+  id                  String            @id @default(uuid())
+  carrierSettlementId String            @map("carrier_settlement_id")
+  shipmentId          String            @map("shipment_id")
+  appliedRateId       String?           @map("applied_rate_id")
+  amount              Decimal           @db.Decimal(12, 4)
+  breakdown           Json?
+  carrierSettlement   CarrierSettlement @relation(fields: [carrierSettlementId], references: [id], onDelete: Cascade)
+  shipment            Shipment          @relation(fields: [shipmentId], references: [id])
+
+  @@map("settlement_line")
+}
+
+model ShipmentMessage {
+  id         String   @id @default(uuid())
+  shipmentId String   @map("shipment_id")
+  senderType String   @map("sender_type")
+  senderName String   @map("sender_name")
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, createdAt])
+  @@map("shipment_message")
+}
+
+model CustomerInvoice {
+  id         String        @id @default(uuid())
+  customerId String        @map("customer_id")
+  orderId    String?       @map("order_id")
+  amount     Decimal       @db.Decimal(12, 4)
+  status     InvoiceStatus @default(draft)
+  order      Order?        @relation(fields: [orderId], references: [id])
+
+  @@map("customer_invoice")
+}
+
+enum UserType {
+  internal
+  customer_portal
+  carrier_portal
+  driver_app
+}
+
+enum AuditAction {
+  create
+  update
+  delete
+}
+
+enum CarrierServiceType {
+  full_truck
+  pallet
+  both
+}
+
+enum TemperatureCapability {
+  ambient
+  refrigerated
+  frozen
+  mixed
+}
+
+enum SurchargeType {
+  fuel
+  adr
+  holiday
+  toll
+  waiting_time
+  zone
+}
+
+enum CalculationMode {
+  fixed
+  percentage
+  per_km
+  per_hour
+}
+
+enum OrderStatus {
+  received
+  validated
+  planned
+  loading
+  dispatched
+  in_transit
+  delivered
+  incident
+  cancelled
+}
+
+enum OrderPriority {
+  standard
+  urgent
+}
+
+enum ServiceType {
+  paqueteria
+  paleteria
+  paleteria_pesada
+  gran_volumen
+}
+
+enum DocumentType {
+  delivery_note
+  carriage_note
+  pod
+  invoice
+}
+
+enum RouteStatus {
+  draft
+  optimized
+  assigned
+  confirmed
+  in_progress
+  closed
+  rejected
+}
+
+enum RouteStopStatus {
+  pending
+  arrived
+  completed
+  failed
+}
+
+enum ShipmentStatus {
+  programmed
+  loaded
+  in_transit
+  finished
+}
+
+enum TrackingEventType {
+  gps_ping
+  stop_arrival
+  stop_departure
+  status_change
+}
+
+enum IncidentType {
+  delay
+  damage
+  refused
+  access_issue
+  other
+}
+
+enum IncidentStatus {
+  open
+  resolved
+  escalated
+}
+
+enum ReturnItemStatus {
+  pending
+  claimed
+  collected
+  reconciled
+}
+
+enum ReturnClaimStatus {
+  pending
+  collected
+  not_available
+}
+
+enum SettlementStatus {
+  draft
+  validated
+  approved
+  paid
+  disputed
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  paid
+}

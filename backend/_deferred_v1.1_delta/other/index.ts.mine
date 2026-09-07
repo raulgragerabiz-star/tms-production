@@ -1,0 +1,109 @@
+import express from "express";
+import cors from "cors";
+import http from "http";
+
+// --- Auth y núcleo de negocio (creados en esta sesión) ---
+import authRoutes from "./modules/auth/auth.routes";
+import coreRoutes from "./modules/core/core.routes";
+
+// --- Módulos del delta v1.1, ya existentes en el repo ---
+import erpclaudRoutes from "./modules/integrations/erpclaud/erpclaud.routes";
+import driverAppRoutesV1_1 from "./modules/driver-app/driver-app.routes.v1_1";
+import trackingRoutes from "./modules/tracking/tracking.routes";
+import customerPortalRoutes from "./modules/customer-portal/customer-portal.routes";
+import optimizationSimulationsRoutes from "./modules/optimization/optimization.simulations.routes";
+import settlementDisputeRoutes from "./modules/settlement/settlement-dispute.routes";
+import shipmentChatRoutes from "./modules/chat/shipment-chat.routes";
+import kpiRoutes from "./modules/kpi/kpi.routes";
+import kpiExportRoutes from "./modules/kpi/kpi-export.routes";
+import scheduledReportsRoutes from "./modules/reports/scheduled-reports.routes";
+import anomalyRoutes from "./modules/intelligence/anomaly.routes";
+import demandForecastRoutes from "./modules/intelligence/demand-forecast.routes";
+import companySettingsRoutes from "./modules/intelligence/company-settings.routes";
+
+import { initRealtimeServer } from "./realtime/socket-server";
+import { startScheduledJobs } from "./jobs/scheduler";
+
+const app = express();
+
+// ----------------------------------------------------------------------
+// CORS — permite Codespaces (cualquier subdominio *.app.github.dev),
+// localhost, y los dominios de Firebase Hosting cuando los despliegues.
+// ----------------------------------------------------------------------
+const allowedOriginPatterns = [
+  /^https:\/\/.*\.app\.github\.dev$/,
+  /^http:\/\/localhost:\d+$/,
+  /^https:\/\/tms-.*\.web\.app$/,
+  /^https:\/\/tms-.*\.firebaseapp\.com$/,
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true); // peticiones sin origin (curl, health checks)
+      const allowed = allowedOriginPatterns.some((pattern) => pattern.test(origin));
+      callback(null, allowed);
+    },
+    credentials: true,
+  })
+);
+
+app.use(express.json());
+
+// ----------------------------------------------------------------------
+// Salud básica — para smoke-test.sh y para comprobar que el proceso vive
+// ----------------------------------------------------------------------
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// ----------------------------------------------------------------------
+// Rutas
+// ----------------------------------------------------------------------
+app.use("/api/auth", authRoutes);
+app.use("/api", coreRoutes); // warehouses, carriers, customers, products, orders, routes, optimization/generate+select, shipments/dispatch, route-stops/complete, dashboard/summary
+
+app.use("/api/integrations/erpclaud", erpclaudRoutes);
+app.use("/api/driver-app", driverAppRoutesV1_1);
+app.use("/api/driver-app", trackingRoutes); // POST /shipments/:id/tracking-events
+app.use("/api/tracking", trackingRoutes); // GET /live
+app.use("/api/customer-portal", customerPortalRoutes);
+app.use("/api/optimization", optimizationSimulationsRoutes); // GET /:routeId/simulations, GET /summary/:routeId
+app.use("/api", settlementDisputeRoutes);
+app.use("/api", shipmentChatRoutes);
+app.use("/api/kpis", kpiRoutes);
+app.use("/api/kpis", kpiExportRoutes);
+app.use("/api/scheduled-reports", scheduledReportsRoutes);
+app.use("/api/anomalies", anomalyRoutes);
+app.use("/api/demand-forecast", demandForecastRoutes);
+app.use("/api/company/settings", companySettingsRoutes);
+
+// ----------------------------------------------------------------------
+// Manejador de errores — captura cualquier `next(err)` de los routers de
+// arriba (incluye errores de validación de Zod, que llegan como
+// err.issues) y devuelve JSON en vez de tirar el proceso.
+// ----------------------------------------------------------------------
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error("[error]", err);
+
+  if (err?.issues) {
+    // Error de validación Zod
+    return res.status(400).json({ error: "validation_error", details: err.issues });
+  }
+
+  const status = err?.status ?? err?.statusCode ?? 500;
+  res.status(status).json({ error: err?.message ?? "internal_server_error" });
+});
+
+// ----------------------------------------------------------------------
+// Arranque — http.createServer en vez de app.listen porque Socket.io lo
+// necesita para adjuntarse al mismo servidor.
+// ----------------------------------------------------------------------
+const PORT = Number(process.env.PORT ?? 4000);
+const httpServer = http.createServer(app);
+initRealtimeServer(httpServer);
+
+httpServer.listen(PORT, () => {
+  console.log(`✅ Backend TMS escuchando en :${PORT}`);
+  startScheduledJobs();
+});

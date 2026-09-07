@@ -1,0 +1,393 @@
+// ============================================================================
+// DELTA v1.1 — pegar/mergear estos bloques en tu schema.prisma existente.
+// No se toca ningún modelo del domain-freeze v1.0 salvo los campos marcados
+// explícitamente como "AMPLIADO" (aditivos, no destructivos).
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1. Segmentación de servicio (§2 del documento v1.1)
+// ----------------------------------------------------------------------------
+enum ServiceSegment {
+  paqueteria
+  paleteria
+  paleteria_pesada
+  gran_volumen
+}
+
+model ServiceSegmentationRule {
+  id                   String         @id @default(uuid())
+  companyId            String
+  company              Company        @relation(fields: [companyId], references: [id])
+  segment              ServiceSegment
+  maxWeightKg          Decimal?       @db.Decimal(12, 4)
+  maxPallets           Decimal?       @db.Decimal(12, 4)
+  maxWeightPerPalletKg Decimal?       @db.Decimal(12, 4)
+  maxVolumeM3          Decimal?       @db.Decimal(12, 4)
+  priority             Int
+  active               Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([companyId, priority])
+  @@map("service_segmentation_rule")
+}
+
+// AMPLIADO: Order.serviceType pasa de 2 a 4 valores.
+// Migración de datos: full_truck -> gran_volumen, pallet -> paleteria (ver migration.sql)
+enum OrderServiceType {
+  paqueteria
+  paleteria
+  paleteria_pesada
+  gran_volumen
+}
+
+// En el modelo `Order` ya existente, sustituir el campo:
+//   service_type ENUM(full_truck, pallet)
+// por:
+//   serviceType OrderServiceType
+// y añadir:
+//   segmentAutoAssigned Boolean @default(true)  // false si un planificador lo corrigió a mano
+//   leadTimeDays        Int?    // calculado, ver segmentation.service.ts — no es fuente de verdad
+
+// En `OrderLine` ya existente, añadir:
+//   volumeM3 Decimal? @db.Decimal(12, 6)   // opcional, calculado si el producto trae volumen
+
+// En `Product` ya existente, añadir:
+//   volumeM3PerUnit Decimal? @db.Decimal(12, 6)
+//   lengthM Decimal? @db.Decimal(8, 3)
+//   widthM  Decimal? @db.Decimal(8, 3)
+//   heightM Decimal? @db.Decimal(8, 3)
+
+// ----------------------------------------------------------------------------
+// 2. Motor de optimización — extensión de VehicleType (§3.1)
+// ----------------------------------------------------------------------------
+// En `VehicleType` ya existente, añadir:
+//   maxVolumeM3         Decimal? @db.Decimal(12, 4)
+//   lengthM             Decimal? @db.Decimal(8, 3)
+//   widthM              Decimal? @db.Decimal(8, 3)
+//   heightM             Decimal? @db.Decimal(8, 3)
+//   compatibleSegments  ServiceSegment[]   // Postgres array nativo
+
+// ----------------------------------------------------------------------------
+// 3. Tarifas — modo "día dedicado" (§4.1)
+// ----------------------------------------------------------------------------
+enum FullTruckServiceMode {
+  per_trip
+  daily_dedicated
+}
+
+// En `FullTruckRate` ya existente, añadir:
+//   serviceMode        FullTruckServiceMode @default(per_trip)
+//   dailyDedicatedFee  Decimal? @db.Decimal(12, 4)
+
+// ----------------------------------------------------------------------------
+// 4. App Conductor — QR de vehículo (§5.1)
+// ----------------------------------------------------------------------------
+model VehicleQrToken {
+  id        String   @id @default(uuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  token     String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([vehicleId])
+  @@map("vehicle_qr_token")
+}
+
+// En `Shipment` ya existente, añadir campo opcional para saber qué vehículo
+// se vinculó por QR en ese turno concreto (puede no coincidir con el vehicle
+// "por defecto" del conductor si usó bind-vehicle):
+//   boundViaQrTokenId String? // FK opcional a VehicleQrToken.id, informativo/auditoría
+
+// ----------------------------------------------------------------------------
+// 5. Portal Cliente (§7) — no requiere modelo nuevo.
+// Reutiliza AppUser.userType = customer_portal (ya definido en domain-freeze v1.0,
+// nunca usado hasta ahora) y AppUser.customerId (ya existente como FK opcional).
+// ----------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------
+// 6. Auditoría de jobs del sistema (§ jobs/scheduler.ts)
+// ----------------------------------------------------------------------------
+// El `audit_log` original (Fase 3) exige `company_id`/`user_id` no nulos,
+// pensado para mutaciones de usuario dentro de una empresa. Los jobs
+// programados transversales (ej. limpieza de vehicle_qr_token) no
+// pertenecen a ninguna company concreta ni a ningún usuario. Se amplían
+// ambas columnas a nullable, de forma aditiva y no destructiva:
+//
+//   ALTER TABLE "audit_log" ALTER COLUMN "company_id" DROP NOT NULL;
+//   ALTER TABLE "audit_log" ALTER COLUMN "user_id" DROP NOT NULL;
+//
+// En el modelo Prisma, cambiar:
+//   companyId String  -> companyId String?
+//   userId    String  -> userId    String?
+// (y sus relaciones correspondientes a `String?` con `onDelete: SetNull`
+// si no lo estaban ya). Ningún registro histórico existente se ve afectado
+// — DROP NOT NULL nunca invalida filas ya pobladas.
+
+// ----------------------------------------------------------------------------
+// 7. GPS en vivo — idempotencia de tracking_event (§ tracking.service.ts)
+// ----------------------------------------------------------------------------
+// En `TrackingEvent` ya existente, añadir:
+//   clientEventId String? // UUID generado en el dispositivo, para idempotencia del modo offline
+// Índice único compuesto (aditivo, no rompe filas existentes con NULL):
+//   @@unique([shipmentId, clientEventId])
+// (Postgres permite múltiples NULL en un índice único, así que los
+//  tracking_event históricos sin clientEventId no se ven afectados.)
+
+// ----------------------------------------------------------------------------
+// 8. Tiempo real (§ realtime/socket-server.ts) — sin modelo nuevo, capa pura
+// de infraestructura sobre datos ya persistidos en TrackingEvent.
+// ----------------------------------------------------------------------------
+
+// ----------------------------------------------------------------------------
+// 9. Motor de tarifas avanzado — suplementos reales (Versión 2 del roadmap,
+// 10-gestion-tarifas-TMS.md). `rate_surcharge` ya existía en el schema base
+// como tabla preparada mas sin lógica de cálculo; este bloque la activa.
+// ----------------------------------------------------------------------------
+
+model HolidayCalendar {
+  id        String   @id @default(uuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  date      DateTime @db.Date
+  label     String
+  province  String?  // NULL = festivo nacional, aplica a todas las provincias
+  createdAt DateTime @default(now())
+
+  @@unique([companyId, date, province])
+  @@index([companyId, date])
+  @@map("holiday_calendar")
+}
+
+model FuelIndexReading {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  effectiveOn DateTime @db.Date
+  indexValue  Decimal  @db.Decimal(8, 4) // ej. €/litro gasóleo, referencia CORES/Boletín Petrolero
+  source      String   @default("manual") // manual | cores_api (futuro)
+  createdAt   DateTime @default(now())
+
+  @@unique([companyId, effectiveOn])
+  @@index([companyId, effectiveOn])
+  @@map("fuel_index_reading")
+}
+
+// En `RateSurcharge` ya existente (Fase 3), el campo `value` se interpreta
+// según `calculationMode` y `surchargeType`:
+//   - fuel + percentage: % aplicado sobre el importe base de la tarifa,
+//     multiplicado por el ratio (fuel_index actual / fuel_index de referencia
+//     fijado en `baseline_value`, campo nuevo aditivo).
+//   - adr + fixed|percentage: aplica solo si order.requiresAdr = true (campo
+//     nuevo aditivo en Order, ver más abajo).
+//   - holiday + percentage: aplica solo si route.routeDate está en
+//     HolidayCalendar para la provincia del almacén/destino.
+//   - waiting_time + per_hour: aplica sobre `shipment.waitingMinutes`
+//     (campo nuevo aditivo en Shipment) por encima de una franquicia
+//     (`franchiseMinutes`, campo nuevo aditivo en RateSurcharge).
+//   - toll: importe real (`tollAmountOverride` en Route, si se conoce) o
+//     estimado (`value` como importe fijo por defecto).
+//
+// Añadir a `RateSurcharge`:
+//   baselineValue     Decimal? @db.Decimal(8, 4)  // para fuel: valor de referencia del índice
+//   franchiseMinutes  Int?                          // para waiting_time: minutos gratuitos
+//
+// Añadir a `Order`:
+//   requiresAdr Boolean @default(false)
+//
+// Añadir a `Shipment`:
+//   waitingMinutes   Int?     // minutos de espera reales registrados en la parada/almacén
+//   tollAmountActual Decimal? @db.Decimal(10, 2) // importe real de peaje si se conoce (telepeaje)
+
+// ----------------------------------------------------------------------------
+// 10. Portal Transportista — chat y disputas (13-portal-transportista-TMS.md)
+// ----------------------------------------------------------------------------
+
+model ShipmentMessage {
+  id         String   @id @default(uuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id])
+  senderType String   // "internal" | "carrier_portal" — evita depender de user_type interno del token
+  senderId   String   // AppUser.id de quien escribe
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([shipmentId, createdAt])
+  @@map("shipment_message")
+}
+
+// En `SettlementLine` ya existente, añadir estado propio de línea (hasta
+// ahora solo `carrier_settlement.status` existía a nivel de cabecera; el
+// documento 13-portal-transportista-TMS.md exige poder disputar UNA línea
+// concreta sin mover toda la liquidación):
+//   status          SettlementLineStatus @default(pending) // pending | accepted | disputed
+//   disputeComment  String?
+//   disputedAt      DateTime?
+//   disputedBy      String?  // AppUser.id del transportista que la disputó
+
+enum SettlementLineStatus {
+  pending
+  accepted
+  disputed
+}
+
+// ----------------------------------------------------------------------------
+// 11. Índice de rendimiento — idempotencia del bridge ERP
+// ----------------------------------------------------------------------------
+// En `Order` ya existente, añadir índice compuesto para que la búsqueda de
+// idempotencia de erpclaud.service.ts (`findFirst` por externalOrderId)
+// use un index scan en vez de un seq scan — crítico en un import de 500
+// pedidos, donde esa búsqueda se ejecuta una vez por pedido:
+//
+//   @@index([companyId, externalSourceSystem, externalOrderId])
+//
+// (No se declara como @@unique porque `externalSourceSystem`/
+//  `externalOrderId` pueden ser NULL para pedidos de alta manual —
+//  Postgres permite múltiples NULL en un unique, pero un simple @@index
+//  evita cualquier ambigüedad y ya resuelve el problema de rendimiento,
+//  que es lo único que se buscaba aquí.)
+
+// ----------------------------------------------------------------------------
+// 12. KPIs/BI — columnas aditivas para distancia planificada vs. real
+// ----------------------------------------------------------------------------
+// En `Route` ya existente, añadir (nullable, no rompe filas existentes):
+//   distancePlannedKm Decimal? @db.Decimal(10, 2) // calculado al secuenciar (Fase 8)
+//   distanceRealKm    Decimal? @db.Decimal(10, 2) // acumulado desde tracking_event al cerrar el shipment
+//
+// `distanceRealKm` se calcula sumando la distancia Haversine entre
+// tracking_event consecutivos de tipo gps_ping del shipment asociado —
+// mismo motor de distancia ya usado en zone-grouping.service.ts y
+// tracking.service.ts, sin introducir una tercera implementación.
+
+// ----------------------------------------------------------------------------
+// 13. Informes programados (17-kpis-bi-TMS.md: "posibilidad de programar
+// envío periódico por email a un rol concreto")
+// ----------------------------------------------------------------------------
+
+model ScheduledReport {
+  id              String    @id @default(uuid())
+  companyId       String
+  company         Company   @relation(fields: [companyId], references: [id])
+  name            String
+  metrics         String[]  // claves de METRICS (kpi.service.ts), validadas en la API antes de guardar
+  dimensions      String[]  // claves de DIMENSIONS
+  period          String?   // "day" | "week" | "month" | null
+  filters         Json?     // { carrierId: "...", warehouseId: "..." }
+  format          String    // "csv" | "xlsx" | "pdf"
+  cronExpression  String    // ej. "0 8 * * MON" = cada lunes a las 8:00
+  recipientEmails String[]
+  active          Boolean   @default(true)
+  lastSentAt      DateTime?
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([companyId, active])
+  @@map("scheduled_report")
+}
+
+// ----------------------------------------------------------------------------
+// 14. Inteligencia — Predicción de ETA calibrada (16-inteligencia-artificial-TMS.md)
+// ----------------------------------------------------------------------------
+
+model RouteSpeedCalibration {
+  id           String   @id @default(uuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id])
+  carrierId    String
+  carrier      Carrier  @relation(fields: [carrierId], references: [id])
+  province     String
+  hourBucket   Int      // 0-23, hora local de captura del tracking_event
+  avgSpeedKmh  Decimal  @db.Decimal(6, 2)
+  sampleSize   Int      // nº de tramos usados para calcular el promedio — informa la confianza del dato
+  calculatedAt DateTime @default(now())
+
+  @@unique([companyId, carrierId, province, hourBucket])
+  @@index([companyId, carrierId, province])
+  @@map("route_speed_calibration")
+}
+
+// ----------------------------------------------------------------------------
+// 15. Inteligencia — Detección de anomalías (16-inteligencia-artificial-TMS.md)
+// ----------------------------------------------------------------------------
+
+enum AnomalyType {
+  order_weight_deviation
+  settlement_amount_deviation
+  low_route_occupancy
+  inefficient_route_distance
+}
+
+enum AnomalySeverity {
+  low
+  medium
+  high
+}
+
+enum AnomalyStatus {
+  pending
+  reviewed
+  dismissed
+}
+
+model AnomalyAlert {
+  id           String          @id @default(uuid())
+  companyId    String
+  company      Company         @relation(fields: [companyId], references: [id])
+  alertType    AnomalyType
+  severity     AnomalySeverity
+  entityName   String          // "order" | "settlement_line" | "route" — mismo patrón que audit_log
+  entityId     String
+  description  String
+  metricValue  Decimal?        @db.Decimal(12, 4) // valor observado, para mostrar en el detalle
+  expectedRange String?        // texto auditable, ej. "120-340 kg (media ± 2 desviaciones)"
+  status       AnomalyStatus   @default(pending)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  detectedAt   DateTime        @default(now())
+
+  // Evita duplicar la misma alerta para la misma entidad mientras siga
+  // pendiente de revisión — ver anomaly-detection.service.ts.
+  @@unique([companyId, alertType, entityId, status], name: "uq_pending_alert_per_entity")
+  @@index([companyId, status, detectedAt])
+  @@map("anomaly_alert")
+}
+
+// ----------------------------------------------------------------------------
+// 16. Inteligencia — Predicción de demanda (16-inteligencia-artificial-TMS.md)
+// ----------------------------------------------------------------------------
+// Documento: "reutiliza el enfoque de percentiles ya presente en
+// tms_getafe.html... evolucionado a un modelo real de series temporales"
+// cuando el histórico lo justifique. Este modelo almacena el pronóstico
+// YA CALCULADO (job nocturno) para que el Planificador lo consulte sin
+// recomputar percentiles en cada carga de pantalla.
+
+model DemandForecast {
+  id               String   @id @default(uuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id])
+  warehouseId      String
+  warehouse        Warehouse @relation(fields: [warehouseId], references: [id])
+  province         String
+  forecastDate     DateTime @db.Date
+  expectedOrdersP50 Decimal @db.Decimal(8, 2) // mediana histórica — estimación central
+  expectedOrdersP80 Decimal @db.Decimal(8, 2) // percentil 80 — umbral de "necesitarás refuerzo de flota"
+  expectedWeightKgP50 Decimal @db.Decimal(12, 2)
+  expectedWeightKgP80 Decimal @db.Decimal(12, 2)
+  sampleSize       Int      // nº de semanas históricas usadas para este día de la semana
+  calculatedAt     DateTime @default(now())
+
+  @@unique([companyId, warehouseId, province, forecastDate])
+  @@index([companyId, warehouseId, forecastDate])
+  @@map("demand_forecast")
+}
+
+// ----------------------------------------------------------------------------
+// 17. Inteligencia — Optimización automática opt-in (16-inteligencia-artificial-TMS.md)
+// ----------------------------------------------------------------------------
+// En `Company` ya existente, añadir (aditivo, default = desactivado —
+// "para clientes que lo habiliten", nunca activo por defecto):
+//   autoAssignEnabled      Boolean @default(false)
+//   autoAssignMinConfidence Decimal @default(0.75) @db.Decimal(3, 2) // 0.00-1.00, ajustable en Configuración

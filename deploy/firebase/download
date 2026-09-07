@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "tms-tuempresa-a1b2c"
+  },
+  "targets": {
+    "tms-tuempresa-a1b2c": {
+      "hosting": {
+        "backoffice": ["tms-backoffice"],
+        "carrier-portal": ["tms-carrier-portal"],
+        "driver-app": ["tms-driver-app"],
+        "customer-portal": ["tms-customer-portal"]
+      }
+    }
+  }
+}

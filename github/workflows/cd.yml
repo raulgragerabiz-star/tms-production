@@ -1,0 +1,62 @@
+name: CD — Build & Publish Docker Images
+
+# Se dispara al crear un tag de versión (v1.0.0, v1.1.0...). Publica las 4 imágenes de
+# producción en GitHub Container Registry (ghcr.io) usando el token integrado de Actions,
+# sin necesidad de configurar secretos adicionales. El job depende de que CI haya pasado
+# en el commit correspondiente (workflow_run) antes de publicar nada.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build & push ${{ matrix.image.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - name: backend
+            context: backend
+            dockerfile: backend/Dockerfile.prod
+          - name: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile.prod
+          - name: carrier-portal
+            context: apps/carrier-portal
+            dockerfile: apps/carrier-portal/Dockerfile.prod
+          - name: driver-app
+            context: apps/driver-app
+            dockerfile: apps/driver-app/Dockerfile.prod
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tms-${{ matrix.image.name }}:${{ steps.version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/tms-${{ matrix.image.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
