@@ -85,7 +85,12 @@ carrierPortalRouter.get(
     const items = await prisma.shipment.findMany({
       where: { carrierId: req.auth!.carrierId!, ...(status ? { status: status as any } : {}) },
       include: {
-        route: { include: { warehouse: { select: { name: true } }, stops: { include: { order: { include: { deliveryPoint: true } } } } } },
+        route: {
+          include: {
+            warehouse: { select: { name: true } },
+            stops: { include: { order: { include: { deliveryPoint: true, customer: true } }, pod: true } },
+          },
+        },
         vehicle: true,
         driver: true,
       },

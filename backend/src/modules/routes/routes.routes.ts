@@ -6,20 +6,29 @@ import { HttpError } from "@/utils/http-error";
 
 export const routesRouter = Router();
 
-async function recalculateLoadPlan(routeId: string) {
+export async function recalculateLoadPlan(routeId: string) {
   const stops = await prisma.routeStop.findMany({
     where: { routeId },
-    include: { order: { include: { lines: true } } },
+    include: { order: { include: { lines: { include: { product: { select: { unitsPerPallet: true } } } } } } },
   });
 
   const totalWeightKg = stops.reduce(
     (acc, s) => acc + s.order.lines.reduce((a, l) => a + Number(l.lineWeightKg ?? 0), 0),
     0
   );
-  // Aproximación de palés: peso total / peso medio de palé completo del pedido, con mínimo 1 por pedido.
-  // Para un cálculo exacto por artículo se requeriría unitsPerPallet por línea; se deja preparado para
-  // refinarse cuando el frontend envíe explícitamente palés por línea (unit = "PAL").
-  const totalPallets = stops.length; // placeholder conservador: 1 palé mínimo por parada
+  // Palés = suma por línea de (cantidad / unidades por palé del producto), igual que el
+  // clasificador de segmento (segmentation.service.ts) — antes esto era un placeholder
+  // fijo de "1 palé por parada", que infravaloraba o sobrevaloraba la ocupación real según
+  // el pedido y hacía inútil cualquier filtro de capacidad por palés.
+  const totalPallets = stops.reduce(
+    (acc, s) =>
+      acc +
+      s.order.lines.reduce((a, l) => {
+        const unitsPerPallet = l.product.unitsPerPallet ?? 1;
+        return a + (unitsPerPallet > 0 ? Number(l.quantity) / unitsPerPallet : 0);
+      }, 0),
+    0
+  );
 
   const route = await prisma.route.findUnique({ where: { id: routeId }, include: { vehicle: { include: { vehicleType: true } } } });
   const maxWeight = route?.vehicle?.vehicleType?.maxWeightKg ? Number(route.vehicle.vehicleType.maxWeightKg) : null;
@@ -157,7 +166,8 @@ routesRouter.post(
     const schema = z.object({
       warehouseId: z.string().uuid(),
       routeDate: z.coerce.date(),
-      serviceType: z.enum(["full_truck", "pallet"]),
+      // Los 4 segmentos reales — ver el mismo comentario en orders.routes.ts.
+      serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]),
       orderIds: z.array(z.string().uuid()).min(1),
     });
     const data = schema.parse(req.body);

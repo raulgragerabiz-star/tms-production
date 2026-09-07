@@ -11,6 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:safe": "tsx prisma/seed.ts || true",
+    "demo:refresh-today": "tsx prisma/refresh-demo-route.ts",
+    "db:seed:segmentation": "tsx prisma/seed-segmentation-rules.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "npm run test && npm run test:integration"
@@ -23,6 +25,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
     "express-async-errors": "^3.1.1",
+    "express-rate-limit": "^7.4.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",

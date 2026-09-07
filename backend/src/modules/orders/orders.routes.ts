@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { computeLineWeightKg } from "./lib/line-weight";
+import { classifyOrder } from "@/modules/segmentation/segmentation.service";
 
 export const ordersRouter = Router();
 
@@ -23,7 +24,12 @@ const orderSchema = z.object({
   deliveryTimeWindowFrom: z.string().optional(),
   deliveryTimeWindowTo: z.string().optional(),
   notes: z.string().optional(),
-  serviceType: z.enum(["full_truck", "pallet"]).optional(),
+  // Los 4 segmentos reales (columna `service_type`, ver ServiceType en el schema
+  // de Prisma) — antes aceptaba "full_truck"/"pallet", 2 valores heredados que ya
+  // no existen en el enum de la base de datos y hacían fallar cualquier alta con
+  // ese campo relleno. Si se omite, el pedido se clasifica automáticamente por
+  // peso/palés al crearlo (mismo motor que usa el bridge de importación ERP).
+  serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]).optional(),
   lines: z.array(orderLineSchema).min(1),
 });
 
@@ -136,7 +142,16 @@ ordersRouter.post(
       include: { lines: true },
     });
 
-    res.status(201).json(order);
+    // Si el planificador no fijó un tipo de servicio explícito, se clasifica
+    // automáticamente por peso/palés — mismo motor que usa el bridge de
+    // importación del ERP, para que un pedido manual y uno importado se
+    // traten igual en vez de depender de que la persona adivine el segmento.
+    if (!data.serviceType) {
+      await prisma.$transaction((tx) => classifyOrder(tx, req.auth!.companyId, order.id));
+    }
+
+    const finalOrder = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { lines: true } });
+    res.status(201).json(finalOrder);
   })
 );
 

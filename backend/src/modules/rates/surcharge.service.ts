@@ -167,7 +167,8 @@ export async function computeSurchargesForRoute(params: {
       where: {
         companyId: params.companyId,
         carrierId: params.carrierId,
-        valid_from: { lte: params.routeDate } as any, // ajustar nombre real del campo (validFrom)
+        validFrom: { lte: params.routeDate },
+        OR: [{ validTo: null }, { validTo: { gte: params.routeDate } }],
       },
     }),
     isHoliday(params.companyId, params.routeDate, params.warehouseProvince),

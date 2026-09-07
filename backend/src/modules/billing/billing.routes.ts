@@ -24,7 +24,10 @@ async function computeShipmentAmount(shipmentId: string) {
 
   const resolved = await resolveShipmentCost({
     carrierId: shipment.carrierId,
-    serviceType: shipment.route.serviceType as "full_truck" | "pallet",
+    // route.serviceType ya es uno de los 4 segmentos reales (ServiceType) — el
+    // cast anterior a "full_truck"|"pallet" era simplemente incorrecto (ese
+    // tipo nunca describió lo que esta columna realmente contiene).
+    serviceType: shipment.route.serviceType,
     date: shipment.finishedAt,
     stops: shipment.route.stops.length,
     notesCount: shipment.route.stops.length,

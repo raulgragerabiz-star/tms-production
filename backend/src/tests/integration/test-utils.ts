@@ -67,7 +67,7 @@ export async function seedBaseFixtures() {
   });
 
   await prisma.product.upsert({
-    where: { sku_companyId: { sku: TEST_PRODUCT_SKU, companyId: TEST_COMPANY_ID } as any },
+    where: { sku: TEST_PRODUCT_SKU },
     update: {},
     create: {
       companyId: TEST_COMPANY_ID,
@@ -77,7 +77,12 @@ export async function seedBaseFixtures() {
       unitsPerPallet: 40,
       grossWeightKg: 12.5,
       netWeightKg: 11,
-      fullPalletWeightKg: 500,
+      // 300kg y no 500kg: con 500 un palé completo de este producto supera el
+      // umbral maxWeightPerPalletKg=400 de la regla "paleteria" (ver seed de
+      // reglas más abajo) y el pedido de prueba clasificaría como
+      // "paleteria_pesada" en vez de "paleteria", que es lo que el test de
+      // erpclaud.integration.test.ts espera y documenta en su comentario.
+      fullPalletWeightKg: 300,
       requiresCold: false,
       isReturnable: true,
       active: true,

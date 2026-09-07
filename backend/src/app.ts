@@ -22,7 +22,10 @@ import { dashboardRouter } from "@/modules/dashboard/dashboard.routes";
 import { warehousesRouter } from "@/modules/warehouses/warehouses.routes";
 import { carrierPortalRouter } from "@/modules/portal/carrier-portal.routes";
 import { driverAppRouter } from "@/modules/portal/driver-app.routes";
+import { customerPortalRouter } from "@/modules/portal/customer-portal.routes";
 import { usersRouter } from "@/modules/users/users.routes";
+import { optimizationRouter } from "@/modules/routes/optimization.routes";
+import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -66,6 +69,9 @@ export function createApp() {
   app.use("/api/rates", requireAuth, ratesRouter);
   app.use("/api/orders", requireAuth, ordersRouter);
   app.use("/api/routes", requireAuth, routesRouter);
+  // Montado en /api/optimization (no /api/routes) porque así lo espera ya el
+  // frontend (PlannerPage.tsx llama a `/optimization/:routeId/simulate`).
+  app.use("/api/optimization", requireAuth, optimizationRouter);
   app.use("/api/shipments", requireAuth, shipmentsRouter);
   app.use("/api/returns", requireAuth, returnsRouter);
   app.use("/api/billing", requireAuth, billingRouter);
@@ -77,6 +83,12 @@ export function createApp() {
   // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.
   app.use("/api/carrier-portal", requireAuth, carrierPortalRouter);
   app.use("/api/driver-app", requireAuth, driverAppRouter);
+  app.use("/api/customer-portal", requireAuth, customerPortalRouter);
+
+  // Bridge de importación de pedidos desde ERP Claude: aplica su propio
+  // rate-limit + requireAuth internamente (ver erpclaud.routes.ts) porque el
+  // limitador por IP debe correr ANTES de resolver el token.
+  app.use("/api/integrations/erpclaud", erpclaudRouter);
 
   app.use((_req, res) => res.status(404).json({ message: "Not found" }));
   app.use(errorHandler);

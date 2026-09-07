@@ -49,10 +49,14 @@ interface BoardData {
   routes: RouteLite[];
 }
 
+// Los 4 segmentos reales de ServiceType (columna `service_type` de route) — antes
+// solo "full_truck"/"pallet", 2 valores heredados que ya no existen en el enum.
+export type ServiceType = "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen";
+
 interface Props {
   warehouseId: string;
   routeDate: string;
-  serviceType: "full_truck" | "pallet";
+  serviceType: ServiceType;
   onCreateRouteRequest: (orderId: string) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;

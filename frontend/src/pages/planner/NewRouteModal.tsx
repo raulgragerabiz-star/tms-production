@@ -12,7 +12,7 @@ interface Props {
   /** Prefijados al abrir desde el drag&drop del planificador (soltar un pedido en "nueva ruta"). */
   presetOrderId?: string;
   presetWarehouseId?: string;
-  presetServiceType?: "full_truck" | "pallet";
+  presetServiceType?: ServiceType;
 }
 
 interface WarehouseOption {
@@ -32,6 +32,17 @@ interface PendingOrder {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
+// Los 4 segmentos reales de ServiceType (columna `service_type` de route) — antes
+// solo "Paletería"/"Camión completo", 2 valores heredados que ya no existen en el
+// enum y hacían fallar cualquier alta de ruta (POST /api/routes).
+const serviceTypeOptions = [
+  { value: "paqueteria", label: "Paquetería" },
+  { value: "paleteria", label: "Paletería" },
+  { value: "paleteria_pesada", label: "Paletería pesada" },
+  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+] as const;
+type ServiceType = (typeof serviceTypeOptions)[number]["value"];
+
 export default function NewRouteModal({
   open,
   onClose,
@@ -45,7 +56,7 @@ export default function NewRouteModal({
 
   const [warehouseId, setWarehouseId] = useState(presetWarehouseId ?? "");
   const [routeDate, setRouteDate] = useState("");
-  const [serviceType, setServiceType] = useState<"full_truck" | "pallet">(presetServiceType ?? "pallet");
+  const [serviceType, setServiceType] = useState<ServiceType>(presetServiceType ?? "paleteria");
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>(presetOrderId ? [presetOrderId] : []);
 
   // Sincroniza los valores prefijados cada vez que el modal se abre desde el drag&drop,
@@ -98,7 +109,7 @@ export default function NewRouteModal({
   function resetAndClose() {
     setWarehouseId("");
     setRouteDate("");
-    setServiceType("pallet");
+    setServiceType("paleteria");
     setSelectedOrderIds([]);
     onClose();
   }
@@ -134,8 +145,11 @@ export default function NewRouteModal({
           </Field>
           <Field label="Tipo de servicio" required>
             <select className={inputCls} value={serviceType} onChange={(e) => setServiceType(e.target.value as any)}>
-              <option value="pallet">Paletería</option>
-              <option value="full_truck">Camión completo</option>
+              {serviceTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </Field>
         </div>

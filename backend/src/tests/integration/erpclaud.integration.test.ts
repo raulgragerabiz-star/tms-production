@@ -59,12 +59,12 @@ describe("POST /api/integrations/erpclaud/import-orders", () => {
 
     const order = await prisma.order.findFirst({
       where: { companyId: TEST_COMPANY_ID, externalOrderId: "ERP-TEST-0001" },
-      include: { orderLines: true, customer: true },
+      include: { lines: true, customer: true },
     });
 
     expect(order).not.toBeNull();
     expect(order!.customer.businessCode).toBe("488000");
-    expect(order!.orderLines).toHaveLength(1);
+    expect(order!.lines).toHaveLength(1);
 
     // 10 unidades, 40 unidades/palé, 12.5kg/ud -> 125kg, 0.25 palés
     // -> por debajo del umbral de paquetería en peso (30kg) NO, 125kg > 30

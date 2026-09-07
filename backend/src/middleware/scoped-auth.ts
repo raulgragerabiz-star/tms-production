@@ -18,3 +18,11 @@ export function requireDriverApp(req: Request, _res: Response, next: NextFunctio
   }
   next();
 }
+
+export function requireCustomerPortal(req: Request, _res: Response, next: NextFunction) {
+  if (!req.auth) return next(HttpError.unauthorized());
+  if (req.auth.userType !== "customer_portal" || !req.auth.customerId) {
+    return next(HttpError.forbidden("Acceso exclusivo del Portal Cliente"));
+  }
+  next();
+}

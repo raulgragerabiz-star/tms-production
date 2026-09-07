@@ -278,6 +278,24 @@ async function main() {
     });
   }
 
+  // Usuario demo del Portal Cliente (falta en el seed original: driver_app y
+  // carrier_portal ya tenían usuario demo, customer_portal no, así que nunca
+  // se podía hacer login en apps/customer-portal con datos de seed).
+  const customerPortalHash = await bcrypt.hash("Customer1234!", 10);
+  await prisma.appUser.upsert({
+    where: { email: "cliente@tms.local" },
+    update: {},
+    create: {
+      companyId: company.id,
+      email: "cliente@tms.local",
+      passwordHash: customerPortalHash,
+      fullName: "Portal Cliente Demo",
+      userType: "customer_portal",
+      customerId: customer.id,
+      active: true,
+    },
+  });
+
   // Clientes/puntos de entrega adicionales con coordenadas en el área de Madrid,
   // para poder ver varios marcadores reales en el mapa del planificador (Fase 5, Pantalla 4).
   const extraCustomers = [

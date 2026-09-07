@@ -5,7 +5,16 @@ import StatusBadge from "@/components/StatusBadge";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 import NewRouteModal from "@/pages/planner/NewRouteModal";
-import DragDropBoard from "@/pages/planner/DragDropBoard";
+import DragDropBoard, { ServiceType } from "@/pages/planner/DragDropBoard";
+
+// Los 4 segmentos reales de ServiceType — antes un toggle de solo 2 botones
+// ("Paletería"/"Camión completo") que ya no cubría los valores válidos del enum.
+const serviceTypeOptions: { value: ServiceType; label: string }[] = [
+  { value: "paqueteria", label: "Paquetería" },
+  { value: "paleteria", label: "Paletería" },
+  { value: "paleteria_pesada", label: "Paletería pesada" },
+  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+];
 
 interface RouteRow {
   id: string;
@@ -33,7 +42,7 @@ export default function PlannerPage() {
 
   const [warehouseId, setWarehouseId] = useState("");
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [serviceType, setServiceType] = useState<"full_truck" | "pallet">("pallet");
+  const [serviceType, setServiceType] = useState<ServiceType>("paleteria");
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -123,20 +132,17 @@ export default function PlannerPage() {
               onChange={(e) => setRouteDate(e.target.value)}
               className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
             />
-            <div className="flex bg-slate-100 rounded-lg p-1">
-              <button
-                onClick={() => setServiceType("pallet")}
-                className={`px-3 py-1 rounded-md text-xs font-medium ${serviceType === "pallet" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
-              >
-                Paletería
-              </button>
-              <button
-                onClick={() => setServiceType("full_truck")}
-                className={`px-3 py-1 rounded-md text-xs font-medium ${serviceType === "full_truck" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
-              >
-                Camión completo
-              </button>
-            </div>
+            <select
+              value={serviceType}
+              onChange={(e) => setServiceType(e.target.value as ServiceType)}
+              className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+            >
+              {serviceTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           <DragDropBoard

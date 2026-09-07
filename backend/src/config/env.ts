@@ -26,6 +26,8 @@ const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173,http://lo
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
+  
+console.log("CORS_ORIGIN cargado:", corsOrigins);
 
 export const env = {
   port: parseInt(process.env.PORT ?? "4000", 10),

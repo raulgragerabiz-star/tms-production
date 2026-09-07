@@ -1,4 +1,181 @@
 // ============================================================================
+// Punto de entrada del motor de tarifas (Fase 9): `resolveShipmentCost`.
+//
+// NOTA IMPORTANTE (hallazgo al reconectar el motor de optimización, v1.1):
+// esta función orquestadora se documentaba en varios sitios (rates.routes.ts
+// /simulate, billing.routes.ts, routes/optimization.routes.ts) como "ya
+// existente", pero no había ninguna implementación real en el código activo
+// — los tres módulos importaban un símbolo que no existía, así que
+// /api/rates/simulate, el cierre de settlements y la simulación de
+// candidatos de ruta fallaban en cuanto se invocaban. Se implementa aquí,
+// completando el motor con las piezas que sí existían (computeFullTruckCost,
+// computePalletCost, computeFinalRouteCost, el motor de suplementos).
+//
+// Prioridad de tarifa base (documento 10-gestion-tarifas-TMS.md):
+//   1. by_customer  (customer_rate): importe fijo pactado con ese cliente.
+//   2. by_zone      (zone_rate, zoneName = provincia): importe fijo por zona.
+//   3. general      (full_truck_rate / pallet_rate): fórmula estándar.
+//
+// `serviceType` acepta tanto los 4 segmentos reales (paqueteria/paleteria/
+// paleteria_pesada/gran_volumen, columna `service_type` del schema) como los
+// valores heredados "full_truck"/"pallet" que todavía usan algunos llamadores
+// (rates.routes.ts, billing.routes.ts) — se normalizan internamente:
+//   full_truck | gran_volumen        -> tabla full_truck_rate
+//   pallet | paleteria | paleteria_pesada -> tabla pallet_rate
+//   paqueteria                       -> sin tabla de tarifa todavía (se
+//                                        devuelve null, igual que "sin
+//                                        tarifa vigente"); pendiente de
+//                                        decisión de negocio.
+// ============================================================================
+import { prisma } from "@/lib/prisma";
+import { ServiceType } from "@prisma/client";
+
+const FULL_TRUCK_SEGMENTS: ServiceType[] = [ServiceType.gran_volumen];
+const PALLET_SEGMENTS: ServiceType[] = [ServiceType.paleteria, ServiceType.paleteria_pesada];
+
+function mapsToFullTruck(serviceType: string): boolean {
+  return serviceType === "full_truck" || serviceType === ServiceType.gran_volumen;
+}
+
+function mapsToPallet(serviceType: string): boolean {
+  return (
+    serviceType === "pallet" ||
+    serviceType === ServiceType.paleteria ||
+    serviceType === ServiceType.paleteria_pesada
+  );
+}
+
+function isCurrentlyValid<T extends { validFrom: Date; validTo: Date | null }>(rows: T[], date: Date): T[] {
+  return rows.filter((r) => r.validFrom <= date && (r.validTo == null || r.validTo >= date));
+}
+
+export interface ResolveShipmentCostParams {
+  carrierId: string;
+  /** "full_truck" | "pallet" (heredado) o uno de los 4 segmentos reales. */
+  serviceType: string;
+  date: Date;
+  km?: number;
+  stops?: number;
+  notesCount?: number;
+  looseItems?: number;
+  customerId?: string;
+  province?: string;
+  conditions?: {
+    requiresAdr?: boolean;
+    isHoliday?: boolean;
+    waitingHours?: number;
+    tollAmount?: number;
+  };
+}
+
+export interface ResolvedShipmentCost {
+  estimatedCost: number;
+  breakdown: {
+    baseRateId: string;
+    base: Record<string, unknown>;
+    surcharges: unknown;
+  };
+}
+
+export async function resolveShipmentCost(params: ResolveShipmentCostParams): Promise<ResolvedShipmentCost | null> {
+  const carrier = await prisma.carrier.findUnique({ where: { id: params.carrierId } });
+  if (!carrier) return null;
+
+  const isFullTruck = mapsToFullTruck(params.serviceType);
+  const isPallet = mapsToPallet(params.serviceType);
+  if (!isFullTruck && !isPallet) return null; // p. ej. "paqueteria": sin tabla de tarifa todavía
+
+  const segments = isFullTruck ? FULL_TRUCK_SEGMENTS : PALLET_SEGMENTS;
+
+  // 1. by_customer (prioridad máxima)
+  let baseRateId: string | undefined;
+  let baseAmount: number | undefined;
+  let baseBreakdown: Record<string, unknown> | undefined;
+
+  if (params.customerId) {
+    const rows = await prisma.customerRate.findMany({
+      where: { carrierId: params.carrierId, customerId: params.customerId, serviceType: { in: segments } },
+    });
+    const valid = isCurrentlyValid(rows, params.date);
+    if (valid.length > 0) {
+      baseRateId = valid[0].id;
+      baseAmount = Number(valid[0].fixedAmount);
+      baseBreakdown = { source: "by_customer", fixedAmount: baseAmount };
+    }
+  }
+
+  // 2. by_zone (si no hubo tarifa por cliente)
+  if (baseAmount === undefined && params.province) {
+    const rows = await prisma.zoneRate.findMany({
+      where: { carrierId: params.carrierId, zoneName: params.province, serviceType: { in: segments } },
+    });
+    const valid = isCurrentlyValid(rows, params.date);
+    if (valid.length > 0) {
+      baseRateId = valid[0].id;
+      baseAmount = Number(valid[0].fixedAmount);
+      baseBreakdown = { source: "by_zone", zoneName: params.province, fixedAmount: baseAmount };
+    }
+  }
+
+  // 3. general (fórmula estándar por camión completo o paletería)
+  if (baseAmount === undefined) {
+    if (isFullTruck) {
+      const rows = await prisma.fullTruckRate.findMany({ where: { carrierId: params.carrierId } });
+      const valid = isCurrentlyValid(rows, params.date);
+      if (valid.length === 0) return null;
+      const rate = valid[0];
+      const result = computeFullTruckCost({
+        rate: {
+          includedKm: Number(rate.includedKm),
+          extraStopFee: Number(rate.extraStopFee),
+          extraKmFee: Number(rate.extraKmFee),
+          serviceMode: "per_trip",
+          dailyDedicatedFee: null,
+        },
+        totalKm: params.km ?? 0,
+        stopsCount: params.stops ?? 0,
+      });
+      baseRateId = rate.id;
+      baseAmount = result.totalAmount;
+      baseBreakdown = { source: "general_full_truck", ...result };
+    } else {
+      const rows = await prisma.palletRate.findMany({ where: { carrierId: params.carrierId } });
+      const valid = isCurrentlyValid(rows, params.date);
+      if (valid.length === 0) return null;
+      const rate = valid[0];
+      const result = computePalletCost({
+        rate: {
+          fixedFeePerNote: Number(rate.fixedFeePerNote),
+          looseItemFee: Number(rate.looseItemFee),
+          maxWeightPerPalletKg: Number(rate.maxWeightPerPalletKg),
+        },
+        looseItemsCount: params.looseItems ?? params.notesCount ?? 0,
+      });
+      baseRateId = rate.id;
+      baseAmount = result.totalAmount;
+      baseBreakdown = { source: "general_pallet", ...result };
+    }
+  }
+
+  const final = await computeFinalRouteCost({
+    baseCost: baseAmount!,
+    companyId: carrier.companyId,
+    carrierId: params.carrierId,
+    routeDate: params.date,
+    warehouseProvince: params.province ?? carrier.province ?? null,
+    totalKm: params.km ?? 0,
+    requiresAdr: params.conditions?.requiresAdr ?? false,
+    waitingMinutes: params.conditions?.waitingHours != null ? params.conditions.waitingHours * 60 : undefined,
+    tollAmountActual: params.conditions?.tollAmount ?? null,
+  });
+
+  return {
+    estimatedCost: final.totalAmount,
+    breakdown: { baseRateId: baseRateId!, base: baseBreakdown!, surcharges: final.surcharges.items },
+  };
+}
+
+// ============================================================================
 // PARCHE v1.1 sobre rate-resolution.service.ts ya existente (Fase 9).
 // Se añade el modo "daily_dedicated" a la función que calcula el importe de
 // full_truck_rate. El resto del motor (by_customer > by_zone > general,
@@ -56,8 +233,10 @@ export function computeFullTruckCost(input: FullTruckCostInput): FullTruckCostBr
     };
   }
 
-  // Modo ya existente (per_trip) — sin cambios de comportamiento.
-  const extraStopAmount = stopsCount * rate.extraStopFee;
+  // Modo per_trip: la primera parada va incluida (recogida), solo las
+  // adicionales generan extra_stop_fee.
+  const extraStops = Math.max(0, stopsCount - 1);
+  const extraStopAmount = extraStops * rate.extraStopFee;
   return {
     baseAmount: 0,
     extraKmAmount,

@@ -387,6 +387,8 @@ model Order {
   deliveryTimeWindowTo   String?           @map("delivery_time_window_to")
   notes                  String?
   serviceType            ServiceType?      @map("service_type")
+  externalSourceSystem   String?           @map("external_source_system")
+  externalOrderId        String?           @map("external_order_id")
   createdAt              DateTime          @default(now()) @map("created_at")
   updatedAt              DateTime          @updatedAt @map("updated_at")
   invoices               CustomerInvoice[]
@@ -401,6 +403,7 @@ model Order {
   @@index([companyId, status])
   @@index([deliveryPointId])
   @@index([requestedDeliveryDate])
+  @@index([companyId, externalSourceSystem, externalOrderId])
   @@map("order")
 }
 

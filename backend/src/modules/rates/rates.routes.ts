@@ -37,10 +37,15 @@ const surchargeSchema = z.object({
   validTo: z.coerce.date().optional().nullable(),
 });
 
+// Los 4 segmentos reales de ServiceType (columna `service_type` de customer_rate
+// / zone_rate) — antes "full_truck"/"pallet", que ya no son valores válidos del
+// enum y hacían fallar cualquier alta de tarifa por cliente o por zona.
+const realServiceTypes = ["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"] as const;
+
 const customerRateSchema = z.object({
   carrierId: z.string().uuid(),
   customerId: z.string().uuid(),
-  serviceType: z.enum(["full_truck", "pallet"]),
+  serviceType: z.enum(realServiceTypes),
   validFrom: z.coerce.date(),
   validTo: z.coerce.date().optional().nullable(),
   fixedAmount: z.number().nonnegative(),
@@ -49,7 +54,7 @@ const customerRateSchema = z.object({
 
 const zoneRateSchema = z.object({
   carrierId: z.string().uuid(),
-  serviceType: z.enum(["full_truck", "pallet"]),
+  serviceType: z.enum(realServiceTypes),
   zoneName: z.string().min(1),
   validFrom: z.coerce.date(),
   validTo: z.coerce.date().optional().nullable(),
@@ -232,7 +237,12 @@ ratesRouter.post(
   asyncHandler(async (req, res) => {
     const schema = z.object({
       carrierId: z.string().uuid(),
-      serviceType: z.enum(["full_truck", "pallet"]),
+      // El simulador manual admite tanto los 4 segmentos reales como los 2
+      // valores heredados "full_truck"/"pallet" (resolveShipmentCost los
+      // normaliza internamente) — es una herramienta de prueba puntual, no
+      // escribe en ninguna columna, así que no hace falta forzar aquí un único
+      // vocabulario.
+      serviceType: z.enum(["full_truck", "pallet", ...realServiceTypes]),
       date: z.coerce.date().default(() => new Date()),
       km: z.number().nonnegative().optional(),
       stops: z.number().int().nonnegative().optional(),
@@ -269,7 +279,7 @@ ratesRouter.post(
     });
 
     if (!result) {
-      throw HttpError.notFound(`No hay tarifa de ${input.serviceType === "full_truck" ? "camión completo" : "paletería"} vigente para esa fecha`);
+      throw HttpError.notFound(`No hay tarifa vigente para esa fecha (servicio: ${input.serviceType})`);
     }
 
     res.json({ carrierId: input.carrierId, serviceType: input.serviceType, ...result });

@@ -26,6 +26,16 @@ interface CustomerOption {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
+// Los 4 segmentos reales de ServiceType (columna `service_type` de customer_rate /
+// zone_rate) — antes solo "Paletería"/"Camión completo", 2 valores heredados que ya
+// no existen en el enum y hacían fallar cualquier alta de tarifa por cliente o zona.
+const serviceTypeOptions = [
+  { value: "paqueteria", label: "Paquetería" },
+  { value: "paleteria", label: "Paletería" },
+  { value: "paleteria_pesada", label: "Paletería pesada" },
+  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+] as const;
+
 // Tarifas de mayor prioridad que la tarifa general del transportista (Fase 9: by_customer
 // gana siempre sobre by_zone, y ambas sobre la tarifa base). Un único componente cubre
 // ambos casos porque comparten forma (importe fijo + vigencia + servicio), solo cambia
@@ -35,7 +45,9 @@ export default function NewPriorityRateModal({ open, kind, onClose, onSuccess, o
   const [carrierId, setCarrierId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [zoneName, setZoneName] = useState("");
-  const [serviceType, setServiceType] = useState<"full_truck" | "pallet">("pallet");
+  const [serviceType, setServiceType] = useState<
+    "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen"
+  >("paleteria");
   const [fixedAmount, setFixedAmount] = useState("");
   const [validFrom, setValidFrom] = useState("");
   const [validTo, setValidTo] = useState("");
@@ -76,6 +88,7 @@ export default function NewPriorityRateModal({ open, kind, onClose, onSuccess, o
     setFixedAmount("");
     setValidFrom("");
     setValidTo("");
+    setServiceType("paleteria");
     onClose();
   }
 
@@ -121,8 +134,11 @@ export default function NewPriorityRateModal({ open, kind, onClose, onSuccess, o
         <div className="grid grid-cols-2 gap-4">
           <Field label="Tipo de servicio" required>
             <select className={inputCls} value={serviceType} onChange={(e) => setServiceType(e.target.value as any)}>
-              <option value="pallet">Paletería</option>
-              <option value="full_truck">Camión completo</option>
+              {serviceTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </Field>
           <Field label="Importe fijo (€)" required>

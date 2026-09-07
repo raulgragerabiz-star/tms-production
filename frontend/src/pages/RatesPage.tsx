@@ -73,6 +73,16 @@ const calculationModeLabel: Record<string, string> = {
   per_hour: "€/hora",
 };
 
+// Etiquetas legibles de los 4 segmentos reales de ServiceType, usadas en las
+// columnas "Servicio" de las tablas de tarifa por cliente/zona (antes se
+// mostraba el valor crudo del enum con guiones bajos sustituidos por espacios).
+const serviceSegmentLabel: Record<string, string> = {
+  paqueteria: "Paquetería",
+  paleteria: "Paletería",
+  paleteria_pesada: "Paletería pesada",
+  gran_volumen: "Gran volumen",
+};
+
 type Tab = "full_truck" | "pallet" | "surcharges" | "customer" | "zone";
 
 export default function RatesPage() {
@@ -245,7 +255,7 @@ export default function RatesPage() {
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3">{r.customer.businessCode} — {r.customer.legalName}</td>
-                  <td className="px-4 py-3 capitalize">{r.serviceType.replace("_", " ")}</td>
+                  <td className="px-4 py-3">{serviceSegmentLabel[r.serviceType] ?? r.serviceType}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>
@@ -279,7 +289,7 @@ export default function RatesPage() {
                 <tr key={r.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3">{r.zoneName}</td>
-                  <td className="px-4 py-3 capitalize">{r.serviceType.replace("_", " ")}</td>
+                  <td className="px-4 py-3">{serviceSegmentLabel[r.serviceType] ?? r.serviceType}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>

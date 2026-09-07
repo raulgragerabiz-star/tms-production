@@ -44,6 +44,17 @@ interface LineDraft {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
+// Los 4 segmentos reales (antes solo "Paletería"/"Camión completo", 2 valores
+// que ya no existen en el enum de la base de datos). "" = dejar que el
+// backend clasifique automáticamente por peso/palés al crear el pedido.
+const serviceTypeOptions = [
+  { value: "", label: "Automático (por peso/palés)" },
+  { value: "paqueteria", label: "Paquetería" },
+  { value: "paleteria", label: "Paletería" },
+  { value: "paleteria_pesada", label: "Paletería pesada" },
+  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+] as const;
+
 export default function NewOrderModal({ open, onClose, onSuccess, onError }: Props) {
   const queryClient = useQueryClient();
 
@@ -52,7 +63,9 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
   const [deliveryPointId, setDeliveryPointId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [priority, setPriority] = useState<"standard" | "urgent">("standard");
-  const [serviceType, setServiceType] = useState<"full_truck" | "pallet">("pallet");
+  const [serviceType, setServiceType] = useState<
+    "" | "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen"
+  >("");
   const [requestedDeliveryDate, setRequestedDeliveryDate] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([{ productId: "", quantity: "1", unit: "UD" }]);
@@ -89,7 +102,7 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
         deliveryPointId,
         warehouseId,
         priority,
-        serviceType,
+        serviceType: serviceType || undefined,
         requestedDeliveryDate,
         notes: notes || undefined,
         lines: lines
@@ -114,7 +127,7 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
     setDeliveryPointId("");
     setWarehouseId("");
     setPriority("standard");
-    setServiceType("pallet");
+    setServiceType("");
     setRequestedDeliveryDate("");
     setNotes("");
     setLines([{ productId: "", quantity: "1", unit: "UD" }]);
@@ -224,8 +237,11 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
           </Field>
           <Field label="Tipo de servicio">
             <select className={inputCls} value={serviceType} onChange={(e) => setServiceType(e.target.value as any)}>
-              <option value="pallet">Paletería</option>
-              <option value="full_truck">Camión completo</option>
+              {serviceTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </Field>
         </div>
