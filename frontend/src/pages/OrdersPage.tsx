@@ -5,6 +5,7 @@ import StatusBadge from "@/components/StatusBadge";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 import NewOrderModal from "@/pages/orders/NewOrderModal";
+import OrderDetailModal from "@/pages/orders/OrderDetailModal";
 
 interface OrderRow {
   id: string;
@@ -21,6 +22,7 @@ interface OrderRow {
 export default function OrdersPage() {
   const [status, setStatus] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
   const { data, isLoading } = useQuery({
@@ -91,7 +93,10 @@ export default function OrdersPage() {
               </tr>
             )}
             {data?.items.map((o) => (
-              <tr key={o.id} className="hover:bg-slate-50">
+              <tr key={o.id}
+                onClick={() => setSelectedOrderId(o.id)}
+                className="hover:bg-slate-50 cursor-pointer"
+              >
                 <td className="px-4 py-3 font-medium text-slate-800">{o.orderNumber}</td>
                 <td className="px-4 py-3">
                   {o.customer.businessCode} — {o.customer.legalName}
@@ -120,6 +125,7 @@ export default function OrdersPage() {
         onSuccess={showSuccess}
         onError={showError}
       />
+      <OrderDetailModal orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
     </div>
   );

@@ -81,7 +81,12 @@ ordersRouter.get(
         warehouse: true,
         lines: { include: { product: true } },
         documents: true,
-        routeStops: { include: { route: true } },
+        // Objetivo 3/4: se incluye el albarán electrónico (POD) de la parada
+        // para que, desde el Backoffice (Pedidos), el personal administrativo
+        // pueda consultar firma/fotos de un pedido ya entregado sin tener que
+        // ir a buscarlo por otro sitio. Puramente aditivo: no cambia ningún
+        // campo que ya se estuviera devolviendo.
+        routeStops: { include: { route: true, pod: true } },
       },
     });
     if (!order) throw HttpError.notFound("Pedido no encontrado");

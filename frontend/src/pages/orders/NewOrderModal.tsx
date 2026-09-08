@@ -44,9 +44,6 @@ interface LineDraft {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
-// Los 4 segmentos reales (antes solo "Paletería"/"Camión completo", 2 valores
-// que ya no existen en el enum de la base de datos). "" = dejar que el
-// backend clasifique automáticamente por peso/palés al crear el pedido.
 const serviceTypeOptions = [
   { value: "", label: "Automático (por peso/palés)" },
   { value: "paqueteria", label: "Paquetería" },
@@ -63,9 +60,7 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
   const [deliveryPointId, setDeliveryPointId] = useState("");
   const [warehouseId, setWarehouseId] = useState("");
   const [priority, setPriority] = useState<"standard" | "urgent">("standard");
-  const [serviceType, setServiceType] = useState<
-    "" | "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen"
-  >("");
+  const [serviceType, setServiceType] = useState<"" | "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen">("");
   const [requestedDeliveryDate, setRequestedDeliveryDate] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([{ productId: "", quantity: "1", unit: "UD" }]);
