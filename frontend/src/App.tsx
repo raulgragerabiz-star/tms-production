@@ -11,6 +11,7 @@ import CarriersPage from "@/pages/masters/CarriersPage";
 import VehiclesPage from "@/pages/masters/VehiclesPage";
 import UsersPage from "@/pages/masters/UsersPage";
 import WarehousesPage from "@/pages/masters/WarehousesPage";
+import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 import RatesPage from "@/pages/RatesPage";
 import ReturnsPage from "@/pages/ReturnsPage";
 import BillingPage from "@/pages/BillingPage";
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="maestros/flota" element={<VehiclesPage />} />
         <Route path="maestros/usuarios" element={<UsersPage />} />
         <Route path="maestros/almacenes" element={<WarehousesPage />} />
+        <Route path="maestros/zonas-influencia" element={<InfluenceZonesPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

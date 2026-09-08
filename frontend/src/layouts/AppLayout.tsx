@@ -17,6 +17,7 @@ const masterItems = [
   { to: "/maestros/flota", label: "Flota" },
   { to: "/maestros/usuarios", label: "Usuarios" },
   { to: "/maestros/almacenes", label: "Almacenes" },
+  { to: "/maestros/zonas-influencia", label: "Zonas de influencia" },
 ];
 
 function linkClass({ isActive }: { isActive: boolean }) {

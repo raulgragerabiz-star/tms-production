@@ -96,6 +96,10 @@ model Warehouse {
   updatedAt        DateTime @updatedAt @map("updated_at")
   orders           Order[]
   routes           Route[]
+  // Objetivo 2: franjas de km ("zona de influencia") desde este almacén,
+  // cada una con su vehículo asignado -- relación nueva, no toca nada de lo
+  // que ya había en Warehouse.
+  influenceZones   InfluenceZone[]
   company          Company  @relation(fields: [companyId], references: [id])
 
   @@index([companyId, active])
@@ -295,6 +299,8 @@ model VehicleType {
   allowsExceedingPallets Boolean          @default(false) @map("allows_exceeding_pallets")
   costSimulations        CostSimulation[]
   vehicles               Vehicle[]
+  // Objetivo 2: tipo de vehículo asignado a una franja de zona de influencia.
+  influenceZones         InfluenceZone[]
 
   @@map("vehicle_type")
 }
@@ -476,6 +482,27 @@ model ServiceSegmentationRule {
   @@unique([companyId, segment])
   @@index([companyId, active, priority])
   @@map("service_segmentation_rule")
+}
+
+// Objetivo 2: "zona de influencia" -- franjas de distancia (km) desde un
+// almacén concreto, cada una con el vehículo que se le asigna. Tabla nueva,
+// no toca ninguna existente. weeklyShipments es solo informativo por ahora
+// (referencia histórica que ve el planificador), no alimenta todavía ningún
+// cálculo automático.
+model InfluenceZone {
+  id              String      @id @default(uuid())
+  warehouseId     String      @map("warehouse_id")
+  kmMin           Decimal     @map("km_min") @db.Decimal(10, 2)
+  kmMax           Decimal     @map("km_max") @db.Decimal(10, 2)
+  vehicleTypeId   String      @map("vehicle_type_id")
+  weeklyShipments Decimal?    @map("weekly_shipments") @db.Decimal(10, 2)
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  warehouse       Warehouse   @relation(fields: [warehouseId], references: [id])
+  vehicleType     VehicleType @relation(fields: [vehicleTypeId], references: [id])
+
+  @@index([warehouseId, kmMin])
+  @@map("influence_zone")
 }
 
 model OrderLine {
