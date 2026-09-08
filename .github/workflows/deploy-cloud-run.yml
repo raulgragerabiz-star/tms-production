@@ -47,12 +47,25 @@ jobs:
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Despliegue en Cloud Run
+        env:
+          # Igual que en el build del backoffice: pasar los secretos por env de step y
+          # escribirlos en un --env-vars-file (YAML) en vez de una lista pegada con comas
+          # (--update-env-vars/--set-env-vars) evita que un valor con caracteres raros
+          # (o, como nos paso, un secreto que llevaba "DATABASE_URL=" duplicado dentro del
+          # propio valor) rompa el parseo o haga desaparecer otra variable de la lista.
+          # NOTA: --env-vars-file REEMPLAZA todas las variables (no las combina), asi que
+          # CORS_ORIGIN se pierde brevemente hasta que el ultimo job de este mismo workflow
+          # (update-backend-cors) lo vuelve a fijar al final de la ejecucion.
+          DATABASE_URL_VALUE: ${{ secrets.DATABASEURL }}
+          JWT_SECRET_VALUE: ${{ secrets.JWTSECRET }}
         run: |
-          # --update-env-vars (no --set-env-vars): en el primer despliegue da igual, pero en
-          # los siguientes evita borrar el CORS_ORIGIN real que fija el último job de este
-          # mismo workflow (update-backend-cors) — con --set-env-vars cada redeploy resetearía
-          # el backend a los orígenes de desarrollo por defecto hasta que ese job volviera a
-          # correr al final.
+          set -e
+          cat > /tmp/backend-env.yaml <<EOF
+          NODE_ENV: "production"
+          JWT_EXPIRES_IN: "8h"
+          DATABASE_URL: "${DATABASE_URL_VALUE}"
+          JWT_SECRET: "${JWT_SECRET_VALUE}"
+          EOF
           gcloud run deploy tms-backend \
             --project="${{ secrets.GCPPROJECTID }}" \
             --region="${{ env.REGION }}" \
@@ -60,7 +73,7 @@ jobs:
             --platform=managed \
             --allow-unauthenticated \
             --port=8080 \
-            --update-env-vars="NODE_ENV=production,JWT_EXPIRES_IN=8h,DATABASE_URL=${{ secrets.DATABASEURL }},JWT_SECRET=${{ secrets.JWTSECRET }}"
+            --env-vars-file=/tmp/backend-env.yaml
 
       - name: Leer la URL pública asignada
         id: describe
