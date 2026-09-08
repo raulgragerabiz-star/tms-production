@@ -154,7 +154,7 @@ export default function OrderDetailPage() {
                       alt="Firma de quien recibió el pedido"
                       className="w-full max-w-sm border border-slate-200 rounded-md bg-slate-50"
                     />
-                    
+                    <a
                       href={pod.signatureUrl}
                       download={`firma-${order.orderNumber}.png`}
                       className="inline-block mt-2 text-sm text-blue-700 font-medium underline"
