@@ -1,5 +1,14 @@
 generator client {
   provider = "prisma-client-js"
+  // node:20-alpine (Alpine 3.19+) trae OpenSSL 3.0, pero sin este binaryTargets
+  // Prisma solo genera el motor "native" detectado en tiempo de build, que en
+  // este caso quedo enlazado contra libssl.so.1.1 (OpenSSL 1.1.x) -- version que
+  // el contenedor de runtime ya no tiene instalada. Resultado: el backend
+  // arranca, pasa el probe TCP, y al primer intento de conectar a Prisma revienta
+  // con "Error loading shared library libssl.so.1.1: No such file or directory"
+  // y entra en crash-loop. Fijar explicitamente el target linux-musl-openssl-3.0.x
+  // fuerza a generar (y descargar) el motor correcto para Alpine+OpenSSL3.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
