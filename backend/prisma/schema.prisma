@@ -344,6 +344,10 @@ model Vehicle {
   carrier            Carrier               @relation(fields: [carrierId], references: [id])
   vehicleType        VehicleType           @relation(fields: [vehicleTypeId], references: [id])
   driverAssignments  VehicleDriver[]
+  // QR de identificación rápida (pegado físicamente al vehículo) y jornadas
+  // de conductor iniciadas con este vehículo -- ver VehicleQrToken/DriverShift.
+  qrTokens           VehicleQrToken[]
+  shifts             DriverShift[]
 
   @@map("vehicle")
 }
@@ -358,8 +362,52 @@ model Driver {
   carrier            Carrier         @relation(fields: [carrierId], references: [id])
   shipments          Shipment[]
   vehicleAssignments VehicleDriver[]
+  shifts             DriverShift[]
 
   @@map("driver")
+}
+
+// QR de identificación rápida del vehículo (pegado físicamente en la cabina):
+// el conductor lo escanea desde la App para vincular ese vehículo concreto a
+// su turno, sin depender de que backoffice le haya asignado uno fijo de
+// antemano. `token` es el valor codificado en el QR físico; se revoca (no se
+// borra) al regenerar, para no romper un QR ya impreso hasta que se sepa que
+// el nuevo se ha repartido.
+model VehicleQrToken {
+  id        String    @id @default(uuid())
+  vehicleId String    @map("vehicle_id")
+  token     String    @unique
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+  vehicle   Vehicle   @relation(fields: [vehicleId], references: [id])
+
+  @@index([vehicleId])
+  @@map("vehicle_qr_token")
+}
+
+// Jornada del conductor (inicio/fin de turno), independiente de la fecha de
+// ruta: un conductor puede iniciar jornada aunque su ruta del día aún no
+// tenga vehículo asignado (queda con vehicleId nulo hasta que se vincula, por
+// asignación de backoffice o escaneando el QR del vehículo). Como mucho una
+// jornada abierta (endedAt nulo) por conductor a la vez -- lo valida el
+// endpoint, no una constraint de base de datos, para poder dar un mensaje
+// claro ("ya hay una jornada en curso") en vez de un error de integridad.
+model DriverShift {
+  id        String    @id @default(uuid())
+  driverId  String    @map("driver_id")
+  vehicleId String?   @map("vehicle_id")
+  startedAt DateTime  @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  startLat  Float?    @map("start_lat")
+  startLng  Float?    @map("start_lng")
+  endLat    Float?    @map("end_lat")
+  endLng    Float?    @map("end_lng")
+  driver    Driver    @relation(fields: [driverId], references: [id])
+  vehicle   Vehicle?  @relation(fields: [vehicleId], references: [id])
+
+  @@index([driverId, startedAt])
+  @@map("driver_shift")
 }
 
 model VehicleDriver {

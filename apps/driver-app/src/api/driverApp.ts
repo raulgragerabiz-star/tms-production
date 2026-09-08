@@ -1,20 +1,37 @@
-// Añadir estas dos funciones al fichero ya existente `apps/app-conductor/src/api/driverApp.ts`
-// (o al api client equivalente), reutilizando el mismo `apiClient` ya configurado
-// con resolveApiBaseUrl().
+// Funciones del cliente de API para QR de conductor + vehículo y jornada.
 //
-// IMPORTANTE (actualización — modo offline): bindVehicleByQrToken se deja
-// como llamada directa (requiere respuesta inmediata para mostrar el
-// vehículo vinculado, no tiene sentido en cola). confirmShipmentLoad, en
-// cambio, pasa a encolarse — es la acción típica que ocurre justo al
-// arrancar el turno, a veces todavía sin cobertura en el propio almacén/
-// polígono, documento 14-app-conductor-TMS.md §Modo offline.
+// bindVehicleByQrToken se deja como llamada directa (requiere respuesta
+// inmediata para mostrar el vehículo vinculado, no tiene sentido en cola).
+//
+// confirmShipmentLoad queda sin usar por ahora: el checkpoint de "carga" ya
+// se cubre desde TodayRoutePage con el botón "He cargado el vehículo"
+// (POST /driver-app/shipments/:id/status), añadido más tarde en el Objetivo
+// 3. Se deja aquí por si en el futuro conviene un checkpoint de carga
+// independiente del estado general del envío, pero no tiene endpoint montado
+// -- no llamar todavía.
 
 import { apiClient } from "./client"; // cliente ya existente en la app
 import { enqueueAction } from "@/offline/offlineQueue";
 
 export async function bindVehicleByQrToken(token: string) {
-  const res = await apiClient.post("/session/bind-vehicle", { token });
+  const res = await apiClient.post("/driver-app/session/bind-vehicle", { token });
   return res.data as { vehicleId: string; plate: string; vehicleType: string; carrier: string };
+}
+
+// Jornada (inicio/fin de turno) -- QR de conductor + jornada.
+export async function getCurrentShift() {
+  const res = await apiClient.get("/driver-app/shifts/current");
+  return res.data as { shift: { id: string; startedAt: string; vehicle: { plate: string } | null } | null };
+}
+
+export async function startShift(coords?: { lat: number; lng: number }) {
+  const res = await apiClient.post("/driver-app/shifts/start", coords ?? {});
+  return res.data as { shift: { id: string; startedAt: string; vehicle: { plate: string } | null } };
+}
+
+export async function endShift(coords?: { lat: number; lng: number }) {
+  const res = await apiClient.post("/driver-app/shifts/end", coords ?? {});
+  return res.data as { shift: { id: string; startedAt: string; endedAt: string } };
 }
 
 export function confirmShipmentLoad(shipmentId: string) {

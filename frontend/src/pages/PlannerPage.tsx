@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 import NewRouteModal from "@/pages/planner/NewRouteModal";
+import RouteAssignmentModal from "@/pages/planner/RouteAssignmentModal";
 import DragDropBoard, { ServiceType } from "@/pages/planner/DragDropBoard";
 
 // Los 4 segmentos reales de ServiceType — antes un toggle de solo 2 botones
@@ -34,10 +35,10 @@ interface WarehouseOption {
 }
 
 export default function PlannerPage() {
-  const queryClient = useQueryClient();
   const [view, setView] = useState<"board" | "list">("board");
   const [modalOpen, setModalOpen] = useState(false);
   const [presetOrderId, setPresetOrderId] = useState<string | undefined>();
+  const [assigningRouteId, setAssigningRouteId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
   const [warehouseId, setWarehouseId] = useState("");
@@ -53,21 +54,6 @@ export default function PlannerPage() {
     queryKey: ["routes"],
     queryFn: async () => (await api.get("/routes")).data as { items: RouteRow[]; total: number },
     enabled: view === "list",
-  });
-
-  const optimizeMutation = useMutation({
-    mutationFn: async (routeId: string) => (await api.post(`/optimization/${routeId}/simulate`)).data,
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ["routes"] });
-      queryClient.invalidateQueries({ queryKey: ["planner-board"] });
-      const best = data.candidates?.[0];
-      showSuccess(
-        best
-          ? `Comparativa generada: mejor coste ${Number(best.estimatedCost).toFixed(2)} € (${data.candidates.length} candidatos)`
-          : "Comparativa generada"
-      );
-    },
-    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo simular el coste"),
   });
 
   function openNewRouteFromDrop(orderId: string) {
@@ -202,13 +188,14 @@ export default function PlannerPage() {
                     <StatusBadge status={r.status} />
                   </td>
                   <td className="px-4 py-3">
-                    {r.status === "draft" && (
+                    {["in_progress", "closed", "rejected"].includes(r.status) ? (
+                      <span className="text-slate-300 text-xs">—</span>
+                    ) : (
                       <button
-                        onClick={() => optimizeMutation.mutate(r.id)}
-                        disabled={optimizeMutation.isPending}
-                        className="text-brand-600 hover:text-brand-700 text-xs font-medium disabled:opacity-50"
+                        onClick={() => setAssigningRouteId(r.id)}
+                        className="text-brand-600 hover:text-brand-700 text-xs font-medium"
                       >
-                        Comparar transportistas
+                        Gestionar
                       </button>
                     )}
                   </td>
@@ -230,6 +217,12 @@ export default function PlannerPage() {
         presetOrderId={presetOrderId}
         presetWarehouseId={warehouseId || undefined}
         presetServiceType={serviceType}
+      />
+      <RouteAssignmentModal
+        routeId={assigningRouteId}
+        onClose={() => setAssigningRouteId(null)}
+        onSuccess={showSuccess}
+        onError={showError}
       />
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
     </div>

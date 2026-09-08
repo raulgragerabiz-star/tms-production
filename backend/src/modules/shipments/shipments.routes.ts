@@ -90,6 +90,29 @@ shipmentsRouter.post(
   })
 );
 
+// Asigna/reasigna el conductor de un envío ya creado -- por ejemplo cuando se
+// creó sin conductor todavía, o si hay que cambiarlo antes de que empiece la
+// ruta. Sin restricción de estado: mientras no esté "finished" tiene sentido
+// poder corregirlo (igual de flexible que el resto de asignaciones manuales
+// del Planificador).
+shipmentsRouter.patch(
+  "/:id/driver",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ driverId: z.string().uuid() });
+    const { driverId } = schema.parse(req.body);
+
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, route: { companyId: req.auth!.companyId } } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+    if (shipment.status === "finished") throw HttpError.conflict("El envío ya está finalizado");
+
+    const driver = await prisma.driver.findFirst({ where: { id: driverId, carrierId: shipment.carrierId } });
+    if (!driver) throw HttpError.notFound("Conductor no encontrado para el transportista de este envío");
+
+    const updated = await prisma.shipment.update({ where: { id: shipment.id }, data: { driverId } });
+    res.json(updated);
+  })
+);
+
 shipmentsRouter.patch(
   "/:id/status",
   asyncHandler(async (req, res) => {

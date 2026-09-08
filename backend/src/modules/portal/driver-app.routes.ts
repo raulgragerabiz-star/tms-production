@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { requireDriverApp } from "@/middleware/scoped-auth";
+import { resolveVehicleFromQrToken } from "@/modules/vehicles/vehicle-qr.service";
 
 export const driverAppRouter = Router();
 driverAppRouter.use(requireDriverApp);
@@ -45,6 +46,108 @@ driverAppRouter.get(
 
     if (!shipment) return res.json({ shipment: null });
     res.json({ shipment });
+  })
+);
+
+// QR de conductor + vehículo: el conductor escanea el QR físico pegado al
+// vehículo (apps/driver-app/src/pages/ScanVehicleQrPage.tsx -- ya existía en
+// el proyecto pero llamaba a un endpoint que nunca se había montado, mismo
+// patrón que el GPS por lotes) para vincularlo cuando no tiene uno fijo
+// asignado ese día. Actualiza el envío de hoy (si existe) y la jornada
+// abierta (si la hay), para que ambos queden con el vehículo correcto sin
+// que el conductor tenga que hacer nada más.
+driverAppRouter.post(
+  "/session/bind-vehicle",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ token: z.string().min(10) });
+    const { token } = schema.parse(req.body);
+    const driverId = req.auth!.driverId!;
+
+    const vehicle = await resolveVehicleFromQrToken(token);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const todayShipment = await prisma.shipment.findFirst({
+      where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
+    });
+    if (todayShipment) {
+      await prisma.shipment.update({ where: { id: todayShipment.id }, data: { vehicleId: vehicle.id } });
+    }
+
+    const openShift = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+    if (openShift) {
+      await prisma.driverShift.update({ where: { id: openShift.id }, data: { vehicleId: vehicle.id } });
+    }
+
+    res.json({
+      vehicleId: vehicle.id,
+      plate: vehicle.plate,
+      vehicleType: vehicle.vehicleType?.name,
+      carrier: vehicle.carrier?.legalName,
+    });
+  })
+);
+
+// Jornada (inicio/fin de turno) -- independiente de la ruta del día: el
+// conductor puede fichar aunque todavía no se le haya asignado vehículo
+// (queda con vehicleId nulo hasta que se vincula, por el envío del día o
+// escaneando el QR de arriba). Como mucho una jornada abierta a la vez.
+driverAppRouter.get(
+  "/shifts/current",
+  asyncHandler(async (req, res) => {
+    const shift = await prisma.driverShift.findFirst({
+      where: { driverId: req.auth!.driverId!, endedAt: null },
+      include: { vehicle: { select: { plate: true } } },
+      orderBy: { startedAt: "desc" },
+    });
+    res.json({ shift });
+  })
+);
+
+driverAppRouter.post(
+  "/shifts/start",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ lat: z.number().optional(), lng: z.number().optional() });
+    const { lat, lng } = schema.parse(req.body);
+    const driverId = req.auth!.driverId!;
+
+    const existing = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+    if (existing) throw HttpError.conflict("Ya hay una jornada en curso");
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const todayShipment = await prisma.shipment.findFirst({
+      where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
+    });
+
+    const shift = await prisma.driverShift.create({
+      data: { driverId, vehicleId: todayShipment?.vehicleId ?? null, startLat: lat, startLng: lng },
+      include: { vehicle: { select: { plate: true } } },
+    });
+    res.status(201).json({ shift });
+  })
+);
+
+driverAppRouter.post(
+  "/shifts/end",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ lat: z.number().optional(), lng: z.number().optional() });
+    const { lat, lng } = schema.parse(req.body);
+    const driverId = req.auth!.driverId!;
+
+    const existing = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+    if (!existing) throw HttpError.notFound("No hay ninguna jornada en curso");
+
+    const shift = await prisma.driverShift.update({
+      where: { id: existing.id },
+      data: { endedAt: new Date(), endLat: lat, endLng: lng },
+    });
+    res.json({ shift });
   })
 );
 

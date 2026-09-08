@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { issueVehicleQrToken } from "./vehicle-qr.service";
 
 export const vehiclesRouter = Router();
 
@@ -18,8 +19,12 @@ const vehicleSchema = z.object({
 vehiclesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
+    // carrierId opcional: usado por el modal de asignación de rutas para
+    // listar solo los vehículos del transportista ya elegido en la
+    // comparativa de costes (Objetivo 2, huecos del Planificador).
+    const carrierId = req.query.carrierId as string | undefined;
     const items = await prisma.vehicle.findMany({
-      where: { deletedAt: null, carrier: { companyId: req.auth!.companyId } },
+      where: { deletedAt: null, carrier: { companyId: req.auth!.companyId }, ...(carrierId ? { carrierId } : {}) },
       include: { vehicleType: true, carrier: { select: { legalName: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -85,6 +90,33 @@ vehiclesRouter.put(
   })
 );
 
+// QR de identificación rápida del vehículo (pegado en la cabina): backoffice
+// consulta/genera el token para imprimirlo; la App del conductor lo escanea
+// y lo resuelve en driver-app.routes.ts (POST /session/bind-vehicle).
+vehiclesRouter.get(
+  "/:id/qr-token",
+  asyncHandler(async (req, res) => {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } },
+    });
+    if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
+    const active = await prisma.vehicleQrToken.findFirst({ where: { vehicleId: vehicle.id, active: true } });
+    res.json({ token: active?.token ?? null });
+  })
+);
+
+vehiclesRouter.post(
+  "/:id/qr-token",
+  asyncHandler(async (req, res) => {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } },
+    });
+    if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
+    const token = await issueVehicleQrToken(vehicle.id);
+    res.status(201).json({ token });
+  })
+);
+
 // ---- Conductores (Fase 10 §"Conductores") ----
 
 const driverSchema = z.object({
@@ -144,5 +176,20 @@ vehiclesRouter.post(
 
     const assignment = await prisma.vehicleDriver.create({ data: { vehicleId: vehicle.id, driverId: driver.id, validFrom } });
     res.status(201).json(assignment);
+  })
+);
+
+// Jornadas de conductor abiertas ahora mismo (QR de conductor + jornada) --
+// visibilidad para despacho de quién está de turno y con qué vehículo, sin
+// tener que preguntar por radio/teléfono.
+vehiclesRouter.get(
+  "/drivers/shifts/active",
+  asyncHandler(async (req, res) => {
+    const items = await prisma.driverShift.findMany({
+      where: { endedAt: null, driver: { carrier: { companyId: req.auth!.companyId } } },
+      include: { driver: { select: { id: true, fullName: true } }, vehicle: { select: { plate: true } } },
+      orderBy: { startedAt: "desc" },
+    });
+    res.json({ items });
   })
 );

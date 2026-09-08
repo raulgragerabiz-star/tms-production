@@ -10,6 +10,11 @@ interface DeliveryPoint {
   city: string | null;
   lat: number | null;
   lng: number | null;
+  // Contacto del punto de entrega -- se muestran en la lista detallada de
+  // paradas del planificador cuando existen; muchos puntos aún no los tienen
+  // cargados, así que siempre se tratan como opcionales.
+  contactPhone: string | null;
+  contactEmail: string | null;
 }
 
 interface Warehouse {
@@ -32,6 +37,11 @@ interface OrderLite {
 interface RouteStopLite {
   id: string;
   sequence: number;
+  // Estado de la parada individual (pending/arrived/completed/failed/returned,
+  // actualizado por el conductor desde la App) y hora estimada de llegada
+  // (recalculada junto con la ruta) -- para la lista detallada de paradas.
+  status: string;
+  eta: string | null;
   order: OrderLite;
 }
 
@@ -270,7 +280,30 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   <StatusBadge status={r.status} />
                 </div>
                 <p className="text-xs text-slate-500 mb-1">{r.warehouse.name}</p>
-                <p className="text-slate-700 font-medium">{r.stops.length} paradas</p>
+                <p className="text-slate-700 font-medium mb-1">{r.stops.length} paradas</p>
+                {r.stops.length > 0 && (
+                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-1 border border-slate-100 rounded-md bg-slate-50/60 p-1.5">
+                    {r.stops.map((s) => (
+                      <div key={s.id} className="flex items-start justify-between gap-2 text-xs bg-white rounded px-1.5 py-1">
+                        <div className="min-w-0">
+                          <p className="font-medium text-slate-700 truncate">
+                            {s.sequence}. {s.order.customer.legalName}
+                          </p>
+                          <p className="text-slate-400 truncate">
+                            {s.order.deliveryPoint.city ?? s.order.deliveryPoint.address}
+                            {s.order.deliveryPoint.contactPhone && ` · ${s.order.deliveryPoint.contactPhone}`}
+                          </p>
+                          {s.eta && (
+                            <p className="text-slate-400">
+                              ETA {new Date(s.eta).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                          )}
+                        </div>
+                        <StatusBadge status={s.status} />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {r.loadPlan && (
                   <p className="text-xs text-slate-400 mt-1">
                     Ocupación: {Math.round(r.loadPlan.weightOccupancyPct * 100)}% peso /{" "}

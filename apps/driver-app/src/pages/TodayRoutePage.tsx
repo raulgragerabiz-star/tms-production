@@ -2,6 +2,29 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
+import { endShift, getCurrentShift, startShift } from "@/api/driverApp";
+
+// Mejor esfuerzo: si el navegador da permiso y ubicación en menos de 3s se
+// adjunta al fichaje; si no, se ficha igualmente sin coordenadas -- la
+// jornada nunca debe bloquearse por un permiso de localización pendiente o
+// denegado.
+function getCoordsBestEffort(): Promise<{ lat: number; lng: number } | undefined> {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(undefined);
+    const timer = setTimeout(() => resolve(undefined), 3000);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+      { timeout: 3000 }
+    );
+  });
+}
 
 interface StopRow {
   id: string;
@@ -66,6 +89,20 @@ export default function TodayRoutePage() {
     refetchInterval: 30000,
   });
 
+  // QR de conductor + jornada: estado de turno independiente de la ruta del
+  // día (el conductor puede fichar aunque su ruta aún no tenga vehículo).
+  const shiftQuery = useQuery({ queryKey: ["current-shift"], queryFn: getCurrentShift, refetchInterval: 30000 });
+
+  const startShiftMutation = useMutation({
+    mutationFn: async () => startShift(await getCoordsBestEffort()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["current-shift"] }),
+  });
+
+  const endShiftMutation = useMutation({
+    mutationFn: async () => endShift(await getCoordsBestEffort()),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["current-shift"] }),
+  });
+
   const shipmentStatusMutation = useMutation({
     mutationFn: async (status: "loaded" | "in_transit") =>
       (await api.post(`/driver-app/shipments/${data!.shipment!.id}/status`, { status })).data,
@@ -88,6 +125,53 @@ export default function TodayRoutePage() {
           Salir
         </button>
       </header>
+
+      {/* QR de conductor + jornada: fichaje de turno, separado del estado del
+          envío -- un conductor puede iniciar jornada aunque su ruta de hoy
+          todavía no tenga vehículo asignado. */}
+      <div className="px-4 pt-4 max-w-lg mx-auto">
+        <div className="bg-white rounded-2xl border border-slate-200 p-3 flex items-center justify-between">
+          <div>
+            {shiftQuery.data?.shift ? (
+              <>
+                <p className="text-sm font-semibold text-emerald-700">
+                  Jornada iniciada ·{" "}
+                  {new Date(shiftQuery.data.shift.startedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {shiftQuery.data.shift.vehicle?.plate ? `Vehículo ${shiftQuery.data.shift.vehicle.plate}` : "Vehículo pendiente de vincular"}
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-slate-500">Jornada no iniciada</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {shiftQuery.data?.shift && !shiftQuery.data.shift.vehicle?.plate && (
+              <button onClick={() => navigate("/escanear-vehiculo")} className="text-xs font-medium text-brand-600 border border-brand-200 rounded-lg px-3 py-2">
+                Escanear QR
+              </button>
+            )}
+            {shiftQuery.data?.shift ? (
+              <button
+                onClick={() => endShiftMutation.mutate()}
+                disabled={endShiftMutation.isPending}
+                className="text-xs font-semibold text-white bg-slate-700 rounded-lg px-3 py-2 disabled:opacity-50"
+              >
+                Finalizar jornada
+              </button>
+            ) : (
+              <button
+                onClick={() => startShiftMutation.mutate()}
+                disabled={startShiftMutation.isPending}
+                className="text-xs font-semibold text-white bg-brand-600 rounded-lg px-3 py-2 disabled:opacity-50"
+              >
+                Iniciar jornada
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       <main className="px-4 pt-4 max-w-lg mx-auto">
         {isLoading && <p className="text-sm text-slate-400 text-center mt-10">Cargando ruta…</p>}

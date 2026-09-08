@@ -23,6 +23,15 @@ interface DriverRow {
   carrier: { legalName: string };
 }
 
+// QR de conductor + jornada: turnos abiertos ahora mismo, para que despacho
+// vea quién está de turno y con qué vehículo sin preguntar por teléfono.
+interface ActiveShiftRow {
+  id: string;
+  startedAt: string;
+  driver: { id: string; fullName: string };
+  vehicle: { plate: string } | null;
+}
+
 interface VehicleTypeRow {
   id: string;
   name: string;
@@ -38,6 +47,7 @@ export default function VehiclesPage() {
   const [tab, setTab] = useState<"vehicles" | "drivers" | "types">("vehicles");
   const [driverModalOpen, setDriverModalOpen] = useState(false);
   const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
+  const [qrVehicleId, setQrVehicleId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
 
@@ -52,6 +62,28 @@ export default function VehiclesPage() {
     queryFn: async () => (await api.get("/vehicles/drivers")).data as { items: DriverRow[]; total: number },
   });
 
+  // QR de conductor + jornada: turnos abiertos ahora, solo se consulta en la
+  // pestaña de Conductores (donde se muestran).
+  const activeShiftsQuery = useQuery({
+    queryKey: ["active-shifts"],
+    queryFn: async () => (await api.get("/vehicles/drivers/shifts/active")).data as { items: ActiveShiftRow[] },
+    enabled: tab === "drivers",
+    refetchInterval: tab === "drivers" ? 30000 : false,
+  });
+  const activeShiftByDriverId = new Map(activeShiftsQuery.data?.items.map((s) => [s.driver.id, s]) ?? []);
+
+  const qrTokenQuery = useQuery({
+    queryKey: ["vehicle-qr-token", qrVehicleId],
+    queryFn: async () => (await api.get(`/vehicles/${qrVehicleId}/qr-token`)).data as { token: string | null },
+    enabled: !!qrVehicleId,
+  });
+
+  const issueQrMutation = useMutation({
+    mutationFn: async (vehicleId: string) => (await api.post(`/vehicles/${vehicleId}/qr-token`)).data as { token: string },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vehicle-qr-token", qrVehicleId] }),
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo generar el QR"),
+  });
+
   // Objetivo 2: capacidad por volumen y dimensiones de cada tipo de vehículo.
   const vehicleTypesQuery = useQuery({
     queryKey: ["vehicle-types"],
@@ -60,7 +92,7 @@ export default function VehiclesPage() {
   });
 
   const updateVehicleTypeMutation = useMutation({
-    mutationFn: async (payload: { id: string; maxVolumeM3?: number; lengthM?: number; widthM?: number; heightM?: number }) => {
+    mutationFn: async (payload: { id: string; maxPallets?: number; maxVolumeM3?: number; lengthM?: number; widthM?: number; heightM?: number }) => {
       const { id, ...rest } = payload;
       return (await api.patch(`/vehicles/types/${id}`, rest)).data;
     },
@@ -133,12 +165,13 @@ export default function VehiclesPage() {
                 <th className="text-left px-4 py-3">Admite superar palés</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Conductor</th>
+                <th className="text-left px-4 py-3">QR vehículo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {vehiclesQuery.isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {vehiclesQuery.data?.items.map((v) => (
@@ -179,6 +212,11 @@ export default function VehiclesPage() {
                       </button>
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => setQrVehicleId(v.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+                      Ver / generar QR
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -196,32 +234,46 @@ export default function VehiclesPage() {
                 <th className="text-left px-4 py-3">Teléfono</th>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Estado</th>
+                <th className="text-left px-4 py-3">Jornada</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {driversQuery.isLoading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {!driversQuery.isLoading && driversQuery.data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
+                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
                 </tr>
               )}
-              {driversQuery.data?.items.map((d) => (
-                <tr key={d.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-medium">{d.fullName}</td>
-                  <td className="px-4 py-3 font-mono text-xs">{d.taxId}</td>
-                  <td className="px-4 py-3 text-slate-500">{d.phone ?? "—"}</td>
-                  <td className="px-4 py-3">{d.carrier.legalName}</td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${d.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                      {d.active ? "Activo" : "Baja"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {driversQuery.data?.items.map((d) => {
+                const shift = activeShiftByDriverId.get(d.id);
+                return (
+                  <tr key={d.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium">{d.fullName}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{d.taxId}</td>
+                    <td className="px-4 py-3 text-slate-500">{d.phone ?? "—"}</td>
+                    <td className="px-4 py-3">{d.carrier.legalName}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${d.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
+                        {d.active ? "Activo" : "Baja"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {shift ? (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          En turno desde {new Date(shift.startedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
+                          {shift.vehicle?.plate ? ` · ${shift.vehicle.plate}` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-400">Sin jornada abierta</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -260,7 +312,82 @@ export default function VehiclesPage() {
       )}
 
       <NewDriverModal open={driverModalOpen} onClose={() => setDriverModalOpen(false)} onSuccess={showSuccess} onError={showError} />
+
+      {qrVehicleId && (
+        <VehicleQrModal
+          plate={vehiclesQuery.data?.items.find((v) => v.id === qrVehicleId)?.plate ?? ""}
+          token={qrTokenQuery.data?.token ?? null}
+          loading={qrTokenQuery.isLoading}
+          generating={issueQrMutation.isPending}
+          onGenerate={() => issueQrMutation.mutate(qrVehicleId)}
+          onClose={() => setQrVehicleId(null)}
+        />
+      )}
+
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
+    </div>
+  );
+}
+
+// QR de conductor + jornada: el token es lo que se codifica en el QR físico
+// que se pega en la cabina del vehículo. La imagen se genera con un servicio
+// gratuito sin API key (api.qrserver.com) -- misma filosofía que Leaflet/OSM
+// para el mapa: sin coste ni credenciales que gestionar. Si el servicio no
+// estuviera disponible, el token en texto sigue sirviendo (se puede teclear
+// a mano en la App Conductor si hiciera falta).
+function VehicleQrModal({
+  plate,
+  token,
+  loading,
+  generating,
+  onGenerate,
+  onClose,
+}: {
+  plate: string;
+  token: string | null;
+  loading: boolean;
+  generating: boolean;
+  onGenerate: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">QR del vehículo {plate}</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          El conductor lo escanea desde la App al iniciar jornada para vincular este vehículo.
+        </p>
+
+        {loading && <p className="text-sm text-slate-400 py-8">Cargando…</p>}
+
+        {!loading && token && (
+          <>
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(token)}`}
+              alt={`Código QR del vehículo ${plate}`}
+              className="mx-auto rounded-lg border border-slate-200"
+              width={220}
+              height={220}
+            />
+            <p className="text-[10px] font-mono text-slate-400 mt-3 break-all">{token}</p>
+          </>
+        )}
+
+        {!loading && !token && <p className="text-sm text-slate-400 py-6">Este vehículo todavía no tiene un QR generado.</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            onClick={onGenerate}
+            disabled={generating}
+            className="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+          >
+            {token ? "Generar nuevo (invalida el anterior)" : "Generar QR"}
+          </button>
+          <button onClick={onClose} className="text-sm text-slate-500 px-4 py-2">
+            Cerrar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -274,13 +401,15 @@ function VehicleTypeTableRow({
   onSave,
 }: {
   vehicleType: VehicleTypeRow;
-  onSave: (patch: { maxVolumeM3?: number; lengthM?: number; widthM?: number; heightM?: number }) => void;
+  onSave: (patch: { maxPallets?: number; maxVolumeM3?: number; lengthM?: number; widthM?: number; heightM?: number }) => void;
 }) {
+  const [maxPallets, setMaxPallets] = useState(String(vehicleType.maxPallets));
   const [maxVolumeM3, setMaxVolumeM3] = useState(vehicleType.maxVolumeM3 ?? "");
   const [lengthM, setLengthM] = useState(vehicleType.lengthM ?? "");
   const [widthM, setWidthM] = useState(vehicleType.widthM ?? "");
   const [heightM, setHeightM] = useState(vehicleType.heightM ?? "");
 
+  useEffect(() => setMaxPallets(String(vehicleType.maxPallets)), [vehicleType.maxPallets]);
   useEffect(() => setMaxVolumeM3(vehicleType.maxVolumeM3 ?? ""), [vehicleType.maxVolumeM3]);
   useEffect(() => setLengthM(vehicleType.lengthM ?? ""), [vehicleType.lengthM]);
   useEffect(() => setWidthM(vehicleType.widthM ?? ""), [vehicleType.widthM]);
@@ -290,7 +419,21 @@ function VehicleTypeTableRow({
     <tr>
       <td className="px-4 py-3 font-medium text-slate-800">{vehicleType.name}</td>
       <td className="px-4 py-3 text-slate-500">{Number(vehicleType.maxWeightKg).toLocaleString("es-ES")}</td>
-      <td className="px-4 py-3 text-slate-500">{vehicleType.maxPallets}</td>
+      <td className="px-4 py-2">
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value={maxPallets}
+          onChange={(e) => setMaxPallets(e.target.value)}
+          onBlur={() =>
+            maxPallets !== "" &&
+            Number(maxPallets) !== vehicleType.maxPallets &&
+            onSave({ maxPallets: Math.round(Number(maxPallets)) })
+          }
+          className={typeCellCls}
+        />
+      </td>
       <td className="px-4 py-2">
         <input
           type="number"

@@ -3,6 +3,7 @@ import { useAuthStore } from "@/store/auth-store";
 import LoginPage from "@/pages/LoginPage";
 import TodayRoutePage from "@/pages/TodayRoutePage";
 import StopDetailPage from "@/pages/StopDetailPage";
+import ScanVehicleQrPage from "@/pages/ScanVehicleQrPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.token);
@@ -27,6 +28,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <StopDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/escanear-vehiculo"
+        element={
+          <ProtectedRoute>
+            <ScanVehicleQrPage />
           </ProtectedRoute>
         }
       />

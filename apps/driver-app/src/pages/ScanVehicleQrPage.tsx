@@ -1,7 +1,7 @@
-// Copiar a apps/app-conductor/src/pages/ScanVehicleQrPage.tsx
-// Requiere: npm install html5-qrcode --workspace=apps/app-conductor
-// (librería gratuita, sin API key, coherente con la decisión de mapa sin
-// coste del documento v1.1 §6 — misma filosofía aplicada aquí al escaneo).
+// Escaneo del QR físico del vehículo (QR de conductor + vehículo). Usa
+// html5-qrcode (librería gratuita, sin API key, misma filosofía que el mapa
+// Leaflet/OSM sin coste). Ruta montada en App.tsx como /escanear-vehiculo,
+// enlazada desde la barra de jornada de TodayRoutePage.tsx.
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";

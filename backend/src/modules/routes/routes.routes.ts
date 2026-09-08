@@ -133,7 +133,9 @@ routesRouter.get(
       },
       include: {
         customer: { select: { businessCode: true, legalName: true } },
-        deliveryPoint: { select: { id: true, address: true, city: true, lat: true, lng: true } },
+        deliveryPoint: {
+          select: { id: true, address: true, city: true, lat: true, lng: true, contactPhone: true, contactEmail: true },
+        },
         warehouse: { select: { id: true, name: true, lat: true, lng: true } },
         lines: true,
       },
@@ -156,7 +158,17 @@ routesRouter.get(
             order: {
               include: {
                 customer: { select: { businessCode: true, legalName: true } },
-                deliveryPoint: { select: { id: true, address: true, city: true, lat: true, lng: true } },
+                deliveryPoint: {
+                  select: {
+                    id: true,
+                    address: true,
+                    city: true,
+                    lat: true,
+                    lng: true,
+                    contactPhone: true,
+                    contactEmail: true,
+                  },
+                },
                 lines: true,
               },
             },
@@ -235,6 +247,10 @@ routesRouter.get(
           include: { order: { include: { deliveryPoint: true, customer: true, lines: true } } },
         },
         costSimulations: { include: { carrier: true, vehicleType: true }, orderBy: { estimatedCost: "asc" } },
+        // Para que el modal de asignación sepa si ya existe un envío creado a
+        // partir de esta ruta (y no ofrecer crear uno duplicado -- Shipment.routeId
+        // es único) sin tener que consultar /shipments aparte.
+        shipment: { select: { id: true, status: true, driverId: true } },
       },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
