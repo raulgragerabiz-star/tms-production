@@ -48,6 +48,10 @@ export default function OrdersPage() {
       });
       return res.data.orders;
     },
+    // Objetivo 4: seguimiento visual sin recargar manualmente la página (antes
+    // solo se refrescaba al hacer una nueva petición manual, igual que el
+    // detalle de pedido).
+    refetchInterval: 30000,
   });
 
   return (

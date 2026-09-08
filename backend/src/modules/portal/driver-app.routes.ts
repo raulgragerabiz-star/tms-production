@@ -150,6 +150,19 @@ driverAppRouter.post(
       // el backoffice, Fase 4 paso 11), disponible también desde la app en campo.
       const shipment = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
       if (shipment) {
+        // Objetivo 4 (Portal Cliente): la línea de tiempo que ve el cliente marca "En ruta"
+        // cuando shipment.status es in_transit/finished. Si el conductor entrega una parada
+        // sin haber pulsado antes "Salgo de reparto" (checkpoint aparte, más arriba en este
+        // fichero), el shipment se quedaría en programmed/loaded para siempre aunque el
+        // pedido ya conste como entregado -- el cliente vería "Entregado" pero "En ruta" sin
+        // marcar, algo incoherente. Se adelanta aquí automáticamente como red de seguridad.
+        if (shipment.status === "programmed" || shipment.status === "loaded") {
+          await tx.shipment.update({
+            where: { id: shipment.id },
+            data: { status: "in_transit", departedAt: shipment.departedAt ?? new Date() },
+          });
+        }
+
         const pendingReturns = await tx.returnItem.findMany({ where: { customerId: stop.order.customerId, status: "pending" } });
         for (const ri of pendingReturns) {
           await tx.returnClaim.create({

@@ -20,6 +20,18 @@ interface OrderDetail {
   timeline: TimelineStep[];
 }
 
+interface PodDetail {
+  signatureUrl: string | null;
+  photoUrls: string[] | null;
+  receivedByName: string | null;
+  deliveredAt: string;
+}
+
+// Nota sobre los enlaces "download" de más abajo: un <a href download> sí puede
+// descargar una data URL sin que el navegador la bloquee; window.open(dataUrl)
+// en cambio se queda en blanco en Chrome/Firefox por política de seguridad
+// frente a navegación a data: URLs -- por eso antes se veía la página en
+// blanco al pulsar "Descargar justificante".
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
 
@@ -29,14 +41,21 @@ export default function OrderDetailPage() {
       const res = await apiClient.get<OrderDetail>(`/orders/${orderId}`);
       return res.data;
     },
+    // Objetivo 4: que el seguimiento se actualice solo (antes había que
+    // recargar la página a mano para ver un cambio de estado nuevo).
+    refetchInterval: 30000,
   });
 
-  async function downloadPod() {
-    const res = await apiClient.get(`/orders/${orderId}/pod`);
-    if (res.data.signatureUrl) {
-      window.open(res.data.signatureUrl, "_blank");
-    }
-  }
+  // La firma/fotos pueden pesar varios cientos de KB en base64 -- solo se
+  // piden cuando el pedido ya está entregado, y no en cada refresco de arriba.
+  const { data: pod, isLoading: isLoadingPod } = useQuery({
+    queryKey: ["customer-order-pod", orderId],
+    queryFn: async () => {
+      const res = await apiClient.get<PodDetail>(`/orders/${orderId}/pod`);
+      return res.data;
+    },
+    enabled: data?.order.status === "delivered",
+  });
 
   if (isLoading) {
     return <p className="p-6 text-sm text-slate-500">Cargando...</p>;
@@ -111,12 +130,59 @@ export default function OrderDetailPage() {
         </section>
 
         {order.status === "delivered" && (
-          <button
-            onClick={downloadPod}
-            className="rounded-md bg-slate-900 text-white px-4 py-2 text-sm font-medium"
-          >
-            Descargar justificante de entrega (POD)
-          </button>
+          <section className="bg-white rounded-lg shadow p-5">
+            <h2 className="text-sm font-medium text-slate-500 mb-3">Justificante de entrega</h2>
+
+            {isLoadingPod && <p className="text-sm text-slate-500">Cargando justificante...</p>}
+
+            {!isLoadingPod && !pod && (
+              <p className="text-sm text-slate-500">Todavía no hay justificante disponible para este pedido.</p>
+            )}
+
+            {pod && (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  Entregado el {new Date(pod.deliveredAt).toLocaleString("es-ES")}
+                  {pod.receivedByName ? ` · Recibido por ${pod.receivedByName}` : ""}
+                </p>
+
+                {pod.signatureUrl && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1">Firma</p>
+                    <img
+                      src={pod.signatureUrl}
+                      alt="Firma de quien recibió el pedido"
+                      className="w-full max-w-sm border border-slate-200 rounded-md bg-slate-50"
+                    />
+                    
+                      href={pod.signatureUrl}
+                      download={`firma-${order.orderNumber}.png`}
+                      className="inline-block mt-2 text-sm text-blue-700 font-medium underline"
+                    >
+                      Descargar firma
+                    </a>
+                  </div>
+                )}
+
+                {pod.photoUrls && pod.photoUrls.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1">Fotos de la entrega</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {pod.photoUrls.map((url, idx) => (
+                        <a key={idx} href={url} download={`foto-${order.orderNumber}-${idx + 1}.jpg`}>
+                          <img
+                            src={url}
+                            alt={`Foto de entrega ${idx + 1}`}
+                            className="w-full aspect-square object-cover rounded-md border border-slate-200"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         )}
       </main>
     </div>
