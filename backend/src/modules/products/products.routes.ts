@@ -17,6 +17,11 @@ const productSchema = z.object({
   requiresCold: z.boolean().optional(),
   isReturnable: z.boolean().optional(),
   carriageNoteDescription: z.string().optional(),
+  // Objetivo 2: dimensiones del palé completo, para calcular volumen real
+  // ocupado por ruta (ver routing.service.ts / recalculateLoadPlan).
+  lengthM: z.number().positive().optional(),
+  widthM: z.number().positive().optional(),
+  heightM: z.number().positive().optional(),
 });
 
 productsRouter.get(

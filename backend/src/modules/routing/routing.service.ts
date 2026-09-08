@@ -62,9 +62,10 @@ export async function estimateRoute(points: RoutePoint[]): Promise<RouteEstimate
 }
 
 export interface VehicleTypeSuggestion {
-  vehicleType: { id: string; name: string; maxWeightKg: number; maxPallets: number };
+  vehicleType: { id: string; name: string; maxWeightKg: number; maxPallets: number; maxVolumeM3: number | null };
   fitsWeight: boolean;
   fitsPallets: boolean;
+  fitsVolume: boolean;
   reasons: string[];
 }
 
@@ -78,6 +79,7 @@ export async function suggestVehicleType(params: {
   distanceKm: number;
   totalWeightKg: number;
   totalPallets: number;
+  totalVolumeM3: number;
 }): Promise<VehicleTypeSuggestion | null> {
   const zone = await prisma.influenceZone.findFirst({
     where: {
@@ -93,8 +95,13 @@ export async function suggestVehicleType(params: {
 
   const maxWeightKg = Number(zone.vehicleType.maxWeightKg);
   const maxPallets = zone.vehicleType.maxPallets;
+  // maxVolumeM3 es opcional en el tipo de vehículo (no todos lo tienen
+  // cargado todavía) -- si no está configurado, no se penaliza por volumen en
+  // vez de bloquear la sugerencia por un dato que aún no existe.
+  const maxVolumeM3 = zone.vehicleType.maxVolumeM3 != null ? Number(zone.vehicleType.maxVolumeM3) : null;
   const fitsWeight = params.totalWeightKg <= maxWeightKg;
   const fitsPallets = params.totalPallets <= maxPallets;
+  const fitsVolume = maxVolumeM3 == null || params.totalVolumeM3 <= maxVolumeM3;
 
   const reasons: string[] = [];
   if (!fitsWeight) {
@@ -107,11 +114,17 @@ export async function suggestVehicleType(params: {
       `La carga (${params.totalPallets.toFixed(1)} palés) supera la capacidad del vehículo sugerido (${maxPallets} palés)`
     );
   }
+  if (!fitsVolume && maxVolumeM3 != null) {
+    reasons.push(
+      `La carga (${params.totalVolumeM3.toFixed(1)} m³) supera la capacidad del vehículo sugerido (${maxVolumeM3.toFixed(1)} m³)`
+    );
+  }
 
   return {
-    vehicleType: { id: zone.vehicleType.id, name: zone.vehicleType.name, maxWeightKg, maxPallets },
+    vehicleType: { id: zone.vehicleType.id, name: zone.vehicleType.name, maxWeightKg, maxPallets, maxVolumeM3 },
     fitsWeight,
     fitsPallets,
+    fitsVolume,
     reasons,
   };
 }

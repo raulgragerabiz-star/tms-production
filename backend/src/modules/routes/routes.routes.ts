@@ -14,7 +14,11 @@ export async function recalculateLoadPlan(routeId: string) {
     include: {
       order: {
         include: {
-          lines: { include: { product: { select: { unitsPerPallet: true } } } },
+          lines: {
+            include: {
+              product: { select: { unitsPerPallet: true, lengthM: true, widthM: true, heightM: true } },
+            },
+          },
           deliveryPoint: { select: { lat: true, lng: true } },
         },
       },
@@ -39,12 +43,33 @@ export async function recalculateLoadPlan(routeId: string) {
     0
   );
 
+  // Volumen real ocupado = suma por línea de (palés de esa línea × volumen de un
+  // palé completo del producto). Si un producto no tiene sus 3 dimensiones
+  // cargadas, esa línea simplemente no aporta volumen (no rompe el resto del
+  // cálculo) -- así el dato es parcial-pero-honesto mientras se completa el
+  // maestro de productos, en vez de fallar o inventar un valor.
+  const totalVolumeM3 = stops.reduce(
+    (acc, s) =>
+      acc +
+      s.order.lines.reduce((a, l) => {
+        const unitsPerPallet = l.product.unitsPerPallet ?? 1;
+        const palletsForLine = unitsPerPallet > 0 ? Number(l.quantity) / unitsPerPallet : 0;
+        const { lengthM, widthM, heightM } = l.product;
+        const palletVolumeM3 = lengthM != null && widthM != null && heightM != null
+          ? Number(lengthM) * Number(widthM) * Number(heightM)
+          : 0;
+        return a + palletsForLine * palletVolumeM3;
+      }, 0),
+    0
+  );
+
   const route = await prisma.route.findUnique({
     where: { id: routeId },
     include: { vehicle: { include: { vehicleType: true } }, warehouse: { select: { lat: true, lng: true } } },
   });
   const maxWeight = route?.vehicle?.vehicleType?.maxWeightKg ? Number(route.vehicle.vehicleType.maxWeightKg) : null;
   const maxPallets = route?.vehicle?.vehicleType?.maxPallets ?? null;
+  const maxVolume = route?.vehicle?.vehicleType?.maxVolumeM3 ? Number(route.vehicle.vehicleType.maxVolumeM3) : null;
 
   // Objetivo 2: distancia/tiempo estimados -- almacén como origen, luego cada
   // parada en su orden de secuencia. Si falta alguna coordenada (almacén o
@@ -71,6 +96,8 @@ export async function recalculateLoadPlan(routeId: string) {
       totalPallets,
       weightOccupancyPct: maxWeight ? totalWeightKg / maxWeight : 0,
       palletOccupancyPct: maxPallets ? totalPallets / maxPallets : 0,
+      totalVolumeM3,
+      volumeOccupancyPct: maxVolume ? totalVolumeM3 / maxVolume : 0,
       distanceKm: estimate?.distanceKm,
       estimatedDurationMin: estimate ? Math.round(estimate.durationMin) : null,
     },
@@ -79,6 +106,8 @@ export async function recalculateLoadPlan(routeId: string) {
       totalPallets,
       weightOccupancyPct: maxWeight ? totalWeightKg / maxWeight : 0,
       palletOccupancyPct: maxPallets ? totalPallets / maxPallets : 0,
+      totalVolumeM3,
+      volumeOccupancyPct: maxVolume ? totalVolumeM3 / maxVolume : 0,
       distanceKm: estimate?.distanceKm,
       estimatedDurationMin: estimate ? Math.round(estimate.durationMin) : null,
     },
@@ -151,6 +180,7 @@ routesRouter.get(
           distanceKm: Number(r.loadPlan.distanceKm),
           totalWeightKg: Number(r.loadPlan.totalWeightKg),
           totalPallets: Number(r.loadPlan.totalPallets),
+          totalVolumeM3: Number(r.loadPlan.totalVolumeM3),
         });
         return { ...r, suggestedVehicleType: suggestion };
       })

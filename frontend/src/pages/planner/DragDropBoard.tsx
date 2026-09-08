@@ -44,6 +44,10 @@ interface RouteLite {
   loadPlan: {
     weightOccupancyPct: number;
     palletOccupancyPct: number;
+    // Volumen real ocupado (a partir de las dimensiones de palé de cada
+    // producto) -- queda en 0 mientras los productos de la ruta no tengan
+    // dimensiones cargadas en el maestro.
+    volumeOccupancyPct: number;
     distanceKm: string | null;
     estimatedDurationMin: number | null;
   } | null;
@@ -54,6 +58,7 @@ interface RouteLite {
     vehicleType: { id: string; name: string };
     fitsWeight: boolean;
     fitsPallets: boolean;
+    fitsVolume: boolean;
     reasons: string[];
   } | null;
   stops: RouteStopLite[];
@@ -270,6 +275,10 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   <p className="text-xs text-slate-400 mt-1">
                     Ocupación: {Math.round(r.loadPlan.weightOccupancyPct * 100)}% peso /{" "}
                     {Math.round(r.loadPlan.palletOccupancyPct * 100)}% palés
+                    {/* Volumen solo se muestra si hay algo que mostrar -- mientras los productos
+                        de la ruta no tengan dimensiones cargadas, queda en 0 y ocultarlo evita dar
+                        a entender que "0% volumen" es un dato real. */}
+                    {r.loadPlan.volumeOccupancyPct > 0 && ` / ${Math.round(r.loadPlan.volumeOccupancyPct * 100)}% volumen`}
                   </p>
                 )}
                 {r.loadPlan?.distanceKm != null && (
@@ -282,13 +291,13 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                 {r.suggestedVehicleType && (
                   <p
                     className={`text-xs mt-1 ${
-                      r.suggestedVehicleType.fitsWeight && r.suggestedVehicleType.fitsPallets
+                      r.suggestedVehicleType.fitsWeight && r.suggestedVehicleType.fitsPallets && r.suggestedVehicleType.fitsVolume
                         ? "text-emerald-600"
                         : "text-amber-600"
                     }`}
                   >
                     Vehículo sugerido: {r.suggestedVehicleType.vehicleType.name}
-                    {!r.suggestedVehicleType.fitsWeight || !r.suggestedVehicleType.fitsPallets
+                    {!r.suggestedVehicleType.fitsWeight || !r.suggestedVehicleType.fitsPallets || !r.suggestedVehicleType.fitsVolume
                       ? ` (${r.suggestedVehicleType.reasons.join("; ")})`
                       : ""}
                   </p>
