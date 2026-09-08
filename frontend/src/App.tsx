@@ -5,6 +5,7 @@ import AppLayout from "@/layouts/AppLayout";
 import DashboardPage from "@/pages/DashboardPage";
 import OrdersPage from "@/pages/OrdersPage";
 import PlannerPage from "@/pages/PlannerPage";
+import SeguimientoPage from "@/pages/SeguimientoPage";
 import CustomersPage from "@/pages/masters/CustomersPage";
 import ProductsPage from "@/pages/masters/ProductsPage";
 import CarriersPage from "@/pages/masters/CarriersPage";
@@ -37,6 +38,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="pedidos" element={<OrdersPage />} />
         <Route path="planificador" element={<PlannerPage />} />
+        <Route path="seguimiento" element={<SeguimientoPage />} />
         <Route path="tarifas" element={<RatesPage />} />
         <Route path="retornos" element={<ReturnsPage />} />
         <Route path="facturacion" element={<BillingPage />} />

@@ -653,8 +653,15 @@ model TrackingEvent {
   lng        Float?
   payload    Json?
   occurredAt DateTime          @map("occurred_at")
+  // Sincronización en tiempo real despacho<->conductor: id generado en el
+  // dispositivo para los envíos por lote de la Driver App (offlineQueue.ts),
+  // así un reintento tras perder cobertura no duplica el mismo ping ya
+  // guardado. Opcional: los eventos ya existentes (gps-ping suelto, llegada
+  // de parada, etc.) no lo llevan y siguen funcionando igual.
+  clientEventId String?        @map("client_event_id")
   shipment   Shipment          @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
+  @@unique([shipmentId, clientEventId])
   @@index([shipmentId, occurredAt])
   @@map("tracking_event")
 }

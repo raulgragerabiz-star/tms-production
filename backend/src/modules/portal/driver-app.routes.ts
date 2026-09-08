@@ -232,6 +232,48 @@ driverAppRouter.post(
   })
 );
 
+// Sincronización en tiempo real despacho<->conductor: ingesta por lotes de la
+// posición GPS capturada en segundo plano por la Driver App
+// (apps/driver-app/src/offline/gpsTracker.ts -- ya estaba mandando aquí desde
+// antes de que este endpoint existiera, por eso la URL y forma del body están
+// fijadas por ese cliente, no al revés). Los lotes pueden reintentarse tras
+// perder cobertura (offlineQueue.ts), así que la inserción es idempotente por
+// `clientEventId`: reintentar un lote ya guardado no duplica nada.
+driverAppRouter.post(
+  "/shipments/:id/tracking-events",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({
+      pings: z
+        .array(
+          z.object({
+            clientEventId: z.string().uuid(),
+            lat: z.number(),
+            lng: z.number(),
+            occurredAt: z.coerce.date(),
+          })
+        )
+        .min(1),
+    });
+    const { pings } = schema.parse(req.body);
+
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+
+    const result = await prisma.trackingEvent.createMany({
+      data: pings.map((p) => ({
+        shipmentId: shipment.id,
+        eventType: "gps_ping" as const,
+        lat: p.lat,
+        lng: p.lng,
+        occurredAt: p.occurredAt,
+        clientEventId: p.clientEventId,
+      })),
+      skipDuplicates: true,
+    });
+    res.status(201).json({ inserted: result.count, received: pings.length });
+  })
+);
+
 // Incidencias desde parada afectada
 driverAppRouter.post(
   "/incidents",

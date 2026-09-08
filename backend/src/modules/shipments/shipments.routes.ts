@@ -13,12 +13,60 @@ shipmentsRouter.get(
     const items = await prisma.shipment.findMany({
       where: { route: { companyId: req.auth!.companyId }, ...(status ? { status: status as any } : {}) },
       include: {
-        route: { include: { warehouse: { select: { name: true } }, stops: true } },
+        route: {
+          include: {
+            warehouse: { select: { name: true } },
+            stops: {
+              orderBy: { sequence: "asc" },
+              include: {
+                order: {
+                  select: {
+                    orderNumber: true,
+                    customer: { select: { legalName: true } },
+                    deliveryPoint: { select: { address: true, city: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
         carrier: { select: { legalName: true } },
         vehicle: { select: { plate: true } },
         driver: { select: { fullName: true } },
+        // Sincronización en tiempo real: último ping conocido de cada envío,
+        // para pintar la posición en el mapa de Seguimiento sin tener que
+        // pedir el histórico completo por cada fila.
+        trackingEvents: {
+          where: { lat: { not: null }, lng: { not: null } },
+          orderBy: { occurredAt: "desc" },
+          take: 1,
+        },
       },
       orderBy: { departedAt: "desc" },
+    });
+    res.json({
+      items: items.map((s) => {
+        const { trackingEvents, ...rest } = s;
+        return { ...rest, lastPosition: trackingEvents[0] ?? null };
+      }),
+      total: items.length,
+    });
+  })
+);
+
+// Histórico de posiciones/eventos de un envío, para el panel de detalle del
+// mapa de Seguimiento (despacho ve exactamente lo que ha ido reportando el
+// conductor: pings GPS, llegadas/salidas de parada, cambios de estado).
+shipmentsRouter.get(
+  "/:id/tracking-events",
+  asyncHandler(async (req, res) => {
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, route: { companyId: req.auth!.companyId } } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+
+    const items = await prisma.trackingEvent.findMany({
+      where: { shipmentId: shipment.id },
+      orderBy: { occurredAt: "desc" },
+      take: 200,
     });
     res.json({ items, total: items.length });
   })
