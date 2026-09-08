@@ -796,6 +796,12 @@ enum RouteStopStatus {
   arrived
   completed
   failed
+  // Objetivo 3 (App Conductor): checkpoint "retorno" -- la mercancia no se
+  // entrega y vuelve al origen/almacen, distinto de una entrega fallida
+  // puntual (failed). Valor añadido al final del enum a proposito: en
+  // Postgres, ALTER TYPE ... ADD VALUE es una operacion aditiva segura que
+  // no afecta a las filas ya existentes con los valores anteriores.
+  returned
 }
 
 enum ShipmentStatus {

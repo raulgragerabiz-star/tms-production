@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
 
@@ -33,6 +33,7 @@ const statusStyle: Record<string, string> = {
   arrived: "bg-amber-100 text-amber-700",
   completed: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
+  returned: "bg-slate-200 text-slate-700",
 };
 
 const statusLabel: Record<string, string> = {
@@ -40,10 +41,22 @@ const statusLabel: Record<string, string> = {
   arrived: "Llegada registrada",
   completed: "Entregado",
   failed: "Fallida",
+  returned: "Retorno",
+};
+
+// Objetivo 3: checkpoints de envío completo (cargado / en reparto) que el
+// conductor puede marcar él mismo desde aquí, además de los checkpoints por
+// parada. "finished" no se ofrece como botón: se deja para cuando todas las
+// paradas estén completadas/falladas/retornadas (lo valida igualmente el
+// backend si se intentara).
+const NEXT_SHIPMENT_STATUS: Record<string, { next: "loaded" | "in_transit"; label: string } | undefined> = {
+  programmed: { next: "loaded", label: "He cargado el vehículo" },
+  loaded: { next: "in_transit", label: "Salgo de reparto" },
 };
 
 export default function TodayRoutePage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
@@ -51,6 +64,12 @@ export default function TodayRoutePage() {
     queryKey: ["today-route"],
     queryFn: async () => (await api.get("/driver-app/today-route")).data as TodayRouteResponse,
     refetchInterval: 30000,
+  });
+
+  const shipmentStatusMutation = useMutation({
+    mutationFn: async (status: "loaded" | "in_transit") =>
+      (await api.post(`/driver-app/shipments/${data!.shipment!.id}/status`, { status })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["today-route"] }),
   });
 
   function handleLogout() {
@@ -88,6 +107,15 @@ export default function TodayRoutePage() {
                 {data.shipment.route.stops.length} paradas ·{" "}
                 {data.shipment.route.stops.filter((s) => s.status === "completed").length} completadas
               </p>
+              {NEXT_SHIPMENT_STATUS[data.shipment.status] && (
+                <button
+                  onClick={() => shipmentStatusMutation.mutate(NEXT_SHIPMENT_STATUS[data.shipment!.status]!.next)}
+                  disabled={shipmentStatusMutation.isPending}
+                  className="w-full mt-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 text-sm font-semibold shadow disabled:opacity-50"
+                >
+                  {NEXT_SHIPMENT_STATUS[data.shipment.status]!.label}
+                </button>
+              )}
             </div>
 
             <div className="space-y-3">

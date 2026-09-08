@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import SignaturePad from "@/components/SignaturePad";
+import PhotoCapture from "@/components/PhotoCapture";
 
 interface TodayRouteResponse {
   shipment: {
@@ -29,7 +31,9 @@ export default function StopDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [receivedByName, setReceivedByName] = useState("");
-  const [showFailForm, setShowFailForm] = useState(false);
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [showIncidentForm, setShowIncidentForm] = useState(false);
   const [failureReason, setFailureReason] = useState("");
 
   const { data, isLoading } = useQuery({
@@ -46,7 +50,13 @@ export default function StopDetailPage() {
 
   const completeMutation = useMutation({
     mutationFn: async () =>
-      (await api.post(`/driver-app/stops/${id}/complete`, { receivedByName: receivedByName || "Firma en dispositivo" })).data,
+      (
+        await api.post(`/driver-app/stops/${id}/complete`, {
+          receivedByName: receivedByName || "Firma en dispositivo",
+          signatureUrl: signatureUrl ?? undefined,
+          photoUrls: photoUrls.length > 0 ? photoUrls : undefined,
+        })
+      ).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       navigate("/");
@@ -55,6 +65,17 @@ export default function StopDetailPage() {
 
   const failMutation = useMutation({
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { failed: true, failureReason })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["today-route"] });
+      navigate("/");
+    },
+  });
+
+  // Objetivo 3: checkpoint "retorno" -- la mercancía no se entrega y vuelve al
+  // almacén (p.ej. cliente cerrado). Reutiliza el mismo endpoint /complete que
+  // "failed", con un flag distinto, ver backend/src/modules/portal/driver-app.routes.ts.
+  const returnMutation = useMutation({
+    mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { returned: true, failureReason })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       navigate("/");
@@ -109,14 +130,18 @@ export default function StopDetailPage() {
           </button>
         )}
 
-        {(stop.status === "pending" || stop.status === "arrived") && !showFailForm && (
+        {(stop.status === "pending" || stop.status === "arrived") && !showIncidentForm && (
           <div className="space-y-3">
-            <input
-              value={receivedByName}
-              onChange={(e) => setReceivedByName(e.target.value)}
-              placeholder="Nombre de quien recibe (opcional)"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base"
-            />
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+              <input
+                value={receivedByName}
+                onChange={(e) => setReceivedByName(e.target.value)}
+                placeholder="Nombre de quien recibe (opcional)"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base"
+              />
+              <SignaturePad onChange={setSignatureUrl} />
+              <PhotoCapture onChange={setPhotoUrls} />
+            </div>
             <button
               onClick={() => completeMutation.mutate()}
               disabled={completeMutation.isPending}
@@ -125,20 +150,20 @@ export default function StopDetailPage() {
               ✓ Confirmar entrega
             </button>
             <button
-              onClick={() => setShowFailForm(true)}
+              onClick={() => setShowIncidentForm(true)}
               className="w-full bg-white border border-red-300 text-red-600 rounded-2xl py-3 text-sm font-medium"
             >
-              Entrega fallida / incidencia
+              Incidencia / Retorno
             </button>
           </div>
         )}
 
-        {showFailForm && (
+        {showIncidentForm && (
           <div className="space-y-3 bg-white rounded-2xl border border-red-200 p-4">
             <textarea
               value={failureReason}
               onChange={(e) => setFailureReason(e.target.value)}
-              placeholder="Motivo de la incidencia…"
+              placeholder="Motivo (incidencia o retorno a almacén)…"
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base"
               rows={3}
             />
@@ -147,9 +172,16 @@ export default function StopDetailPage() {
               disabled={!failureReason.trim() || failMutation.isPending}
               className="w-full bg-red-600 hover:bg-red-700 text-white rounded-2xl py-3 text-sm font-semibold disabled:opacity-50"
             >
-              Confirmar incidencia
+              Confirmar incidencia (entrega fallida)
             </button>
-            <button onClick={() => setShowFailForm(false)} className="w-full text-sm text-slate-500">
+            <button
+              onClick={() => returnMutation.mutate()}
+              disabled={!failureReason.trim() || returnMutation.isPending}
+              className="w-full bg-white border border-slate-400 text-slate-700 rounded-2xl py-3 text-sm font-semibold disabled:opacity-50"
+            >
+              ↩︎ Confirmar retorno a almacén
+            </button>
+            <button onClick={() => setShowIncidentForm(false)} className="w-full text-sm text-slate-500">
               Cancelar
             </button>
           </div>
@@ -162,6 +194,18 @@ export default function StopDetailPage() {
               {new Date(stop.pod.deliveredAt).toLocaleString("es-ES")}
               {stop.pod.receivedByName ? ` · ${stop.pod.receivedByName}` : ""}
             </p>
+          </div>
+        )}
+
+        {stop.status === "failed" && (
+          <div className="bg-red-50 rounded-2xl p-4 text-center">
+            <p className="text-red-700 font-medium">Incidencia registrada</p>
+          </div>
+        )}
+
+        {stop.status === "returned" && (
+          <div className="bg-slate-200 rounded-2xl p-4 text-center">
+            <p className="text-slate-700 font-medium">Retorno a almacén registrado</p>
           </div>
         )}
       </main>

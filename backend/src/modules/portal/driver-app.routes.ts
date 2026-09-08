@@ -77,6 +77,12 @@ driverAppRouter.post(
       receivedByName: z.string().optional(),
       failed: z.boolean().optional(),
       failureReason: z.string().optional(),
+      // Objetivo 3: checkpoint "retorno" -- la mercancia no llega a
+      // entregarse y el conductor la trae de vuelta (p.ej. cliente cerrado
+      // o rechazo total). Distinto de `failed`, que es una incidencia
+      // puntual de entrega; aqui no se marca el pedido como "delivered" ni
+      // se reclaman retornos pendientes del cliente.
+      returned: z.boolean().optional(),
     });
     const data = schema.parse(req.body);
 
@@ -87,7 +93,24 @@ driverAppRouter.post(
     if (!stop) throw HttpError.notFound("Parada no encontrada");
 
     await prisma.$transaction(async (tx) => {
-      await tx.routeStop.update({ where: { id: stop.id }, data: { status: data.failed ? "failed" : "completed" } });
+      const nextStatus = data.returned ? "returned" : data.failed ? "failed" : "completed";
+      await tx.routeStop.update({ where: { id: stop.id }, data: { status: nextStatus } });
+
+      if (data.returned) {
+        const shipment = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
+        if (shipment) {
+          await tx.incident.create({
+            data: {
+              shipmentId: shipment.id,
+              routeStopId: stop.id,
+              incidentType: "other",
+              description: data.failureReason ?? "Retorno a almacén reportado desde App Conductor",
+              reportedBy: req.auth!.sub,
+            },
+          });
+        }
+        return;
+      }
 
       if (data.failed) {
         const shipment = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
@@ -138,6 +161,43 @@ driverAppRouter.post(
     });
 
     const updated = await prisma.routeStop.findUnique({ where: { id: stop.id }, include: { pod: true } });
+    res.json(updated);
+  })
+);
+
+// Objetivo 3: checkpoints "cargado" / "en reparto" (y cierre "finalizado") del
+// envío completo, accesibles desde la App Conductor -- hasta ahora solo existía
+// el equivalente interno (PATCH /api/shipments/:id/status), montado bajo auth
+// de backoffice y por tanto inalcanzable para el conductor en campo. Mismas
+// reglas de negocio que el endpoint interno (departedAt/finishedAt, no se
+// puede finalizar con paradas sin completar), pero solo transiciones hacia
+// adelante y solo sobre el propio shipment del conductor autenticado.
+const SHIPMENT_STATUS_ORDER = ["programmed", "loaded", "in_transit", "finished"] as const;
+
+driverAppRouter.post(
+  "/shipments/:id/status",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ status: z.enum(SHIPMENT_STATUS_ORDER) });
+    const { status } = schema.parse(req.body);
+
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+
+    const currentIdx = SHIPMENT_STATUS_ORDER.indexOf(shipment.status as (typeof SHIPMENT_STATUS_ORDER)[number]);
+    const nextIdx = SHIPMENT_STATUS_ORDER.indexOf(status);
+    if (nextIdx <= currentIdx) {
+      throw HttpError.conflict(`No se puede pasar de "${shipment.status}" a "${status}" (solo hacia adelante)`);
+    }
+
+    const data: any = { status };
+    if (status === "in_transit" && !shipment.departedAt) data.departedAt = new Date();
+    if (status === "finished") {
+      data.finishedAt = new Date();
+      const pending = await prisma.routeStop.count({ where: { routeId: shipment.routeId, status: { notIn: ["completed", "failed", "returned"] } } });
+      if (pending > 0) throw HttpError.conflict("Hay paradas sin completar; no se puede finalizar el envío");
+    }
+
+    const updated = await prisma.shipment.update({ where: { id: shipment.id }, data });
     res.json(updated);
   })
 );
