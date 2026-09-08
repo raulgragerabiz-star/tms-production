@@ -23,6 +23,11 @@ const colorMap: Record<string, string> = {
   completed: "bg-emerald-100 text-emerald-700",
   failed: "bg-red-100 text-red-700",
   returned: "bg-orange-100 text-orange-700",
+  // Estados de incidencia (Incident.status) -- para la ficha única del
+  // pedido (instrucciones del proyecto ampliadas).
+  open: "bg-red-100 text-red-700",
+  resolved: "bg-emerald-100 text-emerald-700",
+  escalated: "bg-orange-100 text-orange-700",
 };
 
 export default function StatusBadge({ status }: { status: string }) {

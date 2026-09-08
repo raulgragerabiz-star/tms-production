@@ -70,6 +70,15 @@ ordersRouter.get(
   })
 );
 
+// "Ficha única del pedido" (instrucciones del proyecto ampliadas): reúne en
+// una sola respuesta todo lo que hasta ahora estaba disperso o sin usar --
+// documentos (ya venían en el include pero el frontend no los pintaba),
+// incidencias de sus paradas (antes no se pedían aquí en absoluto), y una
+// trazabilidad completa combinando los eventos de seguimiento reales (llegada
+// a parada, cambios de estado del envío -- se excluye el gps_ping suelto,
+// demasiado granular para una ficha legible) de todos los envíos por los que
+// ha pasado el pedido. Todo aditivo: ningún campo que ya se devolvía cambia
+// de forma ni de nombre.
 ordersRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -81,16 +90,37 @@ ordersRouter.get(
         warehouse: true,
         lines: { include: { product: true } },
         documents: true,
-        // Objetivo 3/4: se incluye el albarán electrónico (POD) de la parada
-        // para que, desde el Backoffice (Pedidos), el personal administrativo
-        // pueda consultar firma/fotos de un pedido ya entregado sin tener que
-        // ir a buscarlo por otro sitio. Puramente aditivo: no cambia ningún
-        // campo que ya se estuviera devolviendo.
-        routeStops: { include: { route: true, pod: true } },
+        routeStops: {
+          include: {
+            route: {
+              include: {
+                warehouse: { select: { name: true } },
+                carrier: { select: { legalName: true } },
+                vehicle: { select: { plate: true } },
+                shipment: { select: { id: true, status: true, departedAt: true, finishedAt: true } },
+              },
+            },
+            pod: true,
+            incidents: true,
+          },
+        },
       },
     });
     if (!order) throw HttpError.notFound("Pedido no encontrado");
-    res.json(order);
+
+    const shipmentIds = order.routeStops
+      .map((s) => s.route.shipment?.id)
+      .filter((id): id is string => !!id);
+
+    const timeline =
+      shipmentIds.length > 0
+        ? await prisma.trackingEvent.findMany({
+            where: { shipmentId: { in: shipmentIds }, eventType: { not: "gps_ping" } },
+            orderBy: { occurredAt: "asc" },
+          })
+        : [];
+
+    res.json({ ...order, timeline });
   })
 );
 

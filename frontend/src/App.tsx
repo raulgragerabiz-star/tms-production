@@ -6,6 +6,7 @@ import DashboardPage from "@/pages/DashboardPage";
 import OrdersPage from "@/pages/OrdersPage";
 import PlannerPage from "@/pages/PlannerPage";
 import SeguimientoPage from "@/pages/SeguimientoPage";
+import AnalyticsPage from "@/pages/AnalyticsPage";
 import CustomersPage from "@/pages/masters/CustomersPage";
 import ProductsPage from "@/pages/masters/ProductsPage";
 import CarriersPage from "@/pages/masters/CarriersPage";
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="pedidos" element={<OrdersPage />} />
         <Route path="planificador" element={<PlannerPage />} />
         <Route path="seguimiento" element={<SeguimientoPage />} />
+        <Route path="analitica" element={<AnalyticsPage />} />
         <Route path="tarifas" element={<RatesPage />} />
         <Route path="retornos" element={<ReturnsPage />} />
         <Route path="facturacion" element={<BillingPage />} />
