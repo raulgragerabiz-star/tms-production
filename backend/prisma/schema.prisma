@@ -257,6 +257,13 @@ model Product {
   lengthM                 Decimal?    @map("length_m") @db.Decimal(6, 2)
   widthM                  Decimal?    @map("width_m") @db.Decimal(6, 2)
   heightM                 Decimal?    @map("height_m") @db.Decimal(6, 2)
+  // Referencias del catálogo real (importación SURTIDO GETAFE): categoría
+  // (nomenclatura/familia), clasificación ABC de rotación y código de barras.
+  // Todo opcional -- productos sin estos datos (o creados a mano) siguen
+  // funcionando igual.
+  category                String?     @map("category")
+  abcClass                String?     @map("abc_class")
+  ean                     String?     @map("ean")
   active                  Boolean     @default(true)
   deletedAt               DateTime?   @map("deleted_at")
   createdAt               DateTime    @default(now()) @map("created_at")

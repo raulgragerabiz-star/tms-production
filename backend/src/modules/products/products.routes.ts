@@ -22,6 +22,11 @@ const productSchema = z.object({
   lengthM: z.number().positive().optional(),
   widthM: z.number().positive().optional(),
   heightM: z.number().positive().optional(),
+  // Referencias del catálogo real: categoría/familia, clasificación ABC de
+  // rotación y código EAN -- informativos, no afectan a ningún cálculo.
+  category: z.string().optional(),
+  abcClass: z.string().optional(),
+  ean: z.string().optional(),
 });
 
 productsRouter.get(

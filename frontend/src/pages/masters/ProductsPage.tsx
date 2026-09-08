@@ -16,7 +16,20 @@ interface ProductRow {
   lengthM: string | null;
   widthM: string | null;
   heightM: string | null;
+  // Referencias del catálogo real (importación SURTIDO): nomenclatura,
+  // rotación y código de barras -- solo informativos.
+  category: string | null;
+  abcClass: string | null;
+  ean: string | null;
 }
+
+const abcColors: Record<string, string> = {
+  "A+": "bg-emerald-100 text-emerald-700",
+  A: "bg-emerald-100 text-emerald-700",
+  B: "bg-blue-100 text-blue-700",
+  C: "bg-amber-100 text-amber-700",
+  D: "bg-slate-200 text-slate-500",
+};
 
 export default function ProductsPage() {
   const [search, setSearch] = useState("");
@@ -56,12 +69,14 @@ export default function ProductsPage() {
         blanco lo que no conozcas todavía; sin los 3 datos, ese producto no cuenta en el cálculo de volumen.
       </p>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
             <tr>
               <th className="text-left px-4 py-3">SKU</th>
               <th className="text-left px-4 py-3">Descripción</th>
+              <th className="text-left px-4 py-3">Categoría</th>
+              <th className="text-left px-4 py-3">Rotación</th>
               <th className="text-left px-4 py-3">Uds/palé</th>
               <th className="text-left px-4 py-3">Peso bruto (kg)</th>
               <th className="text-left px-4 py-3">Peso palé lleno (kg)</th>
@@ -75,7 +90,7 @@ export default function ProductsPage() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={12} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {data?.items.map((p) => (
@@ -115,6 +130,18 @@ function ProductTableRow({
     <tr className="hover:bg-slate-50">
       <td className="px-4 py-3 font-mono text-xs">{product.sku}</td>
       <td className="px-4 py-3">{product.description}</td>
+      <td className="px-4 py-3 text-slate-500 text-xs max-w-[220px] truncate" title={product.category ?? undefined}>
+        {product.category?.split("\\").pop()?.trim() ?? "—"}
+      </td>
+      <td className="px-4 py-3">
+        {product.abcClass ? (
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${abcColors[product.abcClass] ?? "bg-slate-100 text-slate-600"}`}>
+            {product.abcClass}
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
       <td className="px-4 py-3">{product.unitsPerPallet}</td>
       <td className="px-4 py-3">{Number(product.grossWeightKg).toFixed(2)}</td>
       <td className="px-4 py-3">{Number(product.fullPalletWeightKg).toFixed(1)}</td>
