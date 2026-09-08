@@ -3,13 +3,22 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { estimateRoute, suggestVehicleType } from "@/modules/routing/routing.service";
 
 export const routesRouter = Router();
 
 export async function recalculateLoadPlan(routeId: string) {
   const stops = await prisma.routeStop.findMany({
     where: { routeId },
-    include: { order: { include: { lines: { include: { product: { select: { unitsPerPallet: true } } } } } } },
+    orderBy: { sequence: "asc" },
+    include: {
+      order: {
+        include: {
+          lines: { include: { product: { select: { unitsPerPallet: true } } } },
+          deliveryPoint: { select: { lat: true, lng: true } },
+        },
+      },
+    },
   });
 
   const totalWeightKg = stops.reduce(
@@ -30,9 +39,29 @@ export async function recalculateLoadPlan(routeId: string) {
     0
   );
 
-  const route = await prisma.route.findUnique({ where: { id: routeId }, include: { vehicle: { include: { vehicleType: true } } } });
+  const route = await prisma.route.findUnique({
+    where: { id: routeId },
+    include: { vehicle: { include: { vehicleType: true } }, warehouse: { select: { lat: true, lng: true } } },
+  });
   const maxWeight = route?.vehicle?.vehicleType?.maxWeightKg ? Number(route.vehicle.vehicleType.maxWeightKg) : null;
   const maxPallets = route?.vehicle?.vehicleType?.maxPallets ?? null;
+
+  // Objetivo 2: distancia/tiempo estimados -- almacén como origen, luego cada
+  // parada en su orden de secuencia. Si falta alguna coordenada (almacén o
+  // alguna parada sin lat/lng todavía) simplemente no se calcula, sin romper
+  // el resto del recálculo de ocupación.
+  const routePoints = [
+    route?.warehouse?.lat != null && route?.warehouse?.lng != null
+      ? { lat: route.warehouse.lat, lng: route.warehouse.lng }
+      : null,
+    ...stops.map((s) =>
+      s.order.deliveryPoint.lat != null && s.order.deliveryPoint.lng != null
+        ? { lat: s.order.deliveryPoint.lat, lng: s.order.deliveryPoint.lng }
+        : null
+    ),
+  ];
+  const hasAllCoords = routePoints.every((p) => p !== null);
+  const estimate = hasAllCoords ? await estimateRoute(routePoints as { lat: number; lng: number }[]) : null;
 
   await prisma.loadPlan.upsert({
     where: { routeId },
@@ -42,12 +71,16 @@ export async function recalculateLoadPlan(routeId: string) {
       totalPallets,
       weightOccupancyPct: maxWeight ? totalWeightKg / maxWeight : 0,
       palletOccupancyPct: maxPallets ? totalPallets / maxPallets : 0,
+      distanceKm: estimate?.distanceKm,
+      estimatedDurationMin: estimate ? Math.round(estimate.durationMin) : null,
     },
     update: {
       totalWeightKg,
       totalPallets,
       weightOccupancyPct: maxWeight ? totalWeightKg / maxWeight : 0,
       palletOccupancyPct: maxPallets ? totalPallets / maxPallets : 0,
+      distanceKm: estimate?.distanceKm,
+      estimatedDurationMin: estimate ? Math.round(estimate.durationMin) : null,
     },
   });
 }
@@ -104,12 +137,31 @@ routesRouter.get(
       orderBy: { createdAt: "desc" },
     });
 
+    // Objetivo 2: sugerencia de tipo de vehículo por ruta, según su zona de
+    // influencia (km estimados) y la carga total ya calculada en loadPlan.
+    // Solo aplica a rutas que todavía no tienen vehículo asignado -- una vez
+    // asignado, la ocupación real ya viene de ese vehículo concreto.
+    const routesWithSuggestion = await Promise.all(
+      routes.map(async (r) => {
+        if (r.vehicleId || !r.loadPlan?.distanceKm) {
+          return { ...r, suggestedVehicleType: null };
+        }
+        const suggestion = await suggestVehicleType({
+          warehouseId: r.warehouseId,
+          distanceKm: Number(r.loadPlan.distanceKm),
+          totalWeightKg: Number(r.loadPlan.totalWeightKg),
+          totalPallets: Number(r.loadPlan.totalPallets),
+        });
+        return { ...r, suggestedVehicleType: suggestion };
+      })
+    );
+
     res.json({
       pendingOrders: pendingOrders.map((o) => ({
         ...o,
         totalWeightKg: o.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0),
       })),
-      routes,
+      routes: routesWithSuggestion,
     });
   })
 );

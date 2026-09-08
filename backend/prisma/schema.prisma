@@ -297,6 +297,12 @@ model VehicleType {
   maxWeightKg            Decimal          @map("max_weight_kg") @db.Decimal(12, 4)
   maxPallets             Int              @map("max_pallets")
   allowsExceedingPallets Boolean          @default(false) @map("allows_exceeding_pallets")
+  // Objetivo 2: capacidad y dimensiones -- campos nuevos, opcionales para no
+  // romper los tipos de vehículo ya sembrados (que no los tienen rellenos).
+  maxVolumeM3            Decimal?         @map("max_volume_m3") @db.Decimal(12, 4)
+  lengthM                Decimal?         @map("length_m") @db.Decimal(6, 2)
+  widthM                 Decimal?         @map("width_m") @db.Decimal(6, 2)
+  heightM                Decimal?         @map("height_m") @db.Decimal(6, 2)
   costSimulations        CostSimulation[]
   vehicles               Vehicle[]
   // Objetivo 2: tipo de vehículo asignado a una franja de zona de influencia.
@@ -578,6 +584,11 @@ model LoadPlan {
   totalPallets       Decimal @default(0) @map("total_pallets") @db.Decimal(12, 4)
   weightOccupancyPct Decimal @default(0) @map("weight_occupancy_pct") @db.Decimal(6, 4)
   palletOccupancyPct Decimal @default(0) @map("pallet_occupancy_pct") @db.Decimal(6, 4)
+  // Objetivo 2: distancia/tiempo estimados de la ruta (almacén -> paradas en su
+  // orden de secuencia). Nulos hasta que se recalcula la ruta (rutas ya
+  // cerradas antes de este cambio simplemente no los tendrán, sin romper nada).
+  distanceKm           Decimal? @map("distance_km") @db.Decimal(10, 2)
+  estimatedDurationMin Int?     @map("estimated_duration_min")
   route              Route   @relation(fields: [routeId], references: [id])
 
   @@map("load_plan")
@@ -650,6 +661,7 @@ model Incident {
 
   @@map("incident")
 }
+
 // Objetivo 4 (Portal Cliente): valoración de satisfacción del cliente tras la
 // entrega -- modelo nuevo, no toca ninguna tabla existente. Una valoración
 // por pedido (orderId único); solo tiene sentido una vez el pedido está
@@ -664,6 +676,7 @@ model DeliveryFeedback {
 
   @@map("delivery_feedback")
 }
+
 model ProofOfDelivery {
   id             String    @id @default(uuid())
   routeStopId    String    @unique @map("route_stop_id")

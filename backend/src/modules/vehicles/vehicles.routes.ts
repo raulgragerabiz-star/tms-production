@@ -48,6 +48,30 @@ vehiclesRouter.get(
   })
 );
 
+// Objetivo 2: capacidad por volumen y dimensiones de cada tipo de vehículo --
+// antes solo se podían sembrar por script, sin forma de editarlos desde
+// Backoffice. VehicleType es un catálogo global (sin companyId), igual que ya
+// hace el GET de arriba.
+const vehicleTypeCapacitySchema = z.object({
+  maxWeightKg: z.number().positive().optional(),
+  maxPallets: z.number().int().positive().optional(),
+  maxVolumeM3: z.number().positive().optional(),
+  lengthM: z.number().positive().optional(),
+  widthM: z.number().positive().optional(),
+  heightM: z.number().positive().optional(),
+});
+
+vehiclesRouter.patch(
+  "/types/:id",
+  asyncHandler(async (req, res) => {
+    const data = vehicleTypeCapacitySchema.parse(req.body);
+    const vehicleType = await prisma.vehicleType.findUnique({ where: { id: req.params.id } });
+    if (!vehicleType) throw HttpError.notFound("Tipo de vehículo no encontrado");
+    const updated = await prisma.vehicleType.update({ where: { id: vehicleType.id }, data });
+    res.json(updated);
+  })
+);
+
 vehiclesRouter.put(
   "/:id",
   asyncHandler(async (req, res) => {

@@ -39,8 +39,23 @@ interface RouteLite {
   id: string;
   status: string;
   serviceType: string;
+  vehicleId: string | null;
   warehouse: Warehouse;
-  loadPlan: { weightOccupancyPct: number; palletOccupancyPct: number } | null;
+  loadPlan: {
+    weightOccupancyPct: number;
+    palletOccupancyPct: number;
+    distanceKm: string | null;
+    estimatedDurationMin: number | null;
+  } | null;
+  // Objetivo 2: sugerencia de tipo de vehículo según la zona de km del
+  // almacén -- null si la ruta ya tiene vehículo asignado o si el almacén
+  // no tiene zonas de influencia definidas para esa distancia.
+  suggestedVehicleType: {
+    vehicleType: { id: string; name: string };
+    fitsWeight: boolean;
+    fitsPallets: boolean;
+    reasons: string[];
+  } | null;
   stops: RouteStopLite[];
 }
 
@@ -232,6 +247,27 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   <p className="text-xs text-slate-400 mt-1">
                     Ocupación: {Math.round(r.loadPlan.weightOccupancyPct * 100)}% peso /{" "}
                     {Math.round(r.loadPlan.palletOccupancyPct * 100)}% palés
+                  </p>
+                )}
+                {r.loadPlan?.distanceKm != null && (
+                  <p className="text-xs text-slate-400">
+                    {Math.round(Number(r.loadPlan.distanceKm))} km estimados
+                    {r.loadPlan.estimatedDurationMin != null &&
+                      ` · ${Math.round(r.loadPlan.estimatedDurationMin / 60)} h ${r.loadPlan.estimatedDurationMin % 60} min`}
+                  </p>
+                )}
+                {r.suggestedVehicleType && (
+                  <p
+                    className={`text-xs mt-1 ${
+                      r.suggestedVehicleType.fitsWeight && r.suggestedVehicleType.fitsPallets
+                        ? "text-emerald-600"
+                        : "text-amber-600"
+                    }`}
+                  >
+                    Vehículo sugerido: {r.suggestedVehicleType.vehicleType.name}
+                    {!r.suggestedVehicleType.fitsWeight || !r.suggestedVehicleType.fitsPallets
+                      ? ` (${r.suggestedVehicleType.reasons.join("; ")})`
+                      : ""}
                   </p>
                 )}
                 <p className="text-[11px] text-slate-400 mt-2 italic">Suelta aquí un pedido para añadirlo</p>
