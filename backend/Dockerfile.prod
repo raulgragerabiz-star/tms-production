@@ -1,6 +1,13 @@
 # Imagen de producción del backend: build multi-stage, sin bind-mounts ni watch-mode.
 FROM node:20-alpine AS builder
 WORKDIR /app
+# node:20-alpine no trae el binario `openssl` (solo lo que Node necesita internamente).
+# Prisma, al generar el cliente, ejecuta `openssl version` para decidir que motor nativo
+# usar; sin el binario esa deteccion falla y Prisma asume 1.1.x por defecto, generando
+# (o resolviendo en runtime) el motor equivocado aunque `binaryTargets` ya liste el
+# correcto en el schema. Lo instalamos aqui tambien, no solo en el runner, para que la
+# propia generacion detecte bien la version real (OpenSSL 3.0 en Alpine 3.19+).
+RUN apk add --no-cache openssl
 COPY package*.json ./
 RUN npm ci
 COPY . .
@@ -9,6 +16,10 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
+# Mismo motivo que en el builder: sin esto, Prisma no puede detectar OpenSSL en runtime
+# y cae en el motor "linux-musl" legado (compilado contra libssl.so.1.1, que esta imagen
+# ya no trae) en vez del "linux-musl-openssl-3.0.x" que sí generamos y sí es compatible.
+RUN apk add --no-cache openssl
 ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
