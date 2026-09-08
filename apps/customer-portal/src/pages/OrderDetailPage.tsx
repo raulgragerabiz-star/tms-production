@@ -1,11 +1,17 @@
+import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
 
 interface TimelineStep {
   key: string;
   label: string;
   done: boolean;
+}
+
+interface FeedbackDetail {
+  rating: number;
+  comment: string | null;
 }
 
 interface OrderDetail {
@@ -18,6 +24,7 @@ interface OrderDetail {
     lines: { product: string; quantity: number; unit: string }[];
   };
   timeline: TimelineStep[];
+  feedback: FeedbackDetail | null;
 }
 
 interface PodDetail {
@@ -27,6 +34,14 @@ interface PodDetail {
   deliveredAt: string;
 }
 
+const INCIDENT_TYPE_LABEL: Record<string, string> = {
+  delay: "Retraso",
+  damage: "Mercancía dañada",
+  refused: "Rechazo del pedido",
+  access_issue: "Problema de acceso al punto de entrega",
+  other: "Otro",
+};
+
 // Nota sobre los enlaces "download" de más abajo: un <a href download> sí puede
 // descargar una data URL sin que el navegador la bloquee; window.open(dataUrl)
 // en cambio se queda en blanco en Chrome/Firefox por política de seguridad
@@ -34,6 +49,15 @@ interface PodDetail {
 // blanco al pulsar "Descargar justificante".
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
+  const queryClient = useQueryClient();
+
+  const [incidentOpen, setIncidentOpen] = useState(false);
+  const [incidentType, setIncidentType] = useState("delay");
+  const [incidentDescription, setIncidentDescription] = useState("");
+  const [incidentSent, setIncidentSent] = useState(false);
+
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["customer-order", orderId],
@@ -57,6 +81,36 @@ export default function OrderDetailPage() {
     enabled: data?.order.status === "delivered",
   });
 
+  // Objetivo 4: reportar incidencia -- disponible sobre cualquier pedido no
+  // cancelado, no solo los ya entregados (una incidencia puede surgir
+  // mientras el pedido está en curso).
+  const incidentMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.post(`/orders/${orderId}/incidents`, {
+        incidentType,
+        description: incidentDescription || undefined,
+      });
+    },
+    onSuccess: () => {
+      setIncidentSent(true);
+      setIncidentOpen(false);
+      setIncidentDescription("");
+    },
+  });
+
+  // Objetivo 4: valoración de satisfacción tras la entrega.
+  const feedbackMutation = useMutation({
+    mutationFn: async () => {
+      await apiClient.post(`/orders/${orderId}/feedback`, {
+        rating,
+        comment: comment || undefined,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customer-order", orderId] });
+    },
+  });
+
   if (isLoading) {
     return <p className="p-6 text-sm text-slate-500">Cargando...</p>;
   }
@@ -64,7 +118,7 @@ export default function OrderDetailPage() {
     return <p className="p-6 text-sm text-slate-500">Pedido no encontrado.</p>;
   }
 
-  const { order, timeline } = data;
+  const { order, timeline, feedback } = data;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -154,11 +208,7 @@ export default function OrderDetailPage() {
                       alt="Firma de quien recibió el pedido"
                       className="w-full max-w-sm border border-slate-200 rounded-md bg-slate-50"
                     />
-                    <a
-                      href={pod.signatureUrl}
-                      download={`firma-${order.orderNumber}.png`}
-                      className="inline-block mt-2 text-sm text-blue-700 font-medium underline"
-                    >
+                    <a href={pod.signatureUrl} download={`firma-${order.orderNumber}.png`} className="inline-block mt-2 text-sm text-blue-700 font-medium underline">
                       Descargar firma
                     </a>
                   </div>
@@ -179,6 +229,130 @@ export default function OrderDetailPage() {
                       ))}
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {order.status === "delivered" && (
+          <section className="bg-white rounded-lg shadow p-5">
+            <h2 className="text-sm font-medium text-slate-500 mb-3">Tu valoración</h2>
+
+            {feedback ? (
+              <div>
+                <div className="flex gap-1 text-lg text-amber-400">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <span key={n}>{n <= feedback.rating ? "★" : "☆"}</span>
+                  ))}
+                </div>
+                {feedback.comment && <p className="text-sm text-slate-600 mt-2">{feedback.comment}</p>}
+                <p className="text-xs text-slate-400 mt-1">Gracias por valorar esta entrega.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-sm text-slate-600">¿Cómo ha sido la entrega de este pedido?</p>
+                <div className="flex gap-1 text-2xl">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setRating(n)}
+                      className={n <= rating ? "text-amber-400" : "text-slate-300"}
+                      aria-label={`${n} estrellas`}
+                    >
+                      {n <= rating ? "★" : "☆"}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  placeholder="Comentario opcional..."
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                />
+                <button
+                  type="button"
+                  disabled={rating === 0 || feedbackMutation.isPending}
+                  onClick={() => feedbackMutation.mutate()}
+                  className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                >
+                  {feedbackMutation.isPending ? "Enviando..." : "Enviar valoración"}
+                </button>
+                {feedbackMutation.isError && (
+                  <p className="text-sm text-red-600">No se pudo enviar la valoración. Inténtalo de nuevo.</p>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+
+        {order.status !== "cancelled" && (
+          <section className="bg-white rounded-lg shadow p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-medium text-slate-500">¿Algún problema con este pedido?</h2>
+              {!incidentOpen && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIncidentOpen(true);
+                    setIncidentSent(false);
+                  }}
+                  className="text-sm text-blue-700 font-medium underline"
+                >
+                  Reportar incidencia
+                </button>
+              )}
+            </div>
+
+            {incidentSent && !incidentOpen && (
+              <p className="text-sm text-green-700 mt-2">
+                Incidencia reportada. Nuestro equipo la revisará en breve.
+              </p>
+            )}
+
+            {incidentOpen && (
+              <div className="space-y-3 mt-3">
+                <select
+                  value={incidentType}
+                  onChange={(e) => setIncidentType(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  {Object.entries(INCIDENT_TYPE_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <textarea
+                  value={incidentDescription}
+                  onChange={(e) => setIncidentDescription(e.target.value)}
+                  placeholder="Describe brevemente lo ocurrido (opcional)"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  rows={2}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={incidentMutation.isPending}
+                    onClick={() => incidentMutation.mutate()}
+                    className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                  >
+                    {incidentMutation.isPending ? "Enviando..." : "Enviar incidencia"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIncidentOpen(false)}
+                    className="rounded-md text-sm text-slate-500 px-4 py-2 hover:bg-slate-100"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                {incidentMutation.isError && (
+                  <p className="text-sm text-red-600">
+                    No se pudo reportar la incidencia (puede que el pedido aún no tenga un envío en curso).
+                  </p>
                 )}
               </div>
             )}

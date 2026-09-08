@@ -447,6 +447,10 @@ model Order {
   documents              OrderDocument[]
   lines                  OrderLine[]
   routeStops             RouteStop[]
+  // Objetivo 4 (Portal Cliente): valoración de satisfacción tras la entrega.
+  // Relación 1-1 opcional -- un pedido sin entregar simplemente no tiene
+  // fila asociada todavía, no rompe nada de lo ya existente.
+  deliveryFeedback       DeliveryFeedback?
 
   @@index([companyId, status])
   @@index([deliveryPointId])
@@ -619,7 +623,20 @@ model Incident {
 
   @@map("incident")
 }
+// Objetivo 4 (Portal Cliente): valoración de satisfacción del cliente tras la
+// entrega -- modelo nuevo, no toca ninguna tabla existente. Una valoración
+// por pedido (orderId único); solo tiene sentido una vez el pedido está
+// "delivered" (esa regla se aplica en el endpoint, no aquí).
+model DeliveryFeedback {
+  id        String   @id @default(uuid())
+  orderId   String   @unique @map("order_id")
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now()) @map("created_at")
+  order     Order    @relation(fields: [orderId], references: [id])
 
+  @@map("delivery_feedback")
+}
 model ProofOfDelivery {
   id             String    @id @default(uuid())
   routeStopId    String    @unique @map("route_stop_id")
