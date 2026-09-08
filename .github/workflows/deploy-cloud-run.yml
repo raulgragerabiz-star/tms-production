@@ -313,8 +313,51 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Actualizar CORS_ORIGIN del backend con las 4 URLs reales
         run: |
-          ORIGINS="${{ needs.deploy-backoffice.outputs.url }},${{ needs.deploy-carrier-portal.outputs.url }},${{ needs.deploy-driver-app.outputs.url }},${{ needs.deploy-customer-portal.outputs.url }}"
+          set -e
+          # No confiamos en needs.<job>.outputs.url: nos ha llegado vacio mas de una vez
+          # pese a que el job de origen termino bien y el servicio ya tenia URL real (bug de
+          # propagacion de outputs entre jobs de GitHub Actions que nunca hemos podido
+          # aislar). En su lugar, preguntamos directamente a Cloud Run por cada servicio
+          # (los 4 son dependencias de este job, ya estan desplegados) con el mismo
+          # reintento que ya usan los pasos "describe" de cada job de despliegue.
+          get_url() {
+            local service="$1"
+            local url=""
+            for i in 1 2 3 4 5; do
+              url=$(gcloud run services describe "$service" --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
+              if [ -n "$url" ]; then break; fi
+              echo "  ($service) URL todavia vacia, esperando 5s (intento $i)..." >&2
+              sleep 5
+            done
+            echo "$url"
+          }
+
+          BACKOFFICE_URL=$(get_url tms-backoffice)
+          CARRIER_URL=$(get_url tms-carrier-portal)
+          DRIVER_URL=$(get_url tms-driver-app)
+          CUSTOMER_URL=$(get_url tms-customer-portal)
+
+          ORIGINS=""
+          for url in "$BACKOFFICE_URL" "$CARRIER_URL" "$DRIVER_URL" "$CUSTOMER_URL"; do
+            if [ -n "$url" ]; then
+              if [ -z "$ORIGINS" ]; then ORIGINS="$url"; else ORIGINS="$ORIGINS,$url"; fi
+            fi
+          done
+
+          if [ -z "$ORIGINS" ]; then
+            echo "ERROR: no se pudo obtener ninguna de las 4 URLs de frontend tras varios intentos"
+            exit 1
+          fi
+
+          echo "CORS_ORIGIN a fijar: $ORIGINS"
+
+          # El delimitador "^;^" le dice a gcloud que separe pares KEY=VALUE por ";" en vez
+          # de por ",", dejando la coma libre para usarla dentro del propio valor (aqui
+          # llevamos varias URLs separadas por comas dentro de un unico valor CORS_ORIGIN).
+          # Sin esto gcloud trocea por cada coma como si fuera otro par KEY=VALUE y revienta
+          # con "Bad syntax for dict arg" -- el error que nos ha venido dando siempre, tanto
+          # con las 4 URLs completas como cuando alguna llegaba vacia.
           gcloud run services update tms-backend \
             --project="${{ secrets.GCPPROJECTID }}" \
             --region="${{ env.REGION }}" \
-            --update-env-vars="CORS_ORIGIN=$ORIGINS"
+            --update-env-vars="^;^CORS_ORIGIN=$ORIGINS"
