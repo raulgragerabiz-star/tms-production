@@ -2,7 +2,7 @@ import { DragEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
-import PlannerMap, { MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
+import PlannerMap, { MapLine, MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
 
 interface DeliveryPoint {
   id: string;
@@ -150,6 +150,29 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
     return points;
   }, [boardQuery.data, routesOfSameService, routeColorMap]);
 
+  // Objetivo 2: recorrido de cada ruta (almacén -> paradas en orden de
+  // secuencia) para que el mapa funcione de verdad como visor de ruta, no
+  // solo como lista de puntos sueltos.
+  const mapLines: MapLine[] = useMemo(() => {
+    const lines: MapLine[] = [];
+    for (const r of routesOfSameService) {
+      const color = routeColorMap.get(r.id) ?? PENDING_COLOR;
+      const routePoints: { lat: number; lng: number }[] = [];
+      if (r.warehouse.lat && r.warehouse.lng) {
+        routePoints.push({ lat: r.warehouse.lat, lng: r.warehouse.lng });
+      }
+      for (const stop of r.stops) {
+        if (stop.order.deliveryPoint.lat && stop.order.deliveryPoint.lng) {
+          routePoints.push({ lat: stop.order.deliveryPoint.lat, lng: stop.order.deliveryPoint.lng });
+        }
+      }
+      if (routePoints.length >= 2) {
+        lines.push({ id: `line-${r.id}`, color, points: routePoints });
+      }
+    }
+    return lines;
+  }, [routesOfSameService, routeColorMap]);
+
   function handleDragStart(e: DragEvent<HTMLDivElement>, orderId: string) {
     setDraggingOrderId(orderId);
     e.dataTransfer.setData("text/plain", orderId);
@@ -214,7 +237,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
 
       {/* Panel derecho: mapa + rutas en construcción como zonas de destino */}
       <div className="col-span-8">
-        <PlannerMap center={GETAFE_CENTER} points={mapPoints} height={340} />
+        <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height={340} />
 
         <div className="mt-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
