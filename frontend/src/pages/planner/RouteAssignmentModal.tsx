@@ -116,7 +116,18 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
     mutationFn: async () => (await api.post(`/optimization/${routeId}/simulate`)).data,
     onSuccess: (data: any) => {
       invalidateAll();
-      onSuccess(`Comparativa generada (${data.candidates?.length ?? 0} candidatos)`);
+      // Motor de inteligencia (3/3): si la empresa tiene activada la
+      // auto-asignación (Configuración) y el mejor candidato superó el
+      // umbral de confianza, /simulate ya lo ha asignado -- se refleja aquí
+      // en vez de dejar que el usuario piense que hace falta elegir a mano.
+      if (data.autoAssign?.autoAssigned) {
+        const pct = Math.round((data.autoAssign.confidence ?? 0) * 100);
+        onSuccess(
+          `Comparativa generada (${data.candidates?.length ?? 0} candidatos) — transportista asignado automáticamente (confianza ${pct}%)`
+        );
+      } else {
+        onSuccess(`Comparativa generada (${data.candidates?.length ?? 0} candidatos)`);
+      }
     },
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo comparar transportistas"),
   });

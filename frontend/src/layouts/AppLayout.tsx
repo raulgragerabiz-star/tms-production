@@ -11,6 +11,7 @@ const navItems = [
   { to: "/prevision-demanda", label: "Previsión de demanda" },
   { to: "/retornos", label: "Retornos" },
   { to: "/facturacion", label: "Facturación" },
+  { to: "/configuracion", label: "Configuración" },
 ];
 
 // 2026-09-09: petición de Raúl -- "compactar todo lo relacionado con

@@ -37,6 +37,13 @@ model Company {
   FuelIndexReading        FuelIndexReading[]
   anomalyAlerts           AnomalyAlert[]
   demandForecasts         DemandForecast[]
+  // Motor de inteligencia (3/3): auto-asignación de transportista cuando la
+  // confianza del modelo de puntuación supera este umbral. Opt-in real --
+  // `false` por defecto, nunca se activa sola; se gestiona desde la nueva
+  // pantalla "Configuración". Ver auto-optimization.service.ts /
+  // auto-optimization.orchestrator.ts.
+  autoAssignEnabled       Boolean                   @default(false) @map("auto_assign_enabled")
+  autoAssignMinConfidence Decimal                   @default(0.75) @map("auto_assign_min_confidence") @db.Decimal(3, 2)
 
   @@map("company")
 }

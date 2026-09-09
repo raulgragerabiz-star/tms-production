@@ -17,6 +17,7 @@ import WarehousesPage from "@/pages/masters/WarehousesPage";
 import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 import ReturnsPage from "@/pages/ReturnsPage";
 import BillingPage from "@/pages/BillingPage";
+import CompanySettingsPage from "@/pages/CompanySettingsPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.token);
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="prevision-demanda" element={<DemandForecastPage />} />
         <Route path="retornos" element={<ReturnsPage />} />
         <Route path="facturacion" element={<BillingPage />} />
+        <Route path="configuracion" element={<CompanySettingsPage />} />
         <Route path="maestros/clientes" element={<CustomersPage />} />
         <Route path="maestros/productos" element={<ProductsPage />} />
         <Route path="maestros/flota-transportistas" element={<CarrierFleetPage />} />

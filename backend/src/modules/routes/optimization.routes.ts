@@ -21,6 +21,7 @@ import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { resolveShipmentCost } from "@/modules/rates/rate-resolution.service";
 import { recalculateLoadPlan } from "./routes.routes";
+import { attemptAutoAssign } from "@/modules/intelligence/auto-optimization.orchestrator";
 
 export const optimizationRouter = Router();
 
@@ -119,7 +120,23 @@ optimizationRouter.post(
     results.sort((a, b) => Number(a.estimatedCost) - Number(b.estimatedCost));
     await prisma.route.update({ where: { id: route.id }, data: { status: "optimized" } });
 
-    res.json({ routeId: route.id, totalWeightKg, totalPallets, candidates: results });
+    // Motor de inteligencia (3/3): si la empresa tiene activada la
+    // auto-asignación (Configuración, apagada por defecto), se evalúa aquí
+    // mismo si el mejor candidato es lo bastante bueno para asignarlo solo
+    // -- justo el punto en el que ya existen los cost_simulation recién
+    // creados. Envuelto en try/catch a propósito: es una capa opcional
+    // sobre la comparativa manual que ya funcionaba antes de esta pieza, un
+    // fallo aquí nunca debe impedir que /simulate devuelva sus candidatos.
+    let autoAssign;
+    try {
+      autoAssign = await attemptAutoAssign(route.id);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[auto-optimization] fallo evaluando auto-asignación", err);
+      autoAssign = { autoAssigned: false, routeId: route.id, confidence: null, reason: "auto_assign_error" };
+    }
+
+    res.json({ routeId: route.id, totalWeightKg, totalPallets, candidates: results, autoAssign });
   })
 );
 

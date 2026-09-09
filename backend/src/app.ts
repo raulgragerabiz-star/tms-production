@@ -30,6 +30,7 @@ import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
 import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
 import { demandForecastRouter } from "@/modules/intelligence/demand-forecast.routes";
+import { companySettingsRouter } from "@/modules/company/company-settings.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -113,12 +114,21 @@ export function createApp() {
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
   // Motor de inteligencia (1/3): detección de anomalías -- ver
-  // anomaly-detection.service.ts. Pieza 3 (auto-optimización de rutas)
-  // pendiente de integrar.
+  // anomaly-detection.service.ts.
   app.use("/api/intelligence/anomalies", requireAuth, anomalyRouter);
   // Motor de inteligencia (2/3): pronóstico de demanda -- ver
   // demand-forecast.service.ts.
   app.use("/api/intelligence/demand-forecast", requireAuth, demandForecastRouter);
+  // Motor de inteligencia (3/3): auto-optimización de rutas -- la
+  // evaluación en sí ocurre dentro de POST /optimization/:routeId/simulate
+  // (ver auto-optimization.orchestrator.ts); esto es solo el interruptor de
+  // Configuración, restringido a administradores igual que /api/users.
+  app.use(
+    "/api/company/settings",
+    requireAuth,
+    requireRole("admin_empresa", "admin_plataforma"),
+    companySettingsRouter
+  );
 
   // Portales externos: autenticación independiente (mismo /api/auth/login, distinto
   // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.
