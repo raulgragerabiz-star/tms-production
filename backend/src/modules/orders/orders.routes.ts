@@ -5,7 +5,8 @@ import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { computeLineWeightKg } from "./lib/line-weight";
 import { classifyOrder } from "@/modules/segmentation/segmentation.service";
-import { buildOrdersImportTemplate, runOrdersExcelImport } from "./orders-excel-import.service";
+import { buildOrdersImportTemplate, startOrdersExcelImportJob } from "./orders-excel-import.service";
+import { getImportJob } from "./lib/import-jobs.store";
 
 export const ordersRouter = Router();
 
@@ -94,6 +95,10 @@ const importOrdersSchema = z.object({
   fileName: z.string().optional(),
 });
 
+// Responde de inmediato con un identificador de trabajo -- el procesamiento
+// real ocurre en segundo plano (ver startOrdersExcelImportJob) porque un
+// lote grande puede tardar varios minutos, y esperar aquí a que termine dejó
+// la petición HTTP colgada hasta que el proxy la cortaba con un error de red.
 ordersRouter.post(
   "/import",
   asyncHandler(async (req, res) => {
@@ -106,8 +111,26 @@ ordersRouter.post(
     }
     if (buffer.length === 0) throw HttpError.badRequest("El archivo está vacío");
 
-    const summary = await runOrdersExcelImport(req.auth!.companyId, buffer);
-    res.json({ summary });
+    const { importId, totalOrders } = startOrdersExcelImportJob(req.auth!.companyId, buffer);
+    res.json({ importId, totalOrders });
+  })
+);
+
+// El frontend consulta esto cada poco tiempo mientras el job está
+// "processing" (ver ImportOrdersModal.tsx) para mostrar el progreso y, al
+// terminar, el mismo resumen que antes devolvía el POST directamente.
+ordersRouter.get(
+  "/import/:importId/status",
+  asyncHandler(async (req, res) => {
+    const job = getImportJob(req.params.importId);
+    if (!job) throw HttpError.notFound("No se encuentra esa importación (puede que el servidor se haya reiniciado)");
+    res.json({
+      status: job.status,
+      totalOrders: job.totalOrders,
+      processedOrders: job.processedOrders,
+      summary: job.status === "done" ? job.summary : undefined,
+      error: job.status === "error" ? job.error : undefined,
+    });
   })
 );
 

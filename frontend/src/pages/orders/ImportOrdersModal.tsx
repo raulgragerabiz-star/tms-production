@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Modal from "@/components/Modal";
@@ -7,9 +7,19 @@ import { resolveCustomerPortalUrl } from "@/lib/customer-portal-url";
 // Carga de pedidos por Excel (instrucciones ampliadas: "Recepción de pedidos
 // desde cualquier origen -- ERP, API o carga manual"), pensada sobre todo
 // para poder alimentar la aplicación con datos de prueba sin depender de la
-// integración real con el ERP. Backend: POST /orders/import (ver
-// orders-excel-import.service.ts) -- el fichero se manda en base64 dentro
-// del JSON, sin librería de subida de ficheros nueva.
+// integración real con el ERP.
+//
+// El POST /orders/import responde de inmediato con un identificador de
+// trabajo (el procesamiento real, potencialmente miles de pedidos, ocurre
+// en segundo plano en el backend) -- este modal va consultando el progreso
+// cada segundo hasta que termina. Antes se esperaba aquí mismo a que
+// terminase todo el lote, y con un archivo grande la petición se cortaba
+// con un error de red antes de recibir respuesta.
+//
+// La consulta de estado por parte del cliente ya NO crea un usuario ni una
+// contraseña por cliente (decisión de Raúl: un acceso único para todos,
+// diferenciado solo por el número de pedido consultado -- ver
+// apps/customer-portal/src/pages/TrackOrderPage.tsx en /seguimiento).
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -22,12 +32,10 @@ interface ImportErrorRow {
   motivo: string;
 }
 
-interface CreatedCustomerCredential {
+interface CreatedCustomerInfo {
   customerId: string;
   businessCode: string;
   legalName: string;
-  email: string;
-  password: string;
 }
 
 interface OrdersImportSummary {
@@ -37,9 +45,19 @@ interface OrdersImportSummary {
   pedidosOmitidos: number;
   erroresParseo: string[];
   errores: ImportErrorRow[];
-  clientesCreados: CreatedCustomerCredential[];
+  clientesCreados: CreatedCustomerInfo[];
   productosCreadosAutomaticamente: string[];
 }
+
+interface ImportStatusResponse {
+  status: "processing" | "done" | "error";
+  totalOrders: number;
+  processedOrders: number;
+  summary?: OrdersImportSummary;
+  error?: string;
+}
+
+const POLL_INTERVAL_MS = 1000;
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -54,8 +72,16 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 export default function ImportOrdersModal({ open, onClose, onSuccess, onError }: Props) {
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
+  const [progress, setProgress] = useState<{ total: number; processed: number } | null>(null);
   const [summary, setSummary] = useState<OrdersImportSummary | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const portalUrl = resolveCustomerPortalUrl();
+
+  useEffect(() => {
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, []);
 
   const downloadMutation = useMutation({
     mutationFn: async () => {
@@ -75,29 +101,60 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
     onError: () => onError("No se ha podido descargar la plantilla"),
   });
 
+  function pollStatus(importId: string) {
+    pollTimer.current = setTimeout(async () => {
+      try {
+        const res = await api.get(`/orders/import/${importId}/status`);
+        const data = res.data as ImportStatusResponse;
+        setProgress({ total: data.totalOrders, processed: data.processedOrders });
+
+        if (data.status === "processing") {
+          pollStatus(importId);
+          return;
+        }
+        if (data.status === "error") {
+          onError(data.error ?? "Error al importar el archivo");
+          setProgress(null);
+          return;
+        }
+        // status === "done"
+        setSummary(data.summary ?? null);
+        setProgress(null);
+        queryClient.invalidateQueries({ queryKey: ["orders"] });
+        if (data.summary && data.summary.pedidosCreados > 0) {
+          onSuccess(`${data.summary.pedidosCreados} pedido(s) importado(s) correctamente`);
+        }
+      } catch {
+        onError("Se ha perdido la conexión mientras se comprobaba el progreso de la importación");
+        setProgress(null);
+      }
+    }, POLL_INTERVAL_MS);
+  }
+
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("Selecciona primero un archivo");
       const buffer = await file.arrayBuffer();
       const fileBase64 = arrayBufferToBase64(buffer);
       const res = await api.post("/orders/import", { fileBase64, fileName: file.name });
-      return res.data.summary as OrdersImportSummary;
+      return res.data as { importId: string; totalOrders: number };
     },
     onSuccess: (data) => {
-      setSummary(data);
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      if (data.pedidosCreados > 0) {
-        onSuccess(`${data.pedidosCreados} pedido(s) importado(s) correctamente`);
-      }
+      setProgress({ total: data.totalOrders, processed: 0 });
+      pollStatus(data.importId);
     },
     onError: (err: any) => onError(err?.response?.data?.message ?? err?.message ?? "Error al importar el archivo"),
   });
 
   function resetAndClose() {
+    if (pollTimer.current) clearTimeout(pollTimer.current);
     setFile(null);
     setSummary(null);
+    setProgress(null);
     onClose();
   }
+
+  const isBusy = importMutation.isPending || progress != null;
 
   return (
     <Modal open={open} title="Importar pedidos desde Excel" onClose={resetAndClose} wide>
@@ -105,9 +162,7 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
             Sube un Excel con uno o varios pedidos (una fila por línea de pedido, repitiendo el Nº de pedido si
-            tiene varias líneas) para probar la aplicación sin depender de la integración con el ERP. Si un
-            cliente no existe todavía, se da de alta automáticamente junto con un usuario de acceso al Portal
-            Cliente.
+            tiene varias líneas) para probar la aplicación sin depender de la integración con el ERP.
           </p>
 
           <button
@@ -122,10 +177,25 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
             <input
               type="file"
               accept=".xlsx,.xls"
+              disabled={isBusy}
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-slate-200"
             />
           </div>
+
+          {progress && (
+            <div className="space-y-1.5">
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-brand-600 transition-all"
+                  style={{ width: `${progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                Procesando pedido {progress.processed} de {progress.total}…
+              </p>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={resetAndClose} className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">
@@ -133,10 +203,10 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
             </button>
             <button
               onClick={() => importMutation.mutate()}
-              disabled={!file || importMutation.isPending}
+              disabled={!file || isBusy}
               className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
             >
-              {importMutation.isPending ? "Importando…" : "Importar"}
+              {isBusy ? "Importando…" : "Importar"}
             </button>
           </div>
         </div>
@@ -163,32 +233,27 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
             </div>
           </div>
 
-          {summary.clientesCreados.length > 0 && (
-            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">
-              <h3 className="text-xs font-semibold text-amber-800 uppercase mb-2">
-                Clientes nuevos con acceso al Portal Cliente creado
-              </h3>
-              <p className="text-xs text-amber-700 mb-2">
-                Apunta o comparte estas credenciales ahora: la contraseña no se puede volver a consultar aquí (se
-                puede resetear desde Maestros &gt; Usuarios si se pierde). Enlace del portal:{" "}
-                <a href={portalUrl} target="_blank" rel="noreferrer" className="underline font-medium">
-                  {portalUrl}
+          {summary.pedidosCreados > 0 && (
+            <div className="border border-slate-200 bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-600">
+                Para consultar el estado de cualquiera de estos pedidos no hace falta usuario ni contraseña: basta
+                con el número de pedido y el código postal de la entrega en{" "}
+                <a href={`${portalUrl}/seguimiento`} target="_blank" rel="noreferrer" className="underline font-medium">
+                  {portalUrl}/seguimiento
                 </a>
+                .
               </p>
-              <ul className="space-y-1.5">
-                {summary.clientesCreados.map((c) => (
-                  <li key={c.customerId} className="text-sm bg-white rounded-md px-3 py-2 border border-amber-100">
-                    <span className="font-medium text-slate-700">
-                      {c.businessCode} — {c.legalName}
-                    </span>
-                    <br />
-                    <span className="text-slate-500">Usuario: </span>
-                    <span className="font-mono text-slate-800">{c.email}</span>
-                    <span className="text-slate-500"> · Contraseña: </span>
-                    <span className="font-mono text-slate-800">{c.password}</span>
-                  </li>
-                ))}
-              </ul>
+            </div>
+          )}
+
+          {summary.clientesCreados.length > 0 && (
+            <div className="border border-slate-200 rounded-lg p-3">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                Clientes nuevos dados de alta ({summary.clientesCreados.length})
+              </h3>
+              <p className="text-xs text-slate-400 break-all">
+                {summary.clientesCreados.map((c) => `${c.businessCode} — ${c.legalName}`).join(" · ")}
+              </p>
             </div>
           )}
 
@@ -208,7 +273,7 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
           )}
 
           {(summary.erroresParseo.length > 0 || summary.errores.length > 0) && (
-            <div className="border border-red-200 rounded-lg p-3">
+            <div className="border border-red-200 rounded-lg p-3 max-h-48 overflow-y-auto">
               <h3 className="text-xs font-semibold text-red-700 uppercase mb-2">Incidencias</h3>
               <ul className="space-y-1 text-sm text-red-700">
                 {summary.erroresParseo.map((e, i) => (
@@ -225,7 +290,10 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
 
           <div className="flex justify-end gap-2 pt-2">
             <button
-              onClick={() => setSummary(null)}
+              onClick={() => {
+                setSummary(null);
+                setFile(null);
+              }}
               className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700"
             >
               Importar otro archivo

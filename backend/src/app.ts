@@ -27,6 +27,7 @@ import { customerPortalRouter } from "@/modules/portal/customer-portal.routes";
 import { usersRouter } from "@/modules/users/users.routes";
 import { optimizationRouter } from "@/modules/routes/optimization.routes";
 import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
+import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -63,6 +64,11 @@ export function createApp() {
   });
 
   app.use("/api/auth", authRouter);
+
+  // Consulta pública de estado de pedido por Nº de pedido + código postal,
+  // sin usuario ni contraseña (ver tracking.routes.ts) -- deliberadamente
+  // fuera de requireAuth, con su propio rate-limit por IP.
+  app.use("/api/tracking", trackingRouter);
 
   // Todo lo demás requiere autenticación.
   app.use("/api/customers", requireAuth, customersRouter);

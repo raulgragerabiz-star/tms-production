@@ -6,7 +6,7 @@ import axios from "axios";
  * hardcodear localhost:4000. Se reescribe dinámicamente el puerto del
  * frontend (5176) por el del backend (4000) sobre el mismo host.
  */
-function resolveApiBaseUrl(): string {
+export function resolveApiBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_BASE_URL;
   if (envUrl) return envUrl;
 
