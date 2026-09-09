@@ -180,7 +180,7 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
         )}
 
         {userType === "driver_app" && (
-          <Field label="Conductor" required hint={!carrierId ? "Selecciona primero un transportista" : "El conductor debe existir en Maestros → Flota → Conductores"}>
+          <Field label="Conductor" required hint={!carrierId ? "Selecciona primero un transportista" : "El conductor debe existir en Maestros → Flota y Transportistas → Conductores"}>
             <select className={inputCls} value={driverId} onChange={(e) => setDriverId(e.target.value)} disabled={!carrierId} required>
               <option value="">Selecciona…</option>
               {driversQuery.data?.items.map((d) => (

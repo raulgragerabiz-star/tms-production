@@ -2,6 +2,7 @@ import { DragEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
+import Chip from "@/components/Chip";
 import PlannerMap, { MapLine, MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
 
 interface DeliveryPoint {
@@ -231,19 +232,17 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
               draggable
               onDragStart={(e) => handleDragStart(e, o.id)}
               onDragEnd={() => setDraggingOrderId(null)}
-              className={`bg-white border border-slate-200 rounded-lg p-3 text-sm cursor-grab active:cursor-grabbing shadow-sm hover:shadow transition ${
+              className={`bg-white border border-slate-200 rounded-xl p-3 text-sm cursor-grab active:cursor-grabbing shadow-sm hover:shadow transition ${
                 draggingOrderId === o.id ? "opacity-40" : ""
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-800">{o.orderNumber}</span>
-                {o.priority === "urgent" && (
-                  <span className="text-[10px] font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded">URGENTE</span>
-                )}
+                <span className="font-mono font-semibold text-slate-800">{o.orderNumber}</span>
+                {o.priority === "urgent" && <Chip color="red">Urgente</Chip>}
               </div>
               <p className="text-slate-500 text-xs mt-0.5">{o.customer.legalName}</p>
               <p className="text-slate-400 text-xs">
-                {o.deliveryPoint.city ?? o.deliveryPoint.address} · {o.totalWeightKg.toFixed(0)} kg
+                {o.deliveryPoint.city ?? o.deliveryPoint.address} · <span className="font-mono">{o.totalWeightKg.toFixed(0)} kg</span>
               </p>
             </div>
           ))}
@@ -268,7 +267,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                 }}
                 onDragLeave={() => setDragOverRouteId(null)}
                 onDrop={(e) => handleDropOnRoute(e, r.id)}
-                className={`rounded-lg border-2 border-dashed p-3 text-sm transition ${
+                className={`rounded-xl border-2 border-dashed p-3 text-sm transition ${
                   dragOverRouteId === r.id ? "border-brand-500 bg-brand-50" : "border-slate-200 bg-white"
                 }`}
               >
@@ -280,21 +279,23 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   <StatusBadge status={r.status} />
                 </div>
                 <p className="text-xs text-slate-500 mb-1">{r.warehouse.name}</p>
-                <p className="text-slate-700 font-medium mb-1">{r.stops.length} paradas</p>
+                <p className="text-slate-700 mb-1">
+                  <span className="font-mono font-bold">{r.stops.length}</span> paradas
+                </p>
                 {r.stops.length > 0 && (
                   <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-1 border border-slate-100 rounded-md bg-slate-50/60 p-1.5">
                     {r.stops.map((s) => (
                       <div key={s.id} className="flex items-start justify-between gap-2 text-xs bg-white rounded px-1.5 py-1">
                         <div className="min-w-0">
                           <p className="font-medium text-slate-700 truncate">
-                            {s.sequence}. {s.order.customer.legalName}
+                            <span className="font-mono">{s.sequence}.</span> {s.order.customer.legalName}
                           </p>
                           <p className="text-slate-400 truncate">
                             {s.order.deliveryPoint.city ?? s.order.deliveryPoint.address}
                             {s.order.deliveryPoint.contactPhone && ` · ${s.order.deliveryPoint.contactPhone}`}
                           </p>
                           {s.eta && (
-                            <p className="text-slate-400">
+                            <p className="text-slate-400 font-mono">
                               ETA {new Date(s.eta).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                             </p>
                           )}
@@ -305,7 +306,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   </div>
                 )}
                 {r.loadPlan && (
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-slate-400 mt-1 font-mono">
                     Ocupación: {Math.round(r.loadPlan.weightOccupancyPct * 100)}% peso /{" "}
                     {Math.round(r.loadPlan.palletOccupancyPct * 100)}% palés
                     {/* Volumen solo se muestra si hay algo que mostrar -- mientras los productos
@@ -315,7 +316,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   </p>
                 )}
                 {r.loadPlan?.distanceKm != null && (
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-400 font-mono">
                     {Math.round(Number(r.loadPlan.distanceKm))} km estimados
                     {r.loadPlan.estimatedDurationMin != null &&
                       ` · ${Math.round(r.loadPlan.estimatedDurationMin / 60)} h ${r.loadPlan.estimatedDurationMin % 60} min`}
@@ -325,7 +326,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                   <p
                     className={`text-xs mt-1 ${
                       r.suggestedVehicleType.fitsWeight && r.suggestedVehicleType.fitsPallets && r.suggestedVehicleType.fitsVolume
-                        ? "text-emerald-600"
+                        ? "text-teal-600"
                         : "text-amber-600"
                     }`}
                   >
@@ -342,7 +343,7 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
             <div
               onDragOver={(e) => e.preventDefault()}
               onDrop={handleDropOnNewRouteZone}
-              className="rounded-lg border-2 border-dashed border-slate-300 p-3 text-sm flex flex-col items-center justify-center text-slate-400 hover:border-brand-400 hover:text-brand-500 transition min-h-[110px]"
+              className="rounded-xl border-2 border-dashed border-slate-300 p-3 text-sm flex flex-col items-center justify-center text-slate-400 hover:border-brand-400 hover:text-brand-500 transition min-h-[110px]"
             >
               <span className="text-2xl leading-none mb-1">+</span>
               <span className="text-xs text-center">Suelta aquí para crear una ruta nueva</span>

@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import Modal from "@/components/Modal";
 import Field from "@/components/Field";
 import StatusBadge from "@/components/StatusBadge";
+import Chip from "@/components/Chip";
 
 // Hueco crítico encontrado por Raúl probando el Planificador: "Comparar
 // transportistas" (POST /optimization/:id/simulate) generaba candidatos con
@@ -244,9 +245,9 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                           <span className="text-slate-400 text-xs ml-2">{c.vehicleType?.name}</span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-slate-600">{Number(c.estimatedCost).toFixed(2)} €</span>
+                          <span className="font-mono text-slate-600">{Number(c.estimatedCost).toFixed(2)} €</span>
                           {c.isSelected ? (
-                            <span className="text-xs font-medium text-emerald-600">Seleccionado</span>
+                            <Chip color="teal">Seleccionado</Chip>
                           ) : (
                             route.status !== "confirmed" && (
                               <button
@@ -362,7 +363,7 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   </div>
                   {driversQuery.data?.items.length === 0 && (
                     <p className="text-xs text-amber-600 mt-1">
-                      Este transportista no tiene conductores dados de alta (Maestros → Flota → Conductores), ni por tanto
+                      Este transportista no tiene conductores dados de alta (Maestros → Flota y Transportistas → Conductores), ni por tanto
                       usuario de App Conductor (Maestros → Usuarios) — sin eso, nadie podrá ver esta ruta en el móvil.
                     </p>
                   )}

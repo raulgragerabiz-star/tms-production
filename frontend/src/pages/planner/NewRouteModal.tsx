@@ -164,16 +164,16 @@ export default function NewRouteModal({
               <p className="p-4 text-sm text-slate-400">No hay pedidos validados pendientes para este almacén.</p>
             )}
             {filteredOrders.map((o) => (
-              <label key={o.id} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer">
+              <label key={o.id} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-brand-50/60 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={selectedOrderIds.includes(o.id)}
                   onChange={() => toggleOrder(o.id)}
                   className="rounded border-slate-300"
                 />
-                <span className="font-medium text-slate-700">{o.orderNumber}</span>
+                <span className="font-mono font-semibold text-slate-700">{o.orderNumber}</span>
                 <span className="text-slate-500">{o.customer.legalName}</span>
-                <span className="ml-auto text-slate-400 text-xs">{o.totalWeightKg.toFixed(1)} kg</span>
+                <span className="ml-auto text-slate-400 text-xs font-mono">{o.totalWeightKg.toFixed(1)} kg</span>
               </label>
             ))}
           </div>

@@ -33,7 +33,11 @@ interface Props {
   height?: number;
 }
 
-export const ROUTE_COLORS = ["#3760ff", "#e8590c", "#0ca678", "#e64980", "#7048e8", "#f59f00"];
+// 2026-09-09: paleta categórica alineada con la del resto del rediseño
+// (mismo orden fijo que ya usa la guía de dataviz de Claude para series
+// categóricas -- ámbar/teal/azul/rojo/púrpura/mostaza), en vez de los tonos
+// sueltos de antes.
+export const ROUTE_COLORS = ["#f2a33d", "#35c2a3", "#5b8def", "#e0596a", "#a677e0", "#e0c73d"];
 export const PENDING_COLOR = "#94a3b8"; // slate-400: pedidos aún sin ruta asignada
 export const WAREHOUSE_COLOR = "#111827"; // slate-900: almacén de origen
 

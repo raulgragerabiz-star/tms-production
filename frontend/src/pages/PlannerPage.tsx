@@ -145,13 +145,13 @@ export default function PlannerPage() {
       {view === "list" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Fecha</th>
                 <th className="text-left px-4 py-3">Almacén</th>
                 <th className="text-left px-4 py-3">Servicio</th>
-                <th className="text-left px-4 py-3">Paradas</th>
-                <th className="text-left px-4 py-3">Ocupación (peso/palés)</th>
+                <th className="text-right px-4 py-3">Paradas</th>
+                <th className="text-right px-4 py-3">Ocupación (peso/palés)</th>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Acción</th>
@@ -173,12 +173,12 @@ export default function PlannerPage() {
                 </tr>
               )}
               {data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{new Date(r.routeDate).toLocaleDateString("es-ES")}</td>
                   <td className="px-4 py-3">{r.warehouse.name}</td>
                   <td className="px-4 py-3 capitalize">{r.serviceType.replace("_", " ")}</td>
-                  <td className="px-4 py-3">{r.stops.length}</td>
-                  <td className="px-4 py-3 text-slate-500">
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{r.stops.length}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">
                     {r.loadPlan
                       ? `${Math.round(r.loadPlan.weightOccupancyPct * 100)}% / ${Math.round(r.loadPlan.palletOccupancyPct * 100)}%`
                       : "—"}
