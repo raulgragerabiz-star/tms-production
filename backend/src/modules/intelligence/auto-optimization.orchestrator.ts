@@ -241,6 +241,11 @@ async function applySelection(
         entityId: routeId,
         action: "update",
         oldValue: {},
+        // `as any`: mismo motivo que costBreakdown en optimization.routes.ts
+        // -- el campo Json de Prisma exige un objeto plano (InputJsonValue),
+        // y `breakdown` viaja con un tipo con nombre (WeightProfile) que
+        // TypeScript no reconoce estructuralmente como tal aunque en tiempo
+        // de ejecución sea un objeto corriente serializable sin problema.
         newValue: {
           autoAssigned: true,
           costSimulationId,
@@ -248,7 +253,7 @@ async function applySelection(
           confidence: result.confidence,
           marginOverSecond: result.marginOverSecond,
           breakdown: result.selected?.breakdown,
-        },
+        } as any,
       },
     }),
   ]);

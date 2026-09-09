@@ -51,7 +51,17 @@ companySettingsRouter.patch(
         entityId: req.auth!.companyId,
         action: "update",
         oldValue: {},
-        newValue: { autoAssignSettings: updated },
+        // Se convierte autoAssignMinConfidence (Decimal de Prisma) a number
+        // -- el campo Json exige un objeto plano (InputJsonValue) y un
+        // Decimal no lo es estructuralmente para TypeScript, aunque a
+        // tiempo de ejecución serialice bien (mismo tipo de error real ya
+        // corregido en auto-optimization.orchestrator.ts).
+        newValue: {
+          autoAssignSettings: {
+            autoAssignEnabled: updated.autoAssignEnabled,
+            autoAssignMinConfidence: Number(updated.autoAssignMinConfidence),
+          },
+        },
       },
     });
 
