@@ -298,11 +298,22 @@ async function main() {
 
   // Clientes/puntos de entrega adicionales con coordenadas en el área de Madrid,
   // para poder ver varios marcadores reales en el mapa del planificador (Fase 5, Pantalla 4).
+  // 2026-09-09: estos 4 puntos de entrega se creaban SIN código postal --
+  // era el único lugar de todo el código (aparte de este seed) donde se
+  // daba de alta un DeliveryPoint sin exigirlo, y por eso la consulta
+  // pública de pedidos (/seguimiento, que exige nº de pedido + código
+  // postal) no podía resolver ningún pedido creado contra uno de estos 4
+  // clientes de demo. Se añade un código postal real de cada localidad.
+  // Si ya ejecutaste el seed antes de este cambio, esto NO corrige los
+  // puntos de entrega ya creados en tu base de datos (el `if (!existingEcDp)`
+  // de más abajo no los vuelve a tocar) -- para eso, ver el script nuevo
+  // `backend/prisma/backfill-demo-postal-codes.ts` que sí actualiza los ya
+  // existentes.
   const extraCustomers = [
-    { code: "500010", name: "BIGMAT STORES, S.L.U", city: "Fuenlabrada", lat: 40.2818, lng: -3.7940 },
-    { code: "500011", name: "FERRETERÍA CENTRAL MADRID, S.L.", city: "Madrid", lat: 40.4168, lng: -3.7038 },
-    { code: "500012", name: "CONSTRUCCIONES PINTO, S.A.", city: "Pinto", lat: 40.2415, lng: -3.6996 },
-    { code: "500013", name: "MATERIALES PARLA, S.L.", city: "Parla", lat: 40.2372, lng: -3.7674 },
+    { code: "500010", name: "BIGMAT STORES, S.L.U", city: "Fuenlabrada", postalCode: "28942", lat: 40.2818, lng: -3.7940 },
+    { code: "500011", name: "FERRETERÍA CENTRAL MADRID, S.L.", city: "Madrid", postalCode: "28021", lat: 40.4168, lng: -3.7038 },
+    { code: "500012", name: "CONSTRUCCIONES PINTO, S.A.", city: "Pinto", postalCode: "28320", lat: 40.2415, lng: -3.6996 },
+    { code: "500013", name: "MATERIALES PARLA, S.L.", city: "Parla", postalCode: "28981", lat: 40.2372, lng: -3.7674 },
   ];
   for (const ec of extraCustomers) {
     const c = await prisma.customer.upsert({
@@ -317,6 +328,7 @@ async function main() {
           customerId: c.id,
           label: "Punto de entrega principal",
           address: `Polígono Industrial, ${ec.city}`,
+          postalCode: ec.postalCode,
           city: ec.city,
           province: "Madrid",
           country: "ES",

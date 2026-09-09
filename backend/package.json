@@ -14,6 +14,7 @@
     "demo:refresh-today": "tsx prisma/refresh-demo-route.ts",
     "db:seed:segmentation": "tsx prisma/seed-segmentation-rules.ts",
     "db:import-surtido": "tsx prisma/import-surtido.ts",
+    "db:backfill-demo-cp": "tsx prisma/backfill-demo-postal-codes.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "npm run test && npm run test:integration"
