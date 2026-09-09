@@ -7,6 +7,7 @@ const navItems = [
   { to: "/planificador", label: "Planificador" },
   { to: "/seguimiento", label: "Seguimiento" },
   { to: "/analitica", label: "Analítica" },
+  { to: "/alertas", label: "Alertas" },
   { to: "/tarifas", label: "Tarifas" },
   { to: "/retornos", label: "Retornos" },
   { to: "/facturacion", label: "Facturación" },

@@ -28,6 +28,7 @@ import { usersRouter } from "@/modules/users/users.routes";
 import { optimizationRouter } from "@/modules/routes/optimization.routes";
 import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
 import { trackingRouter } from "@/modules/tracking/tracking.routes";
+import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -110,6 +111,10 @@ export function createApp() {
   app.use("/api/warehouses", requireAuth, warehousesRouter);
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
+  // Motor de inteligencia (1/3): detección de anomalías -- ver
+  // anomaly-detection.service.ts. Piezas 2 y 3 (forecast de demanda,
+  // auto-optimización de rutas) pendientes de integrar.
+  app.use("/api/intelligence/anomalies", requireAuth, anomalyRouter);
 
   // Portales externos: autenticación independiente (mismo /api/auth/login, distinto
   // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.

@@ -35,6 +35,7 @@ model Company {
   warehouses              Warehouse[]
   HolidayCalendar         HolidayCalendar[]
   FuelIndexReading        FuelIndexReading[]
+  anomalyAlerts           AnomalyAlert[]
 
   @@map("company")
 }
@@ -631,6 +632,15 @@ model Route {
   warehouse       Warehouse        @relation(fields: [warehouseId], references: [id])
   stops           RouteStop[]
   shipment        Shipment?
+  // Motor de inteligencia — detección de rutas ineficientes (ver
+  // anomaly-detection.service.ts): distancia planificada al secuenciar vs.
+  // distancia real recorrida. Ambas opcionales -- no rompen filas
+  // existentes ni exigen que ya estén pobladas para poder usar el resto de
+  // Route con normalidad. Todavía sin alimentar automáticamente en ningún
+  // sitio; el detector de anomalías simplemente no genera alertas de este
+  // tipo hasta que haya datos.
+  distancePlannedKm Decimal?       @map("distance_planned_km") @db.Decimal(10, 2)
+  distanceRealKm    Decimal?       @map("distance_real_km") @db.Decimal(10, 2)
 
   @@map("route")
 }
@@ -1000,4 +1010,53 @@ enum InvoiceStatus {
   draft
   issued
   paid
+}
+
+// ----------------------------------------------------------------------------
+// Motor de inteligencia (1/3) — Detección de anomalías. Documentado en el
+// delta v1.1 nunca fusionado (_manual_merge_needed/schema.delta.prisma §15)
+// y ahora sí integrado: vigilancia de patrones fuera de lo habitual que
+// genera una alerta para revisión humana -- nunca corrige nada
+// automáticamente. Ver anomaly-detection.service.ts.
+// ----------------------------------------------------------------------------
+enum AnomalyType {
+  order_weight_deviation
+  settlement_amount_deviation
+  low_route_occupancy
+  inefficient_route_distance
+}
+
+enum AnomalySeverity {
+  low
+  medium
+  high
+}
+
+enum AnomalyStatus {
+  pending
+  reviewed
+  dismissed
+}
+
+model AnomalyAlert {
+  id            String          @id @default(uuid())
+  companyId     String          @map("company_id")
+  company       Company         @relation(fields: [companyId], references: [id])
+  alertType     AnomalyType     @map("alert_type")
+  severity      AnomalySeverity
+  entityName    String          @map("entity_name") // "order" | "settlement_line" | "carrier" -- mismo patrón que audit_log
+  entityId      String          @map("entity_id")
+  description   String
+  metricValue   Decimal?        @map("metric_value") @db.Decimal(12, 4) // valor observado, para mostrar en el detalle
+  expectedRange String?         @map("expected_range") // texto auditable, ej. "120-340 kg (media ± 2 desviaciones)"
+  status        AnomalyStatus   @default(pending)
+  reviewedBy    String?         @map("reviewed_by")
+  reviewedAt    DateTime?       @map("reviewed_at")
+  detectedAt    DateTime        @default(now()) @map("detected_at")
+
+  // Evita duplicar la misma alerta para la misma entidad mientras siga
+  // pendiente de revisión -- ver persistAlertIfNew() en el servicio.
+  @@unique([companyId, alertType, entityId, status], name: "uq_pending_alert_per_entity")
+  @@index([companyId, status, detectedAt])
+  @@map("anomaly_alert")
 }
