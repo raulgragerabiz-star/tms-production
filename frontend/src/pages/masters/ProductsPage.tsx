@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import Pagination from "@/components/Pagination";
 
 interface ProductRow {
   id: string;
@@ -35,9 +36,20 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
 
+  // Paginación: con el catálogo real (10.635 productos) esta pantalla
+  // siempre pedía la página 1 sin ningún control para avanzar, así que solo
+  // se podían ver los primeros 25. El tamaño de página por defecto aquí es
+  // mayor (100) porque es una tabla densa que se suele recorrer entera.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["products", search],
-    queryFn: async () => (await api.get("/products", { params: { search } })).data as { items: ProductRow[]; total: number },
+    queryKey: ["products", search, page, pageSize],
+    queryFn: async () =>
+      (await api.get("/products", { params: { search, page, pageSize } })).data as {
+        items: ProductRow[];
+        total: number;
+      },
   });
 
   const updateDimensionsMutation = useMutation({
@@ -59,7 +71,10 @@ export default function ProductsPage() {
         <input
           placeholder="Buscar por SKU o descripción…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           className="rounded-lg border border-slate-300 text-sm px-3 py-2 w-64"
         />
       </div>
@@ -102,6 +117,16 @@ export default function ProductsPage() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={data?.total ?? 0}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       </div>
     </div>
   );

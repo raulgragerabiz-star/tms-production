@@ -31,6 +31,25 @@ import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
+// CORS en Codespaces con lista fija (CORS_ORIGIN): cada vez que se recrea o
+// se hace rebuild del Codespace, el nombre del host cambia (ej.
+// "upgraded-fiesta-xxxx.github.dev" pasa a llamarse de otra forma), y el
+// .env se queda con un origen que ya no existe -- así se rompió la consulta
+// pública de estado (/seguimiento en el Portal Cliente, puerto 5176): el
+// frontend cargaba bien, pero la llamada a la API la bloqueaba CORS porque
+// el origen real ya no coincidía con el guardado en CORS_ORIGIN.
+//
+// En vez de pedir que se actualice el .env cada vez, se admite automáticamente
+// cualquier origen de Codespaces para los puertos que ya usan las apps de
+// este proyecto (4000 backend, 5173 Backoffice, 5174 Portal Transportista,
+// 5175 App Conductor, 5176 Portal Cliente) -- CORS_ORIGIN se mantiene tal
+// cual para cualquier otro origen (ej. un dominio propio en producción).
+const CODESPACES_ORIGIN_PATTERN = /^https:\/\/[a-z0-9-]+-(4000|5173|5174|5175|5176)\.app\.github\.dev$/;
+
+function isKnownCodespacesOrigin(origin: string): boolean {
+  return CODESPACES_ORIGIN_PATTERN.test(origin);
+}
+
 export function createApp() {
   const app = express();
 
@@ -39,7 +58,9 @@ export function createApp() {
     cors({
       origin: (origin, callback) => {
         // Sin origin (curl, health-checks, apps móviles nativas) siempre se permite.
-        if (!origin || env.corsOrigins.includes(origin)) return callback(null, true);
+        if (!origin || env.corsOrigins.includes(origin) || isKnownCodespacesOrigin(origin)) {
+          return callback(null, true);
+        }
         callback(new Error(`Origen no permitido por CORS: ${origin}`));
       },
       credentials: true,

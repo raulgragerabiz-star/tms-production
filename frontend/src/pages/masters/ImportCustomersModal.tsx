@@ -32,6 +32,7 @@ interface CustomerMasterImportSummary {
   clientesDetectados: number;
   clientesCreados: number;
   clientesActualizados: number;
+  puntosDeEntregaCreados: number;
   sinCodigoPostalDetectado: string[];
   erroresParseo: string[];
   errores: CustomerMasterErrorRow[];
@@ -156,6 +157,11 @@ export default function ImportCustomersModal({ open, onClose, onSuccess, onError
               <p className="text-xs text-slate-500">Con errores</p>
             </div>
           </div>
+
+          <p className="text-xs text-slate-500">
+            {summary.puntosDeEntregaCreados} punto(s) de entrega dado(s) de alta a partir de estas direcciones
+            (visibles en Maestros &gt; Clientes, columna "Puntos de entrega").
+          </p>
 
           {summary.sinCodigoPostalDetectado.length > 0 && (
             <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">

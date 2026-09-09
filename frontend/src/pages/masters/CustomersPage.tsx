@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
+import Pagination from "@/components/Pagination";
 import { useToast } from "@/hooks/use-toast";
 import ImportCustomersModal from "@/pages/masters/ImportCustomersModal";
 
@@ -26,9 +27,19 @@ export default function CustomersPage() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
+  // Paginación: antes siempre se pedía la página 1 sin control para avanzar,
+  // así que a partir del cliente 26 (tamaño de página por defecto del
+  // backend) no había forma de verlos desde aquí.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["customers", search],
-    queryFn: async () => (await api.get("/customers", { params: { search } })).data as { items: CustomerRow[]; total: number },
+    queryKey: ["customers", search, page, pageSize],
+    queryFn: async () =>
+      (await api.get("/customers", { params: { search, page, pageSize } })).data as {
+        items: CustomerRow[];
+        total: number;
+      },
   });
 
   return (
@@ -42,7 +53,10 @@ export default function CustomersPage() {
           <input
             placeholder="Buscar por código o nombre…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="rounded-lg border border-slate-300 text-sm px-3 py-2 w-64"
           />
           <button
@@ -98,6 +112,16 @@ export default function CustomersPage() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={data?.total ?? 0}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       </div>
 
       <ImportCustomersModal

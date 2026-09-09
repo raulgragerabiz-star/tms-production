@@ -32,6 +32,7 @@ export interface CustomerMasterImportSummary {
   clientesDetectados: number;
   clientesCreados: number;
   clientesActualizados: number;
+  puntosDeEntregaCreados: number;
   sinCodigoPostalDetectado: string[];
   erroresParseo: string[];
   errores: CustomerMasterErrorRow[];
@@ -55,6 +56,44 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
 
 const IMPORT_CONCURRENCY = 4;
 
+// Además de guardar la dirección por defecto en el propio Customer (para que
+// la importación de Pedidos la use al resolver un pedido sin dirección
+// propia), se da de alta -- o se reutiliza si ya existe -- un DeliveryPoint
+// real para ese cliente. Sin esto, Maestros > Clientes seguía mostrando
+// "0" en Puntos de entrega aunque el cliente ya tuviera una dirección
+// cargada, porque esa columna cuenta filas de DeliveryPoint, no los campos
+// por defecto del cliente. Mismo criterio de qué identifica un punto de
+// entrega (dirección + código postal) que ya usa orders-excel-import.service.ts,
+// para que este mismo punto se reutilice cuando llegue el primer pedido de
+// ese cliente en vez de crear uno duplicado.
+async function ensureDeliveryPoint(
+  customerId: string,
+  row: ParsedCustomerRow
+): Promise<boolean> {
+  const address = row.address || row.addressRaw;
+  const existingDp = await prisma.deliveryPoint.findFirst({
+    where: {
+      customerId,
+      address: { equals: address, mode: "insensitive" },
+      postalCode: row.postalCode ?? null,
+      deletedAt: null,
+    },
+  });
+  if (existingDp) return false;
+
+  await prisma.deliveryPoint.create({
+    data: {
+      customerId,
+      address,
+      city: row.city,
+      province: row.province,
+      postalCode: row.postalCode,
+      country: "ES",
+    },
+  });
+  return true;
+}
+
 async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summary: CustomerMasterImportSummary): Promise<void> {
   try {
     const businessCode = row.code.trim().slice(0, 10);
@@ -64,6 +103,7 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
     });
 
     const hasAddress = row.addressRaw.trim().length > 0;
+    let customerId: string;
 
     if (existing) {
       const patch: Prisma.CustomerUpdateInput = {};
@@ -80,12 +120,13 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
       if (Object.keys(patch).length > 0) {
         await prisma.customer.update({ where: { id: existing.id }, data: patch });
       }
+      customerId = existing.id;
       summary.clientesActualizados += 1;
     } else {
       if (!row.name) {
         throw new Error(`Falta el Nombre para dar de alta el cliente con código ${businessCode}`);
       }
-      await prisma.customer.create({
+      const created = await prisma.customer.create({
         data: {
           companyId,
           businessCode,
@@ -96,7 +137,13 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
           defaultPostalCode: row.postalCode,
         },
       });
+      customerId = created.id;
       summary.clientesCreados += 1;
+    }
+
+    if (hasAddress) {
+      const created = await ensureDeliveryPoint(customerId, row);
+      if (created) summary.puntosDeEntregaCreados += 1;
     }
 
     if (hasAddress && !row.postalCode) {
@@ -115,6 +162,7 @@ export async function runCustomerMasterImport(companyId: string, buffer: Buffer)
     clientesDetectados: customers.length,
     clientesCreados: 0,
     clientesActualizados: 0,
+    puntosDeEntregaCreados: 0,
     sinCodigoPostalDetectado: [],
     erroresParseo: parseErrors,
     errores: [],

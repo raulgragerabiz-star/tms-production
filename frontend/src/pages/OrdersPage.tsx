@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import Toast from "@/components/Toast";
+import Pagination from "@/components/Pagination";
 import { useToast } from "@/hooks/use-toast";
 import NewOrderModal from "@/pages/orders/NewOrderModal";
 import OrderDetailModal from "@/pages/orders/OrderDetailModal";
@@ -33,10 +34,19 @@ export default function OrdersPage() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
+  // Paginación: antes siempre se pedía la página 1 sin ningún control para
+  // avanzar, así que con más pedidos de los que caben en una página
+  // (por defecto 25) el resto quedaba invisible sin ninguna forma de verlo.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["orders", status],
+    queryKey: ["orders", status, page, pageSize],
     queryFn: async () =>
-      (await api.get("/orders", { params: status ? { status } : {} })).data as { items: OrderRow[]; total: number },
+      (await api.get("/orders", { params: { ...(status ? { status } : {}), page, pageSize } })).data as {
+        items: OrderRow[];
+        total: number;
+      },
   });
 
   return (
@@ -49,7 +59,10 @@ export default function OrdersPage() {
         <div className="flex items-center gap-2">
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
             className="rounded-lg border border-slate-300 text-sm px-3 py-2"
           >
             <option value="">Todos los estados</option>
@@ -133,6 +146,16 @@ export default function OrdersPage() {
             ))}
           </tbody>
         </table>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={data?.total ?? 0}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+        />
       </div>
 
       <NewOrderModal
