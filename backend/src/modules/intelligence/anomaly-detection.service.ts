@@ -301,9 +301,11 @@ async function detectAndPersistWeightAnomalies(companyId: string): Promise<numbe
 }
 
 async function detectAndPersistSettlementAnomalies(companyId: string): Promise<number> {
+  // CarrierSettlement no tiene companyId propio (solo carrierId) -- el
+  // filtro por empresa se resuelve subiendo hasta Carrier, que sí lo tiene.
   const recentLines = await prisma.settlementLine.findMany({
     where: {
-      carrierSettlement: { companyId },
+      carrierSettlement: { carrier: { companyId } },
       shipment: { finishedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
     },
     select: { id: true, amount: true, shipment: { select: { carrierId: true } } },
