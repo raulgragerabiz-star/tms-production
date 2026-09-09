@@ -6,6 +6,7 @@ import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 import NewOrderModal from "@/pages/orders/NewOrderModal";
 import OrderDetailModal from "@/pages/orders/OrderDetailModal";
+import ImportOrdersModal from "@/pages/orders/ImportOrdersModal";
 
 interface OrderRow {
   id: string;
@@ -22,6 +23,13 @@ interface OrderRow {
 export default function OrdersPage() {
   const [status, setStatus] = useState<string>("");
   const [modalOpen, setModalOpen] = useState(false);
+  // Carga de pedidos por Excel (instrucciones ampliadas del proyecto):
+  // alternativa manual a la integración con el ERP, sobre todo para poder
+  // meter datos de prueba sin depender de esa integración.
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  // Objetivo 3/4: id del pedido cuyo detalle (líneas + justificante de
+  // entrega) se está consultando -- null = modal cerrado. No toca el estado
+  // ni el listado ya existentes.
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
@@ -55,6 +63,12 @@ export default function OrdersPage() {
             <option value="incident">Incidencia</option>
             <option value="cancelled">Cancelado</option>
           </select>
+          <button
+            onClick={() => setImportModalOpen(true)}
+            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg"
+          >
+            Importar Excel
+          </button>
           <button
             onClick={() => setModalOpen(true)}
             className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
@@ -93,10 +107,12 @@ export default function OrdersPage() {
               </tr>
             )}
             {data?.items.map((o) => (
-              <tr key={o.id}
+              <tr
+                key={o.id}
                 onClick={() => setSelectedOrderId(o.id)}
                 className="hover:bg-slate-50 cursor-pointer"
               >
+
                 <td className="px-4 py-3 font-medium text-slate-800">{o.orderNumber}</td>
                 <td className="px-4 py-3">
                   {o.customer.businessCode} — {o.customer.legalName}
@@ -126,6 +142,12 @@ export default function OrdersPage() {
         onError={showError}
       />
       <OrderDetailModal orderId={selectedOrderId} onClose={() => setSelectedOrderId(null)} />
+      <ImportOrdersModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        onSuccess={showSuccess}
+        onError={showError}
+      />
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
     </div>
   );

@@ -5,6 +5,7 @@ import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { computeLineWeightKg } from "./lib/line-weight";
 import { classifyOrder } from "@/modules/segmentation/segmentation.service";
+import { buildOrdersImportTemplate, runOrdersExcelImport } from "./orders-excel-import.service";
 
 export const ordersRouter = Router();
 
@@ -67,6 +68,46 @@ ordersRouter.get(
     }));
 
     res.json({ items: withTotals, total, page, pageSize });
+  })
+);
+
+// Carga de pedidos por Excel (instrucciones ampliadas: "Recepción de pedidos
+// desde cualquier origen -- ERP, API o carga manual"). Montadas ANTES de
+// GET "/:id" porque si no, Express interpretaría "import" y "import/template"
+// como un :id literal y nunca llegarían aquí.
+//
+// El archivo se manda en base64 dentro del JSON (en vez de multipart/multer)
+// para no añadir una dependencia nueva solo para subir un fichero -- el
+// límite de tamaño del body (ver app.ts) ya se subió para admitirlo.
+ordersRouter.get(
+  "/import/template",
+  asyncHandler(async (_req, res) => {
+    const buffer = buildOrdersImportTemplate();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", 'attachment; filename="plantilla-carga-pedidos.xlsx"');
+    res.send(buffer);
+  })
+);
+
+const importOrdersSchema = z.object({
+  fileBase64: z.string().min(1),
+  fileName: z.string().optional(),
+});
+
+ordersRouter.post(
+  "/import",
+  asyncHandler(async (req, res) => {
+    const { fileBase64 } = importOrdersSchema.parse(req.body);
+    let buffer: Buffer;
+    try {
+      buffer = Buffer.from(fileBase64, "base64");
+    } catch {
+      throw HttpError.badRequest("El archivo no es un base64 válido");
+    }
+    if (buffer.length === 0) throw HttpError.badRequest("El archivo está vacío");
+
+    const summary = await runOrdersExcelImport(req.auth!.companyId, buffer);
+    res.json({ summary });
   })
 );
 

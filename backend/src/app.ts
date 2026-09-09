@@ -44,7 +44,10 @@ export function createApp() {
       credentials: true,
     })
   );
-  app.use(express.json({ limit: "5mb" }));
+  // Subido de 5mb a 15mb para admitir la carga de pedidos por Excel (ver
+  // orders.routes.ts POST /orders/import): el fichero viaja en base64 dentro
+  // del JSON, que infla su tamaño real en torno a un 35%.
+  app.use(express.json({ limit: "15mb" }));
   app.use(morgan(env.nodeEnv === "development" ? "dev" : "combined"));
 
   // Health-check de infraestructura: comprueba también la conexión a BD, para que un
