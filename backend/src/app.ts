@@ -29,6 +29,7 @@ import { optimizationRouter } from "@/modules/routes/optimization.routes";
 import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
 import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
+import { demandForecastRouter } from "@/modules/intelligence/demand-forecast.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -112,9 +113,12 @@ export function createApp() {
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
   // Motor de inteligencia (1/3): detección de anomalías -- ver
-  // anomaly-detection.service.ts. Piezas 2 y 3 (forecast de demanda,
-  // auto-optimización de rutas) pendientes de integrar.
+  // anomaly-detection.service.ts. Pieza 3 (auto-optimización de rutas)
+  // pendiente de integrar.
   app.use("/api/intelligence/anomalies", requireAuth, anomalyRouter);
+  // Motor de inteligencia (2/3): pronóstico de demanda -- ver
+  // demand-forecast.service.ts.
+  app.use("/api/intelligence/demand-forecast", requireAuth, demandForecastRouter);
 
   // Portales externos: autenticación independiente (mismo /api/auth/login, distinto
   // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.

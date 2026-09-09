@@ -8,6 +8,7 @@ const navItems = [
   { to: "/seguimiento", label: "Seguimiento" },
   { to: "/analitica", label: "Analítica" },
   { to: "/alertas", label: "Alertas" },
+  { to: "/prevision-demanda", label: "Previsión de demanda" },
   { to: "/retornos", label: "Retornos" },
   { to: "/facturacion", label: "Facturación" },
 ];

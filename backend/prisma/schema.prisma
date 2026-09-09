@@ -36,6 +36,7 @@ model Company {
   HolidayCalendar         HolidayCalendar[]
   FuelIndexReading        FuelIndexReading[]
   anomalyAlerts           AnomalyAlert[]
+  demandForecasts         DemandForecast[]
 
   @@map("company")
 }
@@ -101,6 +102,9 @@ model Warehouse {
   // cada una con su vehículo asignado -- relación nueva, no toca nada de lo
   // que ya había en Warehouse.
   influenceZones   InfluenceZone[]
+  // Motor de inteligencia (2/3): pronósticos de demanda calculados para este
+  // almacén (ver DemandForecast más abajo).
+  demandForecasts  DemandForecast[]
   company          Company  @relation(fields: [companyId], references: [id])
 
   @@index([companyId, active])
@@ -1059,4 +1063,39 @@ model AnomalyAlert {
   @@unique([companyId, alertType, entityId, status], name: "uq_pending_alert_per_entity")
   @@index([companyId, status, detectedAt])
   @@map("anomaly_alert")
+}
+
+// ----------------------------------------------------------------------------
+// Motor de inteligencia (2/3) — Predicción de demanda. Documentado en el
+// delta v1.1 nunca fusionado (_manual_merge_needed/.../schema.delta.prisma
+// §16) y ahora integrado, adaptado al schema real (sin `$queryRaw`: se
+// agrega en JS sobre una consulta Prisma normal, mismo criterio que
+// dashboard.routes.ts y anomaly-detection.service.ts, para no depender de
+// SQL a medida sin poder probarlo contra Postgres real desde este entorno).
+// Guarda el pronóstico YA CALCULADO -- el Planificador (o esta pantalla) lo
+// lee sin recomputar percentiles en cada carga. Sin job programado todavía
+// (no hay infraestructura de tareas periódicas en el backend); se recalcula
+// a mano con un botón, igual que la detección de anomalías (pieza 1/3).
+model DemandForecast {
+  id                  String   @id @default(uuid())
+  companyId           String   @map("company_id")
+  company             Company  @relation(fields: [companyId], references: [id])
+  warehouseId         String   @map("warehouse_id")
+  warehouse           Warehouse @relation(fields: [warehouseId], references: [id])
+  province            String
+  forecastDate        DateTime @map("forecast_date") @db.Date
+  // Percentiles sobre el histórico del MISMO día de la semana en las últimas
+  // 12 semanas -- P50 = mediana (estimación central), P80 = umbral de
+  // "necesitarás refuerzo de flota" (se quiere estar preparado para el 80%
+  // de los casos, no solo el mediano).
+  expectedOrdersP50   Decimal  @map("expected_orders_p50") @db.Decimal(8, 2)
+  expectedOrdersP80   Decimal  @map("expected_orders_p80") @db.Decimal(8, 2)
+  expectedWeightKgP50 Decimal  @map("expected_weight_kg_p50") @db.Decimal(12, 2)
+  expectedWeightKgP80 Decimal  @map("expected_weight_kg_p80") @db.Decimal(12, 2)
+  sampleSize          Int      @map("sample_size") // nº de semanas históricas usadas para este día de la semana
+  calculatedAt        DateTime @default(now()) @map("calculated_at")
+
+  @@unique([companyId, warehouseId, province, forecastDate])
+  @@index([companyId, warehouseId, forecastDate])
+  @@map("demand_forecast")
 }
