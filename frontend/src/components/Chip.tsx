@@ -2,9 +2,14 @@
 // está <StatusBadge>): clasificación ABC de clientes, tipo de vehículo,
 // segmento de servicio, etc. Mismo patrón "chip" del panel de referencia
 // (TMS Getafe): fuente monoespaciada, negrita, esquina poco redondeada.
+// Exportado para que otras pantallas puedan tipar sus propios mapas
+// "valor -> color de chip" (p. ej. clasificación ABC en Productos) sin
+// repetir la lista de colores válidos.
+export type ChipColor = "teal" | "blue" | "amber" | "red" | "purple" | "slate";
+
 interface Props {
   children: string;
-  color?: "teal" | "blue" | "amber" | "red" | "purple" | "slate";
+  color?: ChipColor;
 }
 
 const colorClasses: Record<string, string> = {

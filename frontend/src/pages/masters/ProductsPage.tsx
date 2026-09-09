@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Pagination from "@/components/Pagination";
+import Chip, { ChipColor } from "@/components/Chip";
 
 interface ProductRow {
   id: string;
@@ -24,12 +25,15 @@ interface ProductRow {
   ean: string | null;
 }
 
-const abcColors: Record<string, string> = {
-  "A+": "bg-emerald-100 text-emerald-700",
-  A: "bg-emerald-100 text-emerald-700",
-  B: "bg-blue-100 text-blue-700",
-  C: "bg-amber-100 text-amber-700",
-  D: "bg-slate-200 text-slate-500",
+// 2026-09-09: clasificación ABC como <Chip> (etiqueta de categoría, no de
+// estado de ciclo de vida) -- mismo patrón "chip" mono/negrita del panel de
+// referencia (TMS Getafe) usado para segmentaciones de este tipo.
+const abcColors: Record<string, ChipColor> = {
+  "A+": "teal",
+  A: "teal",
+  B: "blue",
+  C: "amber",
+  D: "slate",
 };
 
 export default function ProductsPage() {
@@ -86,15 +90,15 @@ export default function ProductsPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">SKU</th>
               <th className="text-left px-4 py-3">Descripción</th>
               <th className="text-left px-4 py-3">Categoría</th>
               <th className="text-left px-4 py-3">Rotación</th>
-              <th className="text-left px-4 py-3">Uds/palé</th>
-              <th className="text-left px-4 py-3">Peso bruto (kg)</th>
-              <th className="text-left px-4 py-3">Peso palé lleno (kg)</th>
+              <th className="text-right px-4 py-3">Uds/palé</th>
+              <th className="text-right px-4 py-3">Peso bruto (kg)</th>
+              <th className="text-right px-4 py-3">Peso palé lleno (kg)</th>
               <th className="text-left px-4 py-3">Retornable</th>
               <th className="text-left px-4 py-3">Frío</th>
               <th className="text-left px-4 py-3">Largo palé (m)</th>
@@ -152,24 +156,22 @@ function ProductTableRow({
   useEffect(() => setHeightM(product.heightM ?? ""), [product.heightM]);
 
   return (
-    <tr className="hover:bg-slate-50">
-      <td className="px-4 py-3 font-mono text-xs">{product.sku}</td>
+    <tr className="hover:bg-brand-50/60">
+      <td className="px-4 py-3 font-mono font-semibold text-xs">{product.sku}</td>
       <td className="px-4 py-3">{product.description}</td>
       <td className="px-4 py-3 text-slate-500 text-xs max-w-[220px] truncate" title={product.category ?? undefined}>
         {product.category?.split("\\").pop()?.trim() ?? "—"}
       </td>
       <td className="px-4 py-3">
         {product.abcClass ? (
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${abcColors[product.abcClass] ?? "bg-slate-100 text-slate-600"}`}>
-            {product.abcClass}
-          </span>
+          <Chip color={abcColors[product.abcClass] ?? "slate"}>{product.abcClass}</Chip>
         ) : (
           "—"
         )}
       </td>
-      <td className="px-4 py-3">{product.unitsPerPallet}</td>
-      <td className="px-4 py-3">{Number(product.grossWeightKg).toFixed(2)}</td>
-      <td className="px-4 py-3">{Number(product.fullPalletWeightKg).toFixed(1)}</td>
+      <td className="px-4 py-3 text-right font-mono text-slate-600">{product.unitsPerPallet}</td>
+      <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(product.grossWeightKg).toFixed(2)}</td>
+      <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(product.fullPalletWeightKg).toFixed(1)}</td>
       <td className="px-4 py-3">{product.isReturnable ? "Sí" : "No"}</td>
       <td className="px-4 py-3">{product.requiresCold ? "Sí" : "No"}</td>
       <td className="px-4 py-2">

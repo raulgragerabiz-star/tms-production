@@ -93,14 +93,18 @@ export default function OrdersPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          {/* 2026-09-09: cabecera fija (sticky) y fila resaltada en ámbar al
+              pasar el ratón -- mismo patrón de tabla del panel de referencia
+              (TMS Getafe), extendido ahora de Analítica a las tablas
+              principales del Backoffice. */}
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Nº pedido</th>
               <th className="text-left px-4 py-3">Cliente</th>
               <th className="text-left px-4 py-3">Punto de entrega</th>
               <th className="text-left px-4 py-3">Almacén</th>
               <th className="text-left px-4 py-3">Fecha comprometida</th>
-              <th className="text-left px-4 py-3">Peso (kg)</th>
+              <th className="text-right px-4 py-3">Peso (kg)</th>
               <th className="text-left px-4 py-3">Estado</th>
             </tr>
           </thead>
@@ -123,10 +127,10 @@ export default function OrdersPage() {
               <tr
                 key={o.id}
                 onClick={() => setSelectedOrderId(o.id)}
-                className="hover:bg-slate-50 cursor-pointer"
+                className="hover:bg-brand-50/60 cursor-pointer"
               >
 
-                <td className="px-4 py-3 font-medium text-slate-800">{o.orderNumber}</td>
+                <td className="px-4 py-3 font-mono font-semibold text-slate-800">{o.orderNumber}</td>
                 <td className="px-4 py-3">
                   {o.customer.businessCode} — {o.customer.legalName}
                 </td>
@@ -138,7 +142,7 @@ export default function OrdersPage() {
                 <td className="px-4 py-3 text-slate-500">
                   {new Date(o.requestedDeliveryDate).toLocaleDateString("es-ES")}
                 </td>
-                <td className="px-4 py-3 text-slate-500">{o.totalWeightKg.toFixed(1)}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-600">{o.totalWeightKg.toFixed(1)}</td>
                 <td className="px-4 py-3">
                   <StatusBadge status={o.status} />
                 </td>

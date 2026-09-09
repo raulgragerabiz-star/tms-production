@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
 import Pagination from "@/components/Pagination";
+import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import ImportCustomersModal from "@/pages/masters/ImportCustomersModal";
 
@@ -70,13 +71,13 @@ export default function CustomersPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Código</th>
               <th className="text-left px-4 py-3">Razón social</th>
               <th className="text-left px-4 py-3">Nombre comercial</th>
               <th className="text-left px-4 py-3">Dirección por defecto</th>
-              <th className="text-left px-4 py-3">Puntos de entrega</th>
+              <th className="text-right px-4 py-3">Puntos de entrega</th>
               <th className="text-left px-4 py-3">Estado</th>
             </tr>
           </thead>
@@ -87,8 +88,8 @@ export default function CustomersPage() {
               </tr>
             )}
             {data?.items.map((c) => (
-              <tr key={c.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3 font-mono text-xs">{c.businessCode}</td>
+              <tr key={c.id} className="hover:bg-brand-50/60">
+                <td className="px-4 py-3 font-mono font-semibold text-xs">{c.businessCode}</td>
                 <td className="px-4 py-3">{c.legalName}</td>
                 <td className="px-4 py-3 text-slate-500">{c.commercialName ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-500">
@@ -102,11 +103,9 @@ export default function CustomersPage() {
                     "—"
                   )}
                 </td>
-                <td className="px-4 py-3">{c._count.deliveryPoints}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-600">{c._count.deliveryPoints}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${c.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                    {c.active ? "Activo" : "Inactivo"}
-                  </span>
+                  <Chip color={c.active ? "teal" : "slate"}>{c.active ? "Activo" : "Inactivo"}</Chip>
                 </td>
               </tr>
             ))}

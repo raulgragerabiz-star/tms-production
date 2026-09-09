@@ -238,12 +238,12 @@ export default function AnalyticsPage() {
               <h2 className="text-sm font-semibold text-slate-700">Por transportista</h2>
             </div>
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+              <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
                 <tr>
                   <th className="text-left px-4 py-2">Transportista</th>
-                  <th className="text-left px-4 py-2">Rutas</th>
-                  <th className="text-left px-4 py-2">Incidencias</th>
-                  <th className="text-left px-4 py-2">Coste real</th>
+                  <th className="text-right px-4 py-2">Rutas</th>
+                  <th className="text-right px-4 py-2">Incidencias</th>
+                  <th className="text-right px-4 py-2">Coste real</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -255,11 +255,11 @@ export default function AnalyticsPage() {
                   </tr>
                 )}
                 {data.byCarrier.map((c) => (
-                  <tr key={c.carrierId} className="hover:bg-slate-50">
+                  <tr key={c.carrierId} className="hover:bg-brand-50/60">
                     <td className="px-4 py-2 font-medium text-slate-700">{c.legalName}</td>
-                    <td className="px-4 py-2">{c.routes}</td>
-                    <td className="px-4 py-2">{c.incidents}</td>
-                    <td className="px-4 py-2">{formatEuros(c.costReal)}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-600">{c.routes}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-600">{c.incidents}</td>
+                    <td className="px-4 py-2 text-right font-mono text-slate-600">{formatEuros(c.costReal)}</td>
                   </tr>
                 ))}
               </tbody>
