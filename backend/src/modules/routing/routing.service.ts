@@ -61,6 +61,31 @@ export async function estimateRoute(points: RoutePoint[]): Promise<RouteEstimate
   return { distanceKm, durationMin };
 }
 
+// Fase 5b (Planificador estilo Bringg -- vista Despacho + Gantt): reparto de
+// hora estimada de llegada por parada. Mismo criterio y las mismas
+// limitaciones que estimateRoute de arriba (línea recta + factor de
+// sinuosidad, todavía sin proveedor de rutas real): cada tramo se calcula
+// entre una parada y la anterior (el almacén para la primera), y tras cada
+// parada se añade un tiempo fijo de servicio (carga/descarga + firma) antes
+// de calcular el tramo siguiente -- no es un dato exacto, es una
+// aproximación honesta, igual que el resto de esta estimación de ruta.
+// Devuelve un array con una fecha por parada (sin contar el almacén), en el
+// mismo orden que `points.slice(1)`.
+export const STOP_SERVICE_MINUTES = 10;
+
+export function estimateStopEtas(points: RoutePoint[], startAt: Date): Date[] {
+  const etas: Date[] = [];
+  let cursor = new Date(startAt);
+  for (let i = 0; i < points.length - 1; i++) {
+    const legKm = haversineKm(points[i], points[i + 1]) * ROAD_WINDING_FACTOR;
+    const legMin = (legKm / AVERAGE_SPEED_KMH) * 60;
+    cursor = new Date(cursor.getTime() + legMin * 60000);
+    etas.push(new Date(cursor));
+    cursor = new Date(cursor.getTime() + STOP_SERVICE_MINUTES * 60000);
+  }
+  return etas;
+}
+
 export interface VehicleTypeSuggestion {
   vehicleType: { id: string; name: string; maxWeightKg: number; maxPallets: number; maxVolumeM3: number | null };
   fitsWeight: boolean;

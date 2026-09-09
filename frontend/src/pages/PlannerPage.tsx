@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import NewRouteModal from "@/pages/planner/NewRouteModal";
 import RouteAssignmentModal from "@/pages/planner/RouteAssignmentModal";
 import DragDropBoard, { ServiceType } from "@/pages/planner/DragDropBoard";
+import DispatchBoard from "@/pages/planner/DispatchBoard";
 
 // Los 4 segmentos reales de ServiceType — antes un toggle de solo 2 botones
 // ("Paletería"/"Camión completo") que ya no cubría los valores válidos del enum.
@@ -35,7 +36,10 @@ interface WarehouseOption {
 }
 
 export default function PlannerPage() {
-  const [view, setView] = useState<"board" | "list">("board");
+  // Fase 5b (Planificador estilo Bringg): tercera pestaña "Despacho" (tabla +
+  // mapa en vivo + Gantt), sumada a las 2 ya existentes -- "board"/"list" no
+  // cambian de comportamiento.
+  const [view, setView] = useState<"board" | "list" | "dispatch">("board");
   const [modalOpen, setModalOpen] = useState(false);
   const [presetOrderId, setPresetOrderId] = useState<string | undefined>();
   const [assigningRouteId, setAssigningRouteId] = useState<string | null>(null);
@@ -83,6 +87,12 @@ export default function PlannerPage() {
               className={`px-3 py-1.5 rounded-md text-xs font-medium ${view === "list" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
             >
               Lista
+            </button>
+            <button
+              onClick={() => setView("dispatch")}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium ${view === "dispatch" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}
+            >
+              Despacho
             </button>
           </div>
           <button
@@ -204,6 +214,33 @@ export default function PlannerPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {view === "dispatch" && (
+        <>
+          <div className="flex items-center gap-3 mb-4 bg-white border border-slate-200 rounded-xl p-3">
+            <select
+              value={warehouseId}
+              onChange={(e) => setWarehouseId(e.target.value)}
+              className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+            >
+              <option value="">Todos los almacenes</option>
+              {warehousesQuery.data?.items.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+            <input
+              type="date"
+              value={routeDate}
+              onChange={(e) => setRouteDate(e.target.value)}
+              className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+            />
+          </div>
+
+          <DispatchBoard warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />
+        </>
       )}
 
       <NewRouteModal

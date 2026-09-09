@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
-import { estimateRoute, suggestVehicleType } from "@/modules/routing/routing.service";
+import { estimateRoute, estimateStopEtas, suggestVehicleType } from "@/modules/routing/routing.service";
 
 export const routesRouter = Router();
 
@@ -87,6 +87,26 @@ export async function recalculateLoadPlan(routeId: string) {
   ];
   const hasAllCoords = routePoints.every((p) => p !== null);
   const estimate = hasAllCoords ? await estimateRoute(routePoints as { lat: number; lng: number }[]) : null;
+
+  // Fase 5b (Planificador estilo Bringg -- vista Despacho + Gantt): con las
+  // mismas coordenadas ya validadas para la distancia total, se reparte una
+  // hora estimada de llegada por parada. Rellena por fin `RouteStop.eta`,
+  // campo que existía en el schema desde antes pero que ningún sitio
+  // calculaba todavía. Hora de salida de referencia: 08:00 del día de la
+  // ruta -- todavía no hay un horario de salida configurable por almacén o
+  // ruta, así que es una aproximación documentada, igual de honesta que el
+  // resto de esta estimación de ruta sin proveedor real.
+  if (hasAllCoords && route) {
+    const startAt = new Date(route.routeDate);
+    startAt.setHours(8, 0, 0, 0);
+    const etas = estimateStopEtas(routePoints as { lat: number; lng: number }[], startAt);
+    await Promise.all(stops.map((s, idx) => prisma.routeStop.update({ where: { id: s.id }, data: { eta: etas[idx] } })));
+  } else if (stops.length > 0) {
+    // Sin coordenadas completas no se puede calcular con garantías -- se
+    // limpia cualquier ETA de un cálculo anterior con otras paradas, en vez
+    // de dejar un valor obsoleto que ya no se corresponde con la ruta actual.
+    await prisma.routeStop.updateMany({ where: { routeId }, data: { eta: null } });
+  }
 
   await prisma.loadPlan.upsert({
     where: { routeId },
@@ -204,6 +224,88 @@ routesRouter.get(
         totalWeightKg: o.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0),
       })),
       routes: routesWithSuggestion,
+    });
+  })
+);
+
+// Vista "Despacho" del Planificador (Fase 5b, estilo Bringg: tabla + mapa +
+// Gantt). A diferencia de /planner-board (solo rutas draft/optimized,
+// pensado para el tablero de arrastrar y soltar), esta trae TODAS las rutas
+// del almacén/fecha dados sin importar su estado -- pensada para ver de un
+// vistazo el despacho completo del día, incluidas las rutas que ya tienen
+// transportista, conductor y envío en curso (con su última posición GPS
+// conocida, mismo criterio que ya usa /shipments para Seguimiento).
+routesRouter.get(
+  "/dispatch-board",
+  asyncHandler(async (req, res) => {
+    const companyId = req.auth!.companyId;
+    const warehouseId = req.query.warehouseId as string | undefined;
+    const date = (req.query.date as string | undefined) ?? new Date().toISOString().slice(0, 10);
+
+    const routes = await prisma.route.findMany({
+      where: {
+        companyId,
+        routeDate: new Date(date),
+        ...(warehouseId ? { warehouseId } : {}),
+      },
+      include: {
+        warehouse: { select: { id: true, name: true, lat: true, lng: true } },
+        carrier: { select: { id: true, legalName: true } },
+        vehicle: { select: { id: true, plate: true } },
+        loadPlan: true,
+        stops: {
+          orderBy: { sequence: "asc" },
+          include: {
+            order: {
+              select: {
+                orderNumber: true,
+                priority: true,
+                deliveryTimeWindowFrom: true,
+                deliveryTimeWindowTo: true,
+                customer: { select: { legalName: true } },
+                deliveryPoint: { select: { address: true, city: true, lat: true, lng: true, contactPhone: true } },
+              },
+            },
+          },
+        },
+        shipment: {
+          select: {
+            id: true,
+            status: true,
+            driverId: true,
+            departedAt: true,
+            driver: { select: { fullName: true } },
+            trackingEvents: {
+              where: { lat: { not: null }, lng: { not: null } },
+              orderBy: { occurredAt: "desc" },
+              take: 1,
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Pedidos validados de ese almacén/fecha que todavía no están en ninguna
+    // ruta -- mismo criterio que /planner-board, para que la vista de
+    // despacho también avise de lo que falta por planificar ese día.
+    const unassignedOrdersCount = await prisma.order.count({
+      where: {
+        companyId,
+        status: "validated",
+        requestedDeliveryDate: new Date(date),
+        ...(warehouseId ? { warehouseId } : {}),
+      },
+    });
+
+    res.json({
+      items: routes.map((r) => {
+        const { shipment, ...rest } = r;
+        if (!shipment) return { ...rest, shipment: null };
+        const { trackingEvents, ...shipmentRest } = shipment;
+        return { ...rest, shipment: { ...shipmentRest, lastPosition: trackingEvents[0] ?? null } };
+      }),
+      unassignedOrdersCount,
     });
   })
 );
