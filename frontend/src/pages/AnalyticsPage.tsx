@@ -19,17 +19,20 @@ import KpiCard from "@/components/KpiCard";
 // separación de 2px entre barras, vista de tabla como alternativa accesible).
 
 const PALETTE = {
-  slot1: "#2a78d6", // azul -- serie principal (coste real / OTIF)
-  slot2: "#eb6834", // naranja -- segunda serie (coste estimado)
-  surface: "#fcfcfb",
-  textPrimary: "#0b0b0b",
-  textSecondary: "#52514e",
-  muted: "#898781",
-  gridline: "#e1e0d9",
-  baseline: "#c3c2b7",
-  good: "#0ca30c",
-  warning: "#fab219",
-  critical: "#d03b3b",
+  // 2026-09-09: paleta alineada con la nueva estética (panel de referencia
+  // TMS Getafe) -- ámbar de marca como serie principal, azul como
+  // secundaria, y los mismos semánticos teal/rojo que StatusBadge/KpiCard.
+  slot1: "#c9791f", // ámbar -- serie principal (coste real / OTIF)
+  slot2: "#5b8def", // azul -- segunda serie (coste estimado)
+  surface: "#ffffff",
+  textPrimary: "#0f172a",
+  textSecondary: "#64748b",
+  muted: "#94a3b8",
+  gridline: "#e7eaf0",
+  baseline: "#cbd5e1",
+  good: "#178a70",
+  warning: "#c9791f",
+  critical: "#c23b52",
 };
 
 interface Bucket {

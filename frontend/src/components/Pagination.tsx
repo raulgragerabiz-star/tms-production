@@ -26,15 +26,15 @@ export default function Pagination({
   const to = Math.min(page * pageSize, total);
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100 text-sm text-slate-500">
+    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 text-sm text-slate-500">
       <div className="flex items-center gap-3">
-        <span>
-          {total === 0 ? "Sin resultados" : `Mostrando ${from}–${to} de ${total}`}
+        <span className="font-mono text-xs text-slate-500">
+          {total === 0 ? "Sin resultados" : `${from}–${to} de ${total}`}
         </span>
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
-          className="rounded-md border border-slate-300 text-xs px-2 py-1"
+          className="rounded border border-slate-300 text-xs px-2 py-1 font-mono"
         >
           {pageSizeOptions.map((size) => (
             <option key={size} value={size}>
@@ -48,17 +48,17 @@ export default function Pagination({
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="px-3 py-1.5 rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 text-xs font-medium"
+          className="px-3 py-1.5 rounded border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-50 hover:border-brand-300 text-xs font-semibold"
         >
           Anterior
         </button>
-        <span className="text-xs text-slate-500">
-          Página {page} de {totalPages}
+        <span className="font-mono text-xs text-slate-500">
+          {page} / {totalPages}
         </span>
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="px-3 py-1.5 rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 text-xs font-medium"
+          className="px-3 py-1.5 rounded border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand-50 hover:border-brand-300 text-xs font-semibold"
         >
           Siguiente
         </button>

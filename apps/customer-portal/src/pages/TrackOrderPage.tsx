@@ -152,7 +152,7 @@ export default function TrackOrderPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-slate-900 text-white py-2 text-sm font-medium disabled:opacity-50"
+            className="w-full rounded-md bg-brand-600 hover:bg-brand-700 text-white py-2 text-sm font-medium disabled:opacity-50"
           >
             {loading ? "Consultando..." : "Consultar"}
           </button>
@@ -231,7 +231,7 @@ export default function TrackOrderPage() {
                     <a
                       href={result.pod.signatureUrl}
                       download={`firma-${result.orderNumber}.png`}
-                      className="inline-block mt-1 text-xs text-blue-700 font-medium underline"
+                      className="inline-block mt-1 text-xs text-brand-700 font-medium underline"
                     >
                       Descargar firma
                     </a>
@@ -301,7 +301,7 @@ export default function TrackOrderPage() {
                       type="button"
                       disabled={rating === 0 || feedbackSending}
                       onClick={handleSendFeedback}
-                      className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                      className="rounded-md bg-brand-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
                     >
                       {feedbackSending ? "Enviando..." : "Enviar valoración"}
                     </button>
@@ -343,7 +343,7 @@ export default function TrackOrderPage() {
                         setIncidentOpen(true);
                         setIncidentSent(false);
                       }}
-                      className="text-xs text-blue-700 font-medium underline"
+                      className="text-xs text-brand-700 font-medium underline"
                     >
                       Reportar incidencia
                     </button>
@@ -381,7 +381,7 @@ export default function TrackOrderPage() {
                         type="button"
                         disabled={incidentSending}
                         onClick={handleSendIncident}
-                        className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                        className="rounded-md bg-brand-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
                       >
                         {incidentSending ? "Enviando..." : "Enviar incidencia"}
                       </button>

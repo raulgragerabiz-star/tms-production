@@ -30,7 +30,15 @@ const colorMap: Record<string, string> = {
   escalated: "bg-orange-100 text-orange-700",
 };
 
+// 2026-09-09: retoque visual (mismo color por estado de siempre, solo
+// cambia la forma) para acercarse a los "chips" del panel de referencia que
+// aportó Raúl -- mayúsculas, fuente monoespaciada y esquina poco redondeada
+// en vez de píldora completa, en línea con el resto del rediseño.
 export default function StatusBadge({ status }: { status: string }) {
   const cls = colorMap[status] ?? "bg-slate-100 text-slate-700";
-  return <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{status}</span>;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded font-mono text-[0.68rem] font-bold uppercase tracking-wide whitespace-nowrap ${cls}`}>
+      {status}
+    </span>
+  );
 }

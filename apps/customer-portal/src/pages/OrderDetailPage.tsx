@@ -208,7 +208,7 @@ export default function OrderDetailPage() {
                       alt="Firma de quien recibió el pedido"
                       className="w-full max-w-sm border border-slate-200 rounded-md bg-slate-50"
                     />
-                    <a href={pod.signatureUrl} download={`firma-${order.orderNumber}.png`} className="inline-block mt-2 text-sm text-blue-700 font-medium underline">
+                    <a href={pod.signatureUrl} download={`firma-${order.orderNumber}.png`} className="inline-block mt-2 text-sm text-brand-700 font-medium underline">
                       Descargar firma
                     </a>
                   </div>
@@ -276,7 +276,7 @@ export default function OrderDetailPage() {
                   type="button"
                   disabled={rating === 0 || feedbackMutation.isPending}
                   onClick={() => feedbackMutation.mutate()}
-                  className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                  className="rounded-md bg-brand-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
                 >
                   {feedbackMutation.isPending ? "Enviando..." : "Enviar valoración"}
                 </button>
@@ -299,7 +299,7 @@ export default function OrderDetailPage() {
                     setIncidentOpen(true);
                     setIncidentSent(false);
                   }}
-                  className="text-sm text-blue-700 font-medium underline"
+                  className="text-sm text-brand-700 font-medium underline"
                 >
                   Reportar incidencia
                 </button>
@@ -337,7 +337,7 @@ export default function OrderDetailPage() {
                     type="button"
                     disabled={incidentMutation.isPending}
                     onClick={() => incidentMutation.mutate()}
-                    className="rounded-md bg-blue-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
+                    className="rounded-md bg-brand-700 text-white text-sm font-medium px-4 py-2 disabled:opacity-40"
                   >
                     {incidentMutation.isPending ? "Enviando..." : "Enviar incidencia"}
                   </button>
