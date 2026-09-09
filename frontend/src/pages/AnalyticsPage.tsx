@@ -55,6 +55,17 @@ interface CarrierRow {
   costReal: number;
 }
 
+interface ZoneRow {
+  zone: string;
+  weightKg: number;
+}
+
+interface AbcRow {
+  cls: "A" | "B" | "C" | "D";
+  customerCount: number;
+  weightKg: number;
+}
+
 interface HistoryResponse {
   range: { from: string; to: string; groupBy: "day" | "week" | "month" };
   totals: {
@@ -69,7 +80,26 @@ interface HistoryResponse {
   };
   buckets: Bucket[];
   byCarrier: CarrierRow[];
+  topZones: ZoneRow[];
+  customerAbc: AbcRow[];
 }
+
+// Colores fijos por clase ABC (mismo criterio del panel BI de referencia de
+// Raúl: A teal, B azul, C ámbar, D gris -- D es "resto", no una categoría con
+// peso propio, así que se apaga en gris en vez de sumarse a la paleta
+// categórica de series).
+const ABC_COLOR: Record<AbcRow["cls"], string> = {
+  A: "#178a70",
+  B: "#5b8def",
+  C: "#c9791f",
+  D: "#94a3b8",
+};
+const ABC_DESCRIPTION: Record<AbcRow["cls"], string> = {
+  A: "top 70% peso",
+  B: "70-90% peso",
+  C: "90-98% peso",
+  D: "resto",
+};
 
 interface WarehouseOption {
   id: string;
@@ -100,6 +130,11 @@ function formatPeriodLabel(period: string, groupBy: "day" | "week" | "month") {
 
 function formatEuros(n: number) {
   return `${n.toLocaleString("es-ES", { maximumFractionDigits: 0 })} €`;
+}
+
+function formatKg(kg: number) {
+  if (kg >= 1000) return `${(kg / 1000).toLocaleString("es-ES", { maximumFractionDigits: 1 })} t`;
+  return `${kg.toLocaleString("es-ES")} kg`;
 }
 
 export default function AnalyticsPage() {
@@ -233,6 +268,17 @@ export default function AnalyticsPage() {
             </div>
           )}
 
+          {data.topZones.length > 0 && (
+            <div className="grid md:grid-cols-2 gap-4 mb-6">
+              <ChartCard title="Top zonas por volumen" subtitle="Kilos totales del periodo, por provincia de destino">
+                <RankingBarChart items={data.topZones.map((z) => ({ label: z.zone, value: z.weightKg }))} color={PALETTE.slot1} valueFormatter={formatKg} />
+              </ChartCard>
+              <ChartCard title="Segmentación ABC de clientes" subtitle="Clasificación por peso acumulado (Pareto)">
+                <AbcDonutChart rows={data.customerAbc} />
+              </ChartCard>
+            </div>
+          )}
+
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100">
               <h2 className="text-sm font-semibold text-slate-700">Por transportista</h2>
@@ -271,13 +317,16 @@ export default function AnalyticsPage() {
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+function ChartCard({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
   const [asTable, setAsTable] = useState(false);
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
-        <button onClick={() => setAsTable((v) => !v)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+          {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
+        </div>
+        <button onClick={() => setAsTable((v) => !v)} className="text-xs text-brand-600 hover:text-brand-700 font-medium shrink-0">
           {asTable ? "Ver gráfico" : "Ver como tabla"}
         </button>
       </div>
@@ -562,6 +611,160 @@ function PeriodBarChart({
           <p className="text-slate-500">{valueFormatter(Number(hovered[valueKey]))}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// Ranking horizontal de barras ("Top zonas por volumen"): serie única, sin
+// necesidad de leyenda (el título ya dice qué mide) -- etiqueta de categoría a
+// la izquierda, barra con extremo redondeado de 4px, valor en mono al final.
+// Con 10 elementos como mucho, etiquetar cada barra directamente es más claro
+// que exigir pasar el ratón por encima de cada una.
+function RankingBarChart({
+  items,
+  color,
+  valueFormatter,
+  asTable,
+}: {
+  items: { label: string; value: number }[];
+  color: string;
+  valueFormatter: (v: number) => string;
+  asTable?: boolean;
+}) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+
+  if (asTable) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="text-left py-1 pr-3">Zona</th>
+              <th className="text-left py-1 pr-3">Peso</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {items.map((i) => (
+              <tr key={i.label}>
+                <td className="py-1 pr-3">{i.label}</td>
+                <td className="py-1 pr-3 font-mono">{valueFormatter(i.value)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return <p className="text-sm text-slate-400 py-6 text-center">Sin datos para este periodo.</p>;
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {items.map((i) => (
+        <div key={i.label} className="flex items-center gap-3">
+          <span className="w-24 shrink-0 text-xs text-slate-600 truncate" title={i.label}>
+            {i.label}
+          </span>
+          <div className="flex-1 h-3 bg-slate-100 rounded-sm overflow-hidden">
+            <div className="h-full rounded-r" style={{ width: `${(i.value / max) * 100}%`, backgroundColor: color }} />
+          </div>
+          <span className="w-20 shrink-0 text-right text-xs font-mono text-slate-600">{valueFormatter(i.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Dona de segmentación ABC de clientes: cada arco es el nº de clientes de esa
+// clase (no el peso, que por construcción del propio corte de Pareto rondaría
+// siempre 70/20/8/2 y no aportaría información) -- así se ve de un vistazo la
+// concentración real (p.ej. pocos clientes A cargan la mayoría del peso).
+// Leyenda siempre visible con el recuento de cada clase (nunca solo color),
+// hueco de 2px de superficie entre arcos.
+function AbcDonutChart({ rows, asTable }: { rows: AbcRow[]; asTable?: boolean }) {
+  const total = rows.reduce((acc, r) => acc + r.customerCount, 0);
+
+  if (asTable) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="text-left py-1 pr-3">Clase</th>
+              <th className="text-left py-1 pr-3">Clientes</th>
+              <th className="text-left py-1 pr-3">Peso</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.cls}>
+                <td className="py-1 pr-3 font-mono font-bold">{r.cls}</td>
+                <td className="py-1 pr-3">{r.customerCount}</td>
+                <td className="py-1 pr-3">{formatKg(r.weightKg)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  const size = 160;
+  const strokeWidth = 22;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const gapPx = 2;
+  let offsetAcc = 0;
+
+  return (
+    <div className="flex items-center gap-6 flex-wrap">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+          {total === 0 ? (
+            <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={PALETTE.gridline} strokeWidth={strokeWidth} />
+          ) : (
+            rows
+              .filter((r) => r.customerCount > 0)
+              .map((r) => {
+                const frac = r.customerCount / total;
+                const dash = frac * circumference;
+                const el = (
+                  <circle
+                    key={r.cls}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="none"
+                    stroke={ABC_COLOR[r.cls]}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${Math.max(0, dash - gapPx)} ${circumference - dash + gapPx}`}
+                    strokeDashoffset={-offsetAcc}
+                  />
+                );
+                offsetAcc += dash;
+                return el;
+              })
+          )}
+        </g>
+        <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fontSize={20} fontWeight={700} fill={PALETTE.textPrimary} fontFamily="monospace">
+          {total}
+        </text>
+        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fontSize={10} fill={PALETTE.muted}>
+          clientes
+        </text>
+      </svg>
+      <div className="space-y-1.5">
+        {rows.map((r) => (
+          <div key={r.cls} className="flex items-center gap-2 text-xs">
+            <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: ABC_COLOR[r.cls] }} />
+            <span className="font-mono font-bold text-slate-700">{r.cls}</span>
+            <span className="text-slate-500">{ABC_DESCRIPTION[r.cls]}</span>
+            <span className="ml-4 font-mono text-slate-600">{r.customerCount}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

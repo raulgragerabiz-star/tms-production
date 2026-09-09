@@ -60,7 +60,24 @@ dashboardRouter.get(
       },
       include: {
         loadPlan: { select: { weightOccupancyPct: true, palletOccupancyPct: true, distanceKm: true } },
-        stops: { select: { status: true } },
+        // Ampliado para los dos gráficos nuevos de Analítica ("Top zonas por
+        // volumen" y "Segmentación ABC de clientes"): hace falta el peso y el
+        // destino/cliente de cada parada, no solo su estado. Aditivo -- el
+        // resto de bloques que ya usaban `stops` (OTIF, nº de paradas) siguen
+        // leyendo `status` exactamente igual.
+        stops: {
+          select: {
+            status: true,
+            order: {
+              select: {
+                customerId: true,
+                customer: { select: { legalName: true } },
+                deliveryPoint: { select: { province: true, city: true } },
+                lines: { select: { lineWeightKg: true } },
+              },
+            },
+          },
+        },
         costSimulations: { where: { isSelected: true }, select: { estimatedCost: true } },
         carrier: { select: { id: true, legalName: true } },
         shipment: {
@@ -101,6 +118,16 @@ dashboardRouter.get(
 
     const buckets = new Map<string, Bucket>();
     const byCarrier = new Map<string, { carrierId: string; legalName: string; routes: number; incidents: number; costReal: number }>();
+    // "Top zonas por volumen": peso movido por provincia (o población si no
+    // hay provincia) del punto de entrega de cada parada -- aproximación real
+    // a la idea de "ranking de rutas/zonas" del panel BI de referencia que
+    // aportó Raúl, con datos que sí existen en el schema (no hay un código de
+    // ruta/zona propio como "NOR1"/"MAD 02" en este TMS).
+    const zoneWeight = new Map<string, number>();
+    // Segmentación ABC de clientes por peso acumulado (Pareto): mismo criterio
+    // que ya usa Product.abcClass para rotación de producto, aplicado aquí a
+    // clientes por el peso movido en el periodo seleccionado.
+    const customerWeight = new Map<string, { legalName: string; weightKg: number }>();
 
     for (const r of routes) {
       const key = bucketKey(r.routeDate, granularity);
@@ -127,7 +154,49 @@ dashboardRouter.get(
         c.costReal += costReal;
         byCarrier.set(r.carrier.id, c);
       }
+
+      for (const stop of r.stops) {
+        const order = stop.order;
+        const stopWeight = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
+        const zone = order.deliveryPoint.province || order.deliveryPoint.city || "Sin zona";
+        zoneWeight.set(zone, (zoneWeight.get(zone) ?? 0) + stopWeight);
+
+        const cw = customerWeight.get(order.customerId) ?? { legalName: order.customer.legalName, weightKg: 0 };
+        cw.weightKg += stopWeight;
+        customerWeight.set(order.customerId, cw);
+      }
     }
+
+    const topZones = [...zoneWeight.entries()]
+      .map(([zone, weightKg]) => ({ zone, weightKg: Math.round(weightKg) }))
+      .sort((a, b) => b.weightKg - a.weightKg)
+      .slice(0, 10);
+
+    // Clasificación ABC: A = clientes cuyo peso acumulado (de mayor a menor)
+    // llega hasta el 70% del total movido en el periodo; B hasta el 90%; C
+    // hasta el 98%; D el resto -- mismos cortes que muestra el panel de
+    // referencia de Raúl. El tamaño de cada "tarta" de la dona es el número de
+    // clientes en cada clase (revela la concentración real: pocos clientes
+    // grandes cargan la mayoría del peso), no el peso -- que por construcción
+    // rondaría siempre 70/20/8/2.
+    const sortedCustomers = [...customerWeight.values()].sort((a, b) => b.weightKg - a.weightKg);
+    const totalCustomerWeight = sortedCustomers.reduce((acc, c) => acc + c.weightKg, 0);
+    const abcClasses: Array<{ cls: "A" | "B" | "C" | "D"; customerCount: number; weightKg: number }> = [
+      { cls: "A", customerCount: 0, weightKg: 0 },
+      { cls: "B", customerCount: 0, weightKg: 0 },
+      { cls: "C", customerCount: 0, weightKg: 0 },
+      { cls: "D", customerCount: 0, weightKg: 0 },
+    ];
+    let cumulativeWeight = 0;
+    for (const c of sortedCustomers) {
+      cumulativeWeight += c.weightKg;
+      const cumulativePct = totalCustomerWeight > 0 ? (cumulativeWeight / totalCustomerWeight) * 100 : 100;
+      const bucket =
+        cumulativePct <= 70 ? abcClasses[0] : cumulativePct <= 90 ? abcClasses[1] : cumulativePct <= 98 ? abcClasses[2] : abcClasses[3];
+      bucket.customerCount += 1;
+      bucket.weightKg += c.weightKg;
+    }
+    const customerAbc = abcClasses.map((c) => ({ ...c, weightKg: Math.round(c.weightKg) }));
 
     const sortedBuckets = [...buckets.values()].sort((a, b) => a.period.localeCompare(b.period));
 
@@ -170,6 +239,8 @@ dashboardRouter.get(
       byCarrier: [...byCarrier.values()]
         .sort((a, b) => b.routes - a.routes)
         .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100 })),
+      topZones,
+      customerAbc,
     });
   })
 );
