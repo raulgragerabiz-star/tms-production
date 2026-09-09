@@ -85,7 +85,12 @@ const serviceSegmentLabel: Record<string, string> = {
 
 type Tab = "full_truck" | "pallet" | "surcharges" | "customer" | "zone";
 
-export default function RatesPage() {
+// 2026-09-09: "embedded" -- se usa desde el nuevo "Flota y Transportistas"
+// (pestaña Tarifas), que ya pone su propio título arriba; solo oculta el
+// h1 propio de esta pantalla, las 5 sub-pestañas (camión completo/paletería/
+// cliente/zona/suplementos) y el motor de tarifas siguen exactamente igual.
+// Sin este prop (uso independiente) el comportamiento no cambia en nada.
+export default function RatesPage({ embedded = false }: { embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>("full_truck");
   const [rateModalOpen, setRateModalOpen] = useState(false);
   const [surchargeModalOpen, setSurchargeModalOpen] = useState(false);
@@ -139,7 +144,7 @@ export default function RatesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-semibold text-slate-900">Tarifas</h1>
+        {embedded ? <div /> : <h1 className="text-xl font-semibold text-slate-900">Tarifas</h1>}
         <button
           onClick={handleNewClick}
           className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
@@ -168,13 +173,13 @@ export default function RatesPage() {
       {tab === "full_truck" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Vigencia</th>
-                <th className="text-left px-4 py-3">Km incluidos</th>
-                <th className="text-left px-4 py-3">Parada adicional</th>
-                <th className="text-left px-4 py-3">€/km extra</th>
+                <th className="text-right px-4 py-3">Km incluidos</th>
+                <th className="text-right px-4 py-3">Parada adicional</th>
+                <th className="text-right px-4 py-3">€/km extra</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -184,14 +189,14 @@ export default function RatesPage() {
                 </tr>
               )}
               {fullTruck.data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>
-                  <td className="px-4 py-3">{r.includedKm}</td>
-                  <td className="px-4 py-3">{Number(r.extraStopFee).toFixed(2)} €</td>
-                  <td className="px-4 py-3">{Number(r.extraKmFee).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{r.includedKm}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.extraStopFee).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.extraKmFee).toFixed(2)} €</td>
                 </tr>
               ))}
             </tbody>
@@ -202,13 +207,13 @@ export default function RatesPage() {
       {tab === "pallet" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Vigencia</th>
-                <th className="text-left px-4 py-3">Fijo/albarán</th>
-                <th className="text-left px-4 py-3">Bulto suelto</th>
-                <th className="text-left px-4 py-3">Peso máx/palé</th>
+                <th className="text-right px-4 py-3">Fijo/albarán</th>
+                <th className="text-right px-4 py-3">Bulto suelto</th>
+                <th className="text-right px-4 py-3">Peso máx/palé</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -218,14 +223,14 @@ export default function RatesPage() {
                 </tr>
               )}
               {pallet.data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>
-                  <td className="px-4 py-3">{Number(r.fixedFeePerNote).toFixed(2)} €</td>
-                  <td className="px-4 py-3">{Number(r.looseItemFee).toFixed(2)} €</td>
-                  <td className="px-4 py-3">{Number(r.maxWeightPerPalletKg).toFixed(0)} kg</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.fixedFeePerNote).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.looseItemFee).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.maxWeightPerPalletKg).toFixed(0)} kg</td>
                 </tr>
               ))}
             </tbody>
@@ -236,13 +241,13 @@ export default function RatesPage() {
       {tab === "customer" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Cliente</th>
                 <th className="text-left px-4 py-3">Servicio</th>
                 <th className="text-left px-4 py-3">Vigencia</th>
-                <th className="text-left px-4 py-3">Importe</th>
+                <th className="text-right px-4 py-3">Importe</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -252,14 +257,14 @@ export default function RatesPage() {
                 </tr>
               )}
               {customerRates.data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3">{r.customer.businessCode} — {r.customer.legalName}</td>
                   <td className="px-4 py-3">{serviceSegmentLabel[r.serviceType] ?? r.serviceType}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>
-                  <td className="px-4 py-3">{Number(r.fixedAmount).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.fixedAmount).toFixed(2)} €</td>
                 </tr>
               ))}
             </tbody>
@@ -270,13 +275,13 @@ export default function RatesPage() {
       {tab === "zone" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Zona / Provincia</th>
                 <th className="text-left px-4 py-3">Servicio</th>
                 <th className="text-left px-4 py-3">Vigencia</th>
-                <th className="text-left px-4 py-3">Importe</th>
+                <th className="text-right px-4 py-3">Importe</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -286,14 +291,14 @@ export default function RatesPage() {
                 </tr>
               )}
               {zoneRates.data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3">{r.zoneName}</td>
                   <td className="px-4 py-3">{serviceSegmentLabel[r.serviceType] ?? r.serviceType}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>
-                  <td className="px-4 py-3">{Number(r.fixedAmount).toFixed(2)} €</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.fixedAmount).toFixed(2)} €</td>
                 </tr>
               ))}
             </tbody>
@@ -304,12 +309,12 @@ export default function RatesPage() {
       {tab === "surcharges" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Tipo</th>
                 <th className="text-left px-4 py-3">Modo</th>
-                <th className="text-left px-4 py-3">Valor</th>
+                <th className="text-right px-4 py-3">Valor</th>
                 <th className="text-left px-4 py-3">Vigencia</th>
               </tr>
             </thead>
@@ -320,11 +325,11 @@ export default function RatesPage() {
                 </tr>
               )}
               {surcharges.data?.items.map((r) => (
-                <tr key={r.id} className="hover:bg-slate-50">
+                <tr key={r.id} className="hover:bg-brand-50/60">
                   <td className="px-4 py-3">{r.carrier.legalName}</td>
                   <td className="px-4 py-3">{surchargeTypeLabel[r.surchargeType] ?? r.surchargeType}</td>
                   <td className="px-4 py-3">{calculationModeLabel[r.calculationMode] ?? r.calculationMode}</td>
-                  <td className="px-4 py-3">{Number(r.value).toFixed(2)}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(r.value).toFixed(2)}</td>
                   <td className="px-4 py-3 text-slate-500">
                     {new Date(r.validFrom).toLocaleDateString("es-ES")} — {r.validTo ? new Date(r.validTo).toLocaleDateString("es-ES") : "vigente"}
                   </td>

@@ -8,16 +8,20 @@ const navItems = [
   { to: "/seguimiento", label: "Seguimiento" },
   { to: "/analitica", label: "Analítica" },
   { to: "/alertas", label: "Alertas" },
-  { to: "/tarifas", label: "Tarifas" },
   { to: "/retornos", label: "Retornos" },
   { to: "/facturacion", label: "Facturación" },
 ];
 
+// 2026-09-09: petición de Raúl -- "compactar todo lo relacionado con
+// transportista y flotas [en] un solo acceso en el menú lateral + pestañas".
+// Transportistas, Flota (que ya tenía Vehículos/Conductores/Tipos como
+// sub-pestañas) y el "Tarifas" de nivel superior de arriba se sustituyen por
+// un único acceso -- ver CarrierFleetPage, con las 5 pestañas que pidió
+// (Empresa, Tarifas, Vehículos, Conductores, Tipo de vehículo).
 const masterItems = [
   { to: "/maestros/clientes", label: "Clientes" },
   { to: "/maestros/productos", label: "Productos" },
-  { to: "/maestros/transportistas", label: "Transportistas" },
-  { to: "/maestros/flota", label: "Flota" },
+  { to: "/maestros/flota-transportistas", label: "Flota y Transportistas" },
   { to: "/maestros/usuarios", label: "Usuarios" },
   { to: "/maestros/almacenes", label: "Almacenes" },
   { to: "/maestros/zonas-influencia", label: "Zonas de influencia" },

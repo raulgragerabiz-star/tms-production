@@ -10,12 +10,10 @@ import AnalyticsPage from "@/pages/AnalyticsPage";
 import AnomaliesPage from "@/pages/AnomaliesPage";
 import CustomersPage from "@/pages/masters/CustomersPage";
 import ProductsPage from "@/pages/masters/ProductsPage";
-import CarriersPage from "@/pages/masters/CarriersPage";
-import VehiclesPage from "@/pages/masters/VehiclesPage";
+import CarrierFleetPage from "@/pages/masters/CarrierFleetPage";
 import UsersPage from "@/pages/masters/UsersPage";
 import WarehousesPage from "@/pages/masters/WarehousesPage";
 import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
-import RatesPage from "@/pages/RatesPage";
 import ReturnsPage from "@/pages/ReturnsPage";
 import BillingPage from "@/pages/BillingPage";
 
@@ -43,13 +41,11 @@ export default function App() {
         <Route path="seguimiento" element={<SeguimientoPage />} />
         <Route path="analitica" element={<AnalyticsPage />} />
         <Route path="alertas" element={<AnomaliesPage />} />
-        <Route path="tarifas" element={<RatesPage />} />
         <Route path="retornos" element={<ReturnsPage />} />
         <Route path="facturacion" element={<BillingPage />} />
         <Route path="maestros/clientes" element={<CustomersPage />} />
         <Route path="maestros/productos" element={<ProductsPage />} />
-        <Route path="maestros/transportistas" element={<CarriersPage />} />
-        <Route path="maestros/flota" element={<VehiclesPage />} />
+        <Route path="maestros/flota-transportistas" element={<CarrierFleetPage />} />
         <Route path="maestros/usuarios" element={<UsersPage />} />
         <Route path="maestros/almacenes" element={<WarehousesPage />} />
         <Route path="maestros/zonas-influencia" element={<InfluenceZonesPage />} />

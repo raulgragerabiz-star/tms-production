@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
+import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewDriverModal from "@/pages/masters/DriversModal";
 
@@ -43,8 +44,22 @@ interface VehicleTypeRow {
   heightM: string | null;
 }
 
-export default function VehiclesPage() {
-  const [tab, setTab] = useState<"vehicles" | "drivers" | "types">("vehicles");
+// 2026-09-09: "embedded" -- se usa desde el nuevo "Flota y Transportistas",
+// donde el tab activo (Vehículos/Conductores/Tipo de vehículo) lo decide la
+// barra de pestañas única de esa pantalla, no esta. Con `embedded`, esta
+// página deja de dibujar su propio título y su propia barra de pestañas, y
+// usa el `activeTab` que le pasan en vez de su estado interno. Sin `embedded`
+// (uso independiente, por si algún sitio la sigue montando suelta) el
+// comportamiento no cambia en absoluto -- mismo título, mismas 3 pestañas
+// propias, mismo estado interno de siempre.
+interface Props {
+  embedded?: boolean;
+  activeTab?: "vehicles" | "drivers" | "types";
+}
+
+export default function VehiclesPage({ embedded = false, activeTab }: Props) {
+  const [internalTab, setInternalTab] = useState<"vehicles" | "drivers" | "types">("vehicles");
+  const tab = embedded && activeTab ? activeTab : internalTab;
   const [driverModalOpen, setDriverModalOpen] = useState(false);
   const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
   const [qrVehicleId, setQrVehicleId] = useState<string | null>(null);
@@ -118,50 +133,65 @@ export default function VehiclesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-semibold text-slate-900">Flota</h1>
-        {tab === "drivers" && (
+      {!embedded && (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <h1 className="text-xl font-semibold text-slate-900">Flota</h1>
+            {tab === "drivers" && (
+              <button
+                onClick={() => setDriverModalOpen(true)}
+                className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
+              >
+                + Nuevo conductor
+              </button>
+            )}
+          </div>
+          <p className="text-sm text-slate-500 mb-4">Vehículos y conductores de la flota subcontratada.</p>
+
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setInternalTab("vehicles")}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "vehicles" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
+            >
+              Vehículos
+            </button>
+            <button
+              onClick={() => setInternalTab("drivers")}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "drivers" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
+            >
+              Conductores
+            </button>
+            <button
+              onClick={() => setInternalTab("types")}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "types" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
+            >
+              Tipos de vehículo
+            </button>
+          </div>
+        </>
+      )}
+
+      {embedded && tab === "drivers" && (
+        <div className="flex justify-end mb-3">
           <button
             onClick={() => setDriverModalOpen(true)}
             className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
           >
             + Nuevo conductor
           </button>
-        )}
-      </div>
-      <p className="text-sm text-slate-500 mb-4">Vehículos y conductores de la flota subcontratada.</p>
-
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={() => setTab("vehicles")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "vehicles" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
-        >
-          Vehículos
-        </button>
-        <button
-          onClick={() => setTab("drivers")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "drivers" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
-        >
-          Conductores
-        </button>
-        <button
-          onClick={() => setTab("types")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === "types" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"}`}
-        >
-          Tipos de vehículo
-        </button>
-      </div>
+        </div>
+      )}
 
       {tab === "vehicles" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Matrícula</th>
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Tipo</th>
-                <th className="text-left px-4 py-3">Cap. peso (kg)</th>
-                <th className="text-left px-4 py-3">Cap. palés</th>
+                <th className="text-right px-4 py-3">Cap. peso (kg)</th>
+                <th className="text-right px-4 py-3">Cap. palés</th>
                 <th className="text-left px-4 py-3">Admite superar palés</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Conductor</th>
@@ -175,17 +205,15 @@ export default function VehiclesPage() {
                 </tr>
               )}
               {vehiclesQuery.data?.items.map((v) => (
-                <tr key={v.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 font-mono text-xs">{v.plate}</td>
+                <tr key={v.id} className="hover:bg-brand-50/60">
+                  <td className="px-4 py-3 font-mono font-semibold text-xs">{v.plate}</td>
                   <td className="px-4 py-3">{v.carrier.legalName}</td>
                   <td className="px-4 py-3">{v.vehicleType.name}</td>
-                  <td className="px-4 py-3">{Number(v.vehicleType.maxWeightKg).toLocaleString("es-ES")}</td>
-                  <td className="px-4 py-3">{v.vehicleType.maxPallets}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(v.vehicleType.maxWeightKg).toLocaleString("es-ES")}</td>
+                  <td className="px-4 py-3 text-right font-mono text-slate-600">{v.vehicleType.maxPallets}</td>
                   <td className="px-4 py-3">{v.vehicleType.allowsExceedingPallets ? "Sí" : "No"}</td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${v.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                      {v.active ? "Activo" : "Baja"}
-                    </span>
+                    <Chip color={v.active ? "teal" : "slate"}>{v.active ? "Activo" : "Baja"}</Chip>
                   </td>
                   <td className="px-4 py-3">
                     {assigningVehicleId === v.id ? (
@@ -227,7 +255,7 @@ export default function VehiclesPage() {
       {tab === "drivers" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Nombre</th>
                 <th className="text-left px-4 py-3">NIF</th>
@@ -251,22 +279,22 @@ export default function VehiclesPage() {
               {driversQuery.data?.items.map((d) => {
                 const shift = activeShiftByDriverId.get(d.id);
                 return (
-                  <tr key={d.id} className="hover:bg-slate-50">
+                  <tr key={d.id} className="hover:bg-brand-50/60">
                     <td className="px-4 py-3 font-medium">{d.fullName}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{d.taxId}</td>
+                    <td className="px-4 py-3 font-mono font-semibold text-xs">{d.taxId}</td>
                     <td className="px-4 py-3 text-slate-500">{d.phone ?? "—"}</td>
                     <td className="px-4 py-3">{d.carrier.legalName}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${d.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                        {d.active ? "Activo" : "Baja"}
-                      </span>
+                      <Chip color={d.active ? "teal" : "slate"}>{d.active ? "Activo" : "Baja"}</Chip>
                     </td>
                     <td className="px-4 py-3">
                       {shift ? (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                          En turno desde {new Date(shift.startedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
-                          {shift.vehicle?.plate ? ` · ${shift.vehicle.plate}` : ""}
-                        </span>
+                        <Chip color="teal">
+                          {`En turno desde ${new Date(shift.startedAt).toLocaleTimeString("es-ES", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}${shift.vehicle?.plate ? ` · ${shift.vehicle.plate}` : ""}`}
+                        </Chip>
                       ) : (
                         <span className="text-xs text-slate-400">Sin jornada abierta</span>
                       )}
@@ -282,10 +310,10 @@ export default function VehiclesPage() {
       {tab === "types" && (
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+            <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
               <tr>
                 <th className="text-left px-4 py-3">Tipo</th>
-                <th className="text-left px-4 py-3">Cap. peso (kg)</th>
+                <th className="text-right px-4 py-3">Cap. peso (kg)</th>
                 <th className="text-left px-4 py-3">Cap. palés</th>
                 <th className="text-left px-4 py-3">Volumen (m³)</th>
                 <th className="text-left px-4 py-3">Largo (m)</th>
@@ -416,9 +444,9 @@ function VehicleTypeTableRow({
   useEffect(() => setHeightM(vehicleType.heightM ?? ""), [vehicleType.heightM]);
 
   return (
-    <tr>
+    <tr className="hover:bg-brand-50/60">
       <td className="px-4 py-3 font-medium text-slate-800">{vehicleType.name}</td>
-      <td className="px-4 py-3 text-slate-500">{Number(vehicleType.maxWeightKg).toLocaleString("es-ES")}</td>
+      <td className="px-4 py-3 text-right font-mono text-slate-600">{Number(vehicleType.maxWeightKg).toLocaleString("es-ES")}</td>
       <td className="px-4 py-2">
         <input
           type="number"
