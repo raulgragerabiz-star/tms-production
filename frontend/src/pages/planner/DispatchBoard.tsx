@@ -15,6 +15,15 @@ import { useRealtimeChannel } from "@/lib/realtime";
 // vez de /routes/planner-board, porque aquí interesan TODAS las rutas del
 // día (también las ya asignadas/confirmadas/en curso), no solo las que
 // todavía se están montando.
+//
+// Fase 7: la maqueta original dejaba un hueco muerto entre la tabla y el
+// mapa, y el mapa se veía pequeño para lo que hay que vigilar en un
+// despacho real. Se sustituye ese hueco por un panel central (estilo Bringg)
+// que siempre tiene contenido -- por defecto, la lista de rutas del día (lo
+// que antes eran unas píldoras sueltas bajo el mapa); al seleccionar una
+// parada o una ruta, ese mismo panel pasa a mostrar su ficha (conductor,
+// vehículo, transportista, posición, contacto) con accesos directos para
+// centrar el mapa o llamar. El mapa gana espacio y altura.
 const POLL_INTERVAL_MS = 20_000;
 
 interface StopRow {
@@ -45,7 +54,10 @@ interface RouteRow {
     id: string;
     status: string;
     driverId: string | null;
-    driver: { fullName: string } | null;
+    // Fase 7: se suma el teléfono del conductor (ya existía en el modelo,
+    // solo faltaba pedirlo aquí) para poder ofrecer la acción "Llamar" en el
+    // panel de detalle.
+    driver: { fullName: string; phone: string | null } | null;
     lastPosition: { lat: number | null; lng: number | null; occurredAt: string } | null;
   } | null;
   // Fase 6: geometría real por carretera (OpenRouteService) -- null si no hay
@@ -65,6 +77,10 @@ interface Props {
   onManageRoute: (routeId: string) => void;
 }
 
+// Qué se muestra en el panel central: nada (lista de rutas por defecto), una
+// ruta completa, o una parada concreta dentro de una ruta.
+type Selection = { kind: "route"; routeId: string } | { kind: "stop"; stopId: string } | null;
+
 const GETAFE_CENTER = { lat: 40.3058, lng: -3.7327 };
 
 function timeAgo(iso: string): string {
@@ -74,8 +90,14 @@ function timeAgo(iso: string): string {
   return `hace ${Math.round(minutes / 60)} h`;
 }
 
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
+}
+
 export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }: Props) {
-  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<Selection>(null);
   const queryClient = useQueryClient();
   const queryKey = ["dispatch-board", warehouseId, routeDate];
 
@@ -167,6 +189,21 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
     return rows;
   }, [routes]);
 
+  const selectedStopId = selection?.kind === "stop" ? selection.stopId : null;
+
+  // Ficha resuelta de la selección actual (ruta, y parada si aplica) -- si la
+  // selección apunta a algo que ya no está en los datos (p. ej. la ruta se
+  // cerró y desapareció de este día), se ignora sola sin romper nada.
+  const selectedEntry = useMemo(() => {
+    if (!selection) return null;
+    if (selection.kind === "stop") {
+      const found = stopRows.find((r) => r.stop.id === selection.stopId);
+      return found ? { route: found.route, stop: found.stop } : null;
+    }
+    const route = routes.find((r) => r.id === selection.routeId);
+    return route ? { route, stop: null as StopRow | null } : null;
+  }, [selection, stopRows, routes]);
+
   const mapPoints: MapPoint[] = useMemo(() => {
     const points: MapPoint[] = [];
     const warehouse = routes[0]?.warehouse;
@@ -199,6 +236,25 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
     return points;
   }, [routes, routeColorMap, selectedStopId]);
 
+  // Fase 7: punto sobre el que se centra el mapa cuando hay algo
+  // seleccionado en el panel -- prioriza la parada elegida, luego la
+  // posición en vivo del vehículo, luego el almacén. Sin selección, el mapa
+  // vuelve solo a encuadrar todos los puntos (comportamiento de siempre).
+  const focusPoint = useMemo(() => {
+    if (!selectedEntry) return null;
+    const { route, stop } = selectedEntry;
+    if (stop?.order.deliveryPoint.lat != null && stop.order.deliveryPoint.lng != null) {
+      return { lat: stop.order.deliveryPoint.lat, lng: stop.order.deliveryPoint.lng };
+    }
+    if (route.shipment?.lastPosition?.lat != null && route.shipment?.lastPosition?.lng != null) {
+      return { lat: route.shipment.lastPosition.lat, lng: route.shipment.lastPosition.lng };
+    }
+    if (route.warehouse.lat != null && route.warehouse.lng != null) {
+      return { lat: route.warehouse.lat, lng: route.warehouse.lng };
+    }
+    return null;
+  }, [selectedEntry]);
+
   const ganttRoutes: GanttRoute[] = useMemo(
     () =>
       routes.map((r) => ({
@@ -221,6 +277,14 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
       })),
     [routes, routeColorMap]
   );
+
+  function selectStop(stopId: string) {
+    setSelection((current) => (current?.kind === "stop" && current.stopId === stopId ? null : { kind: "stop", stopId }));
+  }
+
+  function selectRoute(routeId: string) {
+    setSelection((current) => (current?.kind === "route" && current.routeId === routeId ? null : { kind: "route", routeId }));
+  }
 
   return (
     <div>
@@ -250,8 +314,10 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
       </div>
 
       <div className="grid grid-cols-12 gap-4">
-        {/* Tabla de paradas -- alternativa accesible del Gantt de abajo */}
-        <div className="col-span-5">
+        {/* Tabla de paradas -- alternativa accesible del Gantt de abajo. El
+            color de cada ruta se indica con un borde a la izquierda en vez de
+            una columna aparte, para dejar sitio a las demás columnas. */}
+        <div className="col-span-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Paradas del día</p>
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="max-h-[520px] overflow-y-auto">
@@ -260,21 +326,20 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
                   <tr>
                     <th className="text-left px-3 py-2">Hora</th>
                     <th className="text-left px-3 py-2">Pedido / cliente</th>
-                    <th className="text-left px-3 py-2">Ruta</th>
                     <th className="text-left px-3 py-2">Estado</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {isLoading && (
                     <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
                         Cargando…
                       </td>
                     </tr>
                   )}
                   {!isLoading && stopRows.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-3 py-6 text-center text-slate-400">
+                      <td colSpan={3} className="px-3 py-6 text-center text-slate-400">
                         No hay paradas planificadas este día.
                       </td>
                     </tr>
@@ -282,7 +347,8 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
                   {stopRows.map(({ stop, route }) => (
                     <tr
                       key={stop.id}
-                      onClick={() => setSelectedStopId(stop.id === selectedStopId ? null : stop.id)}
+                      onClick={() => selectStop(stop.id)}
+                      style={{ borderLeft: `3px solid ${routeColorMap.get(route.id) ?? PENDING_COLOR}` }}
                       className={`cursor-pointer ${stop.id === selectedStopId ? "bg-brand-50" : "hover:bg-brand-50/60"}`}
                     >
                       <td className="px-3 py-2 font-mono text-slate-600 whitespace-nowrap">
@@ -290,16 +356,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
                       </td>
                       <td className="px-3 py-2">
                         <p className="font-mono font-medium text-slate-800">{stop.order.orderNumber}</p>
-                        <p className="text-xs text-slate-400 truncate max-w-[180px]">{stop.order.customer.legalName}</p>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="flex items-center gap-1.5 text-xs text-slate-600">
-                          <span
-                            className="w-2 h-2 rounded-full inline-block shrink-0"
-                            style={{ backgroundColor: routeColorMap.get(route.id) }}
-                          />
-                          <span className="truncate max-w-[110px]">{routeLabel(route)}</span>
-                        </span>
+                        <p className="text-xs text-slate-400 truncate max-w-[140px]">{stop.order.customer.legalName}</p>
                       </td>
                       <td className="px-3 py-2">
                         <StatusBadge status={stop.status} />
@@ -312,24 +369,186 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
           </div>
         </div>
 
-        {/* Mapa en vivo */}
-        <div className="col-span-7">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Mapa en vivo</p>
-          <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height={330} />
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {routes.map((r) => (
+        {/* Fase 7: panel central -- por defecto, lista de rutas del día (con
+            acceso directo a "Gestionar"); al seleccionar una parada o una
+            ruta, muestra su ficha completa. Nunca queda vacío. */}
+        <div className="col-span-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              {selectedEntry ? "Detalle" : "Rutas del día"}
+            </p>
+            {selectedEntry && (
               <button
-                key={r.id}
-                onClick={() => onManageRoute(r.id)}
-                className="flex items-center gap-1.5 text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 hover:border-brand-300"
+                onClick={() => setSelection(null)}
+                className="text-[11px] text-slate-400 hover:text-slate-600 font-medium"
               >
-                <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: routeColorMap.get(r.id) }} />
-                <span className="font-mono">{routeLabel(r)}</span>
-                <StatusBadge status={r.status} />
+                ‹ Volver al listado
               </button>
-            ))}
+            )}
           </div>
+
+          {!selectedEntry && (
+            <div className="space-y-2 max-h-[520px] overflow-y-auto pr-0.5">
+              {routes.length === 0 && !isLoading && (
+                <p className="text-sm text-slate-400 bg-white border border-slate-200 rounded-xl p-4 text-center">
+                  No hay rutas este día.
+                </p>
+              )}
+              {routes.map((r) => (
+                <button
+                  key={r.id}
+                  onClick={() => selectRoute(r.id)}
+                  className="w-full text-left bg-white border border-slate-200 rounded-lg p-3 text-sm hover:border-brand-300 transition"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: routeColorMap.get(r.id) }} />
+                      <span className="font-mono font-medium text-slate-800 truncate">{routeLabel(r)}</span>
+                    </span>
+                    <StatusBadge status={r.status} />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    {r.stops.length} paradas
+                    {r.loadPlan?.distanceKm ? ` · ${Math.round(Number(r.loadPlan.distanceKm))} km` : ""}
+                    {r.loadPlan?.estimatedDurationMin ? ` · ${Math.round(r.loadPlan.estimatedDurationMin)} min` : ""}
+                  </p>
+                  {r.shipment?.lastPosition?.occurredAt && (
+                    <p className="text-[11px] text-slate-400 mt-0.5 font-mono">
+                      Posición {timeAgo(r.shipment.lastPosition.occurredAt)}
+                    </p>
+                  )}
+                  <div className="mt-2">
+                    <span
+                      role="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onManageRoute(r.id);
+                      }}
+                      className="inline-block text-brand-600 hover:text-brand-700 text-xs font-medium"
+                    >
+                      Gestionar →
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selectedEntry && (
+            <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-3">
+              {/* Cabecera: conductor si lo hay, si no transportista/vehículo */}
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-full bg-slate-800 text-white text-xs font-semibold flex items-center justify-center shrink-0">
+                  {selectedEntry.route.shipment?.driver ? initials(selectedEntry.route.shipment.driver.fullName) : "—"}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-800 truncate">
+                    {selectedEntry.route.shipment?.driver?.fullName ?? "Sin conductor asignado"}
+                  </p>
+                  <p className="text-xs text-slate-400 truncate">
+                    {selectedEntry.route.vehicle?.plate ?? "Sin vehículo"} · {selectedEntry.route.carrier?.legalName ?? "Sin transportista"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <StatusBadge status={selectedEntry.route.status} />
+                {selectedEntry.route.shipment?.lastPosition?.occurredAt && (
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Posición {timeAgo(selectedEntry.route.shipment.lastPosition.occurredAt)}
+                  </span>
+                )}
+              </div>
+
+              {/* Acciones rápidas -- estilo Bringg (localizar/llamar), usando
+                  solo datos reales: sin valoración ni foto porque todavía no
+                  existe esa información en la ficha del conductor. */}
+              <div className="flex flex-wrap gap-2 pt-1">
+                {focusPoint && (
+                  <span className="text-xs bg-slate-100 text-slate-500 rounded-md px-2 py-1">
+                    📍 Centrado en el mapa
+                  </span>
+                )}
+                {selectedEntry.route.shipment?.driver?.phone ? (
+                  <a
+                    href={`tel:${selectedEntry.route.shipment.driver.phone}`}
+                    className="text-xs bg-slate-900 hover:bg-slate-800 text-white rounded-md px-2.5 py-1.5"
+                  >
+                    📞 Llamar al conductor
+                  </a>
+                ) : (
+                  <span className="text-xs bg-slate-50 text-slate-400 rounded-md px-2.5 py-1.5">Sin teléfono de conductor</span>
+                )}
+                <button
+                  onClick={() => onManageRoute(selectedEntry.route.id)}
+                  className="text-xs bg-brand-600 hover:bg-brand-700 text-white rounded-md px-2.5 py-1.5"
+                >
+                  Gestionar ruta
+                </button>
+              </div>
+
+              {/* Ficha de la parada, si la selección es una parada concreta */}
+              {selectedEntry.stop && (
+                <div className="pt-3 border-t border-slate-100 space-y-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Parada {selectedEntry.stop.sequence} · {selectedEntry.stop.order.orderNumber}
+                  </p>
+                  <p className="font-medium text-slate-700">{selectedEntry.stop.order.customer.legalName}</p>
+                  <p className="text-xs text-slate-500">
+                    {selectedEntry.stop.order.deliveryPoint.address}
+                    {selectedEntry.stop.order.deliveryPoint.city ? `, ${selectedEntry.stop.order.deliveryPoint.city}` : ""}
+                  </p>
+                  {(selectedEntry.stop.order.deliveryTimeWindowFrom || selectedEntry.stop.order.deliveryTimeWindowTo) && (
+                    <p className="text-xs text-slate-500">
+                      Ventana: {selectedEntry.stop.order.deliveryTimeWindowFrom ?? "—"} - {selectedEntry.stop.order.deliveryTimeWindowTo ?? "—"}
+                    </p>
+                  )}
+                  <div className="flex items-center justify-between pt-1">
+                    <StatusBadge status={selectedEntry.stop.status} />
+                    {selectedEntry.stop.order.deliveryPoint.contactPhone && (
+                      <a
+                        href={`tel:${selectedEntry.stop.order.deliveryPoint.contactPhone}`}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                      >
+                        📞 Llamar al cliente
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Sin parada concreta seleccionada: mini listado de las paradas
+                  de la ruta para poder entrar directamente en una de ellas. */}
+              {!selectedEntry.stop && selectedEntry.route.stops.length > 0 && (
+                <div className="pt-3 border-t border-slate-100">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
+                    Paradas ({selectedEntry.route.stops.length})
+                  </p>
+                  <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                    {selectedEntry.route.stops.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => selectStop(s.id)}
+                        className="w-full flex items-center justify-between text-left text-xs px-1.5 py-1 rounded hover:bg-brand-50/60"
+                      >
+                        <span className="truncate">
+                          {s.sequence}. {s.order.customer.legalName}
+                        </span>
+                        <StatusBadge status={s.status} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Mapa en vivo -- más ancho y más alto que antes de la Fase 7 para
+            que sea realmente el foco de la vista de Despacho. */}
+        <div className="col-span-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Mapa en vivo</p>
+          <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height={460} focus={focusPoint} />
         </div>
       </div>
 
@@ -342,7 +561,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
           routes={ganttRoutes}
           routeDateIso={routeDate}
           selectedStopId={selectedStopId}
-          onSelectStop={(id) => setSelectedStopId(id === selectedStopId ? null : id)}
+          onSelectStop={(id) => selectStop(id)}
         />
       </div>
     </div>

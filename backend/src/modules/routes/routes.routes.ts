@@ -276,7 +276,7 @@ routesRouter.get(
             status: true,
             driverId: true,
             departedAt: true,
-            driver: { select: { fullName: true } },
+            driver: { select: { fullName: true, phone: true } },
             trackingEvents: {
               where: { lat: { not: null }, lng: { not: null } },
               orderBy: { occurredAt: "desc" },

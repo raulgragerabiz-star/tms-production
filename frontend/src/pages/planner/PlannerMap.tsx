@@ -31,6 +31,12 @@ interface Props {
   points: MapPoint[];
   lines?: MapLine[];
   height?: number;
+  // Fase 7 (Despacho más productivo): al fijar `focus` el mapa se desplaza a
+  // ese punto concreto (p. ej. la parada o el vehículo seleccionado en el
+  // panel lateral) en vez de reencuadrar todos los puntos. Opcional -- quien
+  // no lo pase (SeguimientoPage, DragDropBoard) sigue con el comportamiento
+  // de siempre.
+  focus?: { lat: number; lng: number } | null;
 }
 
 // 2026-09-09: paleta categórica alineada con la del resto del rediseño
@@ -44,10 +50,25 @@ export const WAREHOUSE_COLOR = "#111827"; // slate-900: almacén de origen
 // Ajusta el encuadre del mapa a los puntos disponibles cada vez que cambian,
 // en vez de dejar center/zoom fijos -- así funciona de verdad como visor de
 // ruta (se ve la ruta completa, no solo el centro de Getafe).
-function FitToPoints({ center, points }: { center: { lat: number; lng: number }; points: MapPoint[] }) {
+function FitToPoints({
+  center,
+  points,
+  focus,
+}: {
+  center: { lat: number; lng: number };
+  points: MapPoint[];
+  focus?: { lat: number; lng: number } | null;
+}) {
   const map = useMap();
 
   useEffect(() => {
+    // Fase 7: con un punto de foco concreto (selección en el panel lateral
+    // de Despacho), nos acercamos a él en vez de reencuadrar todos los
+    // puntos -- así "centrar en el mapa" tiene efecto real.
+    if (focus) {
+      map.flyTo([focus.lat, focus.lng], Math.max(map.getZoom(), 14), { duration: 0.6 });
+      return;
+    }
     if (points.length === 0) {
       map.setView([center.lat, center.lng], 9);
     } else if (points.length === 1) {
@@ -59,12 +80,12 @@ function FitToPoints({ center, points }: { center: { lat: number; lng: number };
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, center.lat, center.lng, points.map((p) => `${p.id}:${p.lat}:${p.lng}`).join("|")]);
+  }, [map, center.lat, center.lng, points.map((p) => `${p.id}:${p.lat}:${p.lng}`).join("|"), focus?.lat, focus?.lng]);
 
   return null;
 }
 
-export default function PlannerMap({ center, points, lines = [], height = 480 }: Props) {
+export default function PlannerMap({ center, points, lines = [], height = 480, focus = null }: Props) {
   const initialCenter = useMemo<[number, number]>(() => [center.lat, center.lng], []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -75,7 +96,7 @@ export default function PlannerMap({ center, points, lines = [], height = 480 }:
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           maxZoom={19}
         />
-        <FitToPoints center={center} points={points} />
+        <FitToPoints center={center} points={points} focus={focus} />
         {lines.map((line) => (
           <Polyline
             key={line.id}
