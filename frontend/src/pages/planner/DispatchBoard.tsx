@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
-import PlannerMap, { MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
+import PlannerMap, { MapLine, MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
 import DispatchGantt, { GanttRoute } from "./DispatchGantt";
+import { useRealtimeChannel } from "@/lib/realtime";
 
 // Fase 5b (Planificador estilo Bringg): vista "Despacho" -- tabla de paradas
 // del día + mapa en vivo + línea de tiempo (Gantt), las tres sincronizadas
@@ -47,6 +48,10 @@ interface RouteRow {
     driver: { fullName: string } | null;
     lastPosition: { lat: number | null; lng: number | null; occurredAt: string } | null;
   } | null;
+  // Fase 6: geometría real por carretera (OpenRouteService) -- null si no hay
+  // clave ORS configurada, si falta alguna coordenada, o si la llamada falló;
+  // el mapa simplemente no dibuja esa línea en ese caso.
+  geometry: { lat: number; lng: number }[] | null;
 }
 
 interface DispatchBoardData {
@@ -71,9 +76,11 @@ function timeAgo(iso: string): string {
 
 export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }: Props) {
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryKey = ["dispatch-board", warehouseId, routeDate];
 
   const { data, isLoading } = useQuery({
-    queryKey: ["dispatch-board", warehouseId, routeDate],
+    queryKey,
     queryFn: async () =>
       (
         await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, date: routeDate } })
@@ -81,7 +88,54 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
     refetchInterval: POLL_INTERVAL_MS,
   });
 
+  // Fase 6: canal en vivo -- cuando llega un evento de posición/estado, se
+  // actualiza directamente la cache de React Query (sin esperar al próximo
+  // sondeo). Solo se suscribe cuando hay un almacén concreto elegido (la
+  // sala en el backend es por almacén); con "Todos los almacenes" esta
+  // pantalla se queda con el sondeo de siempre.
+  const realtimeStatus = useRealtimeChannel(warehouseId ? { warehouseId } : null, (msg) => {
+    if (msg.type === "position_update") {
+      const { shipmentId, lat, lng, occurredAt } = msg.payload as { shipmentId: string; lat: number; lng: number; occurredAt: string };
+      queryClient.setQueryData<DispatchBoardData | undefined>(queryKey, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((r) =>
+                r.shipment?.id === shipmentId ? { ...r, shipment: { ...r.shipment, lastPosition: { lat, lng, occurredAt } } } : r
+              ),
+            }
+          : current
+      );
+      return;
+    }
+    if (msg.type === "stop_status_changed") {
+      const { routeStopId, status } = msg.payload as { routeStopId: string; status: string };
+      queryClient.setQueryData<DispatchBoardData | undefined>(queryKey, (current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map((r) => ({ ...r, stops: r.stops.map((s) => (s.id === routeStopId ? { ...s, status } : s)) })),
+            }
+          : current
+      );
+      return;
+    }
+    // route_status_changed / shipment_status_changed / auto_plan_completed /
+    // eta_recalculated: cambian datos que no vale la pena parchear a mano
+    // (relaciones completas, ETAs recalculadas) -- se pide un refetch directo,
+    // que sigue siendo más inmediato que esperar el sondeo de 20s.
+    queryClient.invalidateQueries({ queryKey });
+  });
+
   const routes = data?.items ?? [];
+
+  const mapLines: MapLine[] = useMemo(
+    () =>
+      routes
+        .filter((r) => r.geometry && r.geometry.length > 0)
+        .map((r, idx) => ({ id: `geo-${r.id}`, color: ROUTE_COLORS[idx % ROUTE_COLORS.length], points: r.geometry! })),
+    [routes]
+  );
 
   const routeColorMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -177,6 +231,16 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
         <span>
           <span className="font-mono font-semibold text-slate-700">{stopRows.length}</span> paradas
         </span>
+        {/* Fase 6: indicador del canal en vivo -- si se corta, esta pantalla
+            sigue funcionando igual con el sondeo de 20s, solo que sin el punto verde. */}
+        {warehouseId && (
+          <span className="flex items-center gap-1.5 text-xs">
+            <span
+              className={`w-1.5 h-1.5 rounded-full inline-block ${realtimeStatus === "live" ? "bg-emerald-500" : "bg-slate-300"}`}
+            />
+            {realtimeStatus === "live" ? "En vivo" : "Sondeo cada 20s"}
+          </span>
+        )}
         {(data?.unassignedOrdersCount ?? 0) > 0 && (
           <span className="text-amber-600">
             <span className="font-mono font-semibold">{data?.unassignedOrdersCount}</span> pedidos de este día sin
@@ -251,7 +315,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
         {/* Mapa en vivo */}
         <div className="col-span-7">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Mapa en vivo</p>
-          <PlannerMap center={GETAFE_CENTER} points={mapPoints} height={330} />
+          <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height={330} />
 
           <div className="mt-3 flex flex-wrap gap-2">
             {routes.map((r) => (

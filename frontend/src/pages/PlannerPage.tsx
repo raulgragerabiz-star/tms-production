@@ -48,6 +48,7 @@ export default function PlannerPage() {
   const [warehouseId, setWarehouseId] = useState("");
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [serviceType, setServiceType] = useState<ServiceType>("paleteria");
+  const [isAutoPlanning, setIsAutoPlanning] = useState(false);
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -63,6 +64,32 @@ export default function PlannerPage() {
   function openNewRouteFromDrop(orderId: string) {
     setPresetOrderId(orderId);
     setModalOpen(true);
+  }
+
+  // Fase 6: planificación automática -- agrupa y secuencia geográficamente
+  // (motor de optimización OpenRouteService/VROOM) los pedidos validados sin
+  // ruta todavía del almacén/fecha/servicio elegidos. Crea rutas "draft"
+  // igual que si se hubieran montado a mano; la asignación de transportista
+  // sigue el flujo ya existente (Gestionar ruta / comparar coste).
+  async function handleAutoPlan() {
+    if (!warehouseId) {
+      showError("Elige primero un almacén concreto para planificar automáticamente");
+      return;
+    }
+    setIsAutoPlanning(true);
+    try {
+      const { data } = await api.post("/routes/auto-plan", { warehouseId, routeDate, serviceType });
+      if (data.routesCreated === 0) {
+        showError(data.message ?? "No se ha podido crear ninguna ruta con los pedidos pendientes de ese día");
+      } else {
+        const extra = data.ordersUnassigned > 0 ? ` (${data.ordersUnassigned} pedidos quedaron sin encajar)` : "";
+        showSuccess(`${data.routesCreated} ruta(s) creada(s) automáticamente, ${data.ordersPlanned} pedidos planificados${extra}.`);
+      }
+    } catch (err: any) {
+      showError(err?.response?.data?.message ?? "No se pudo completar la planificación automática");
+    } finally {
+      setIsAutoPlanning(false);
+    }
   }
 
   return (
@@ -237,6 +264,25 @@ export default function PlannerPage() {
               onChange={(e) => setRouteDate(e.target.value)}
               className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
             />
+            <select
+              value={serviceType}
+              onChange={(e) => setServiceType(e.target.value as ServiceType)}
+              className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+            >
+              {serviceTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleAutoPlan}
+              disabled={isAutoPlanning}
+              className="ml-auto bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+              title="Agrupa y secuencia geográficamente (OpenRouteService) los pedidos validados sin ruta de este almacén/fecha/servicio"
+            >
+              {isAutoPlanning ? "Planificando…" : "Planificar automáticamente"}
+            </button>
           </div>
 
           <DispatchBoard warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />

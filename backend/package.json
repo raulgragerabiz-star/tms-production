@@ -16,6 +16,7 @@
     "db:import-surtido": "tsx prisma/import-surtido.ts",
     "db:backfill-demo-cp": "tsx prisma/backfill-demo-postal-codes.ts",
     "db:fix-order-cp": "tsx prisma/fix-order-postal-code.ts",
+    "postgis:setup": "tsx src/scripts/setup-postgis.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "npm run test && npm run test:integration"
@@ -30,9 +31,11 @@
     "express-async-errors": "^3.1.1",
     "express-rate-limit": "^7.4.1",
     "helmet": "^7.1.0",
+    "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "uuid": "^9.0.1",
+    "ws": "^8.18.0",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
@@ -45,6 +48,7 @@
     "@types/node": "^20.16.5",
     "@types/supertest": "^6.0.2",
     "@types/uuid": "^9.0.8",
+    "@types/ws": "^8.5.12",
     "prisma": "^5.20.0",
     "supertest": "^7.0.0",
     "tsc-alias": "^1.8.10",

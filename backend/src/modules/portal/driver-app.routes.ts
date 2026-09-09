@@ -7,9 +7,28 @@ import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { requireDriverApp } from "@/middleware/scoped-auth";
 import { resolveVehicleFromQrToken } from "@/modules/vehicles/vehicle-qr.service";
+import { broadcastToShipment, broadcastToWarehouse } from "@/realtime/ws.server";
+import { maybeRecalculateEta } from "@/modules/routing/eta-recalc.service";
 
 export const driverAppRouter = Router();
 driverAppRouter.use(requireDriverApp);
+
+// Fase 6: mismo helper "avisa y no rompas nada si falla" que en
+// shipments.routes.ts, para las notificaciones en vivo que salen desde la
+// App Conductor (llegada/entrega/cambio de estado de envío).
+async function notifyShipmentChange(shipmentId: string, type: string, payload: Record<string, unknown>) {
+  try {
+    const shipment = await prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: { route: { select: { warehouseId: true } } },
+    });
+    broadcastToShipment(shipmentId, type, { shipmentId, ...payload });
+    if (shipment?.route.warehouseId) broadcastToWarehouse(shipment.route.warehouseId, type, { shipmentId, ...payload });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[realtime] no se pudo notificar el cambio en vivo:", (err as Error)?.message ?? err);
+  }
+}
 
 // Ruta diaria: paradas del día en orden, con dirección, ventana horaria y resumen del pedido.
 driverAppRouter.get(
@@ -166,6 +185,7 @@ driverAppRouter.post(
       await prisma.trackingEvent.create({
         data: { shipmentId: shipment.id, eventType: "stop_arrival", occurredAt: new Date(), payload: { routeStopId: stop.id } },
       });
+      await notifyShipmentChange(shipment.id, "stop_status_changed", { routeStopId: stop.id, status: "arrived" });
     }
     res.json(updated);
   })
@@ -277,6 +297,10 @@ driverAppRouter.post(
     });
 
     const updated = await prisma.routeStop.findUnique({ where: { id: stop.id }, include: { pod: true } });
+    const shipmentForStop = await prisma.shipment.findUnique({ where: { routeId: stop.routeId } });
+    if (shipmentForStop) {
+      await notifyShipmentChange(shipmentForStop.id, "stop_status_changed", { routeStopId: stop.id, status: updated?.status });
+    }
     res.json(updated);
   })
 );
@@ -314,6 +338,7 @@ driverAppRouter.post(
     }
 
     const updated = await prisma.shipment.update({ where: { id: shipment.id }, data });
+    await notifyShipmentChange(shipment.id, "shipment_status_changed", { status: updated.status });
     res.json(updated);
   })
 );
@@ -331,6 +356,11 @@ driverAppRouter.post(
     const event = await prisma.trackingEvent.create({
       data: { shipmentId: shipment.id, eventType: "gps_ping", lat: data.lat, lng: data.lng, occurredAt: new Date() },
     });
+    await notifyShipmentChange(shipment.id, "position_update", { lat: data.lat, lng: data.lng, occurredAt: event.occurredAt });
+    // Fase 6: recálculo de ETA por desviación/intervalo -- en segundo plano
+    // respecto a la respuesta del ping (no se espera aquí con `await`) para
+    // que un GPS ping nunca se retrase por una llamada a la API de rutas.
+    maybeRecalculateEta(shipment.id, { lat: data.lat, lng: data.lng }).catch(() => {});
     res.status(201).json(event);
   })
 );
@@ -373,6 +403,15 @@ driverAppRouter.post(
       })),
       skipDuplicates: true,
     });
+
+    // Se usa el ping más reciente del lote como posición "actual" para el
+    // aviso en vivo y el recálculo de ETA -- los anteriores del mismo lote ya
+    // quedaron guardados como histórico, pero solo el último importa para
+    // saber dónde está el vehículo ahora mismo.
+    const latest = [...pings].sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())[0];
+    await notifyShipmentChange(shipment.id, "position_update", { lat: latest.lat, lng: latest.lng, occurredAt: latest.occurredAt });
+    maybeRecalculateEta(shipment.id, { lat: latest.lat, lng: latest.lng }).catch(() => {});
+
     res.status(201).json({ inserted: result.count, received: pings.length });
   })
 );

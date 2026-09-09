@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import PlannerMap, { MapPoint, ROUTE_COLORS } from "@/pages/planner/PlannerMap";
+import { useRealtimeChannel } from "@/lib/realtime";
 
 // Sincronización en tiempo real despacho<->conductor: la Driver App ya manda
-// su posición GPS en segundo plano (apps/driver-app/src/offline/gpsTracker.ts)
-// -- esta pantalla es quien la consume. "Tiempo real" aquí es sondeo cada 20s,
-// no un socket con empuje instantáneo: para una vista de despacho es
-// suficiente margen y evita montar infraestructura de WebSockets nueva (no
-// hay ninguna en producción todavía) solo para esta pantalla.
+// su posición GPS en segundo plano (apps/driver-app/src/offline/gpsTracker.ts).
+// Hasta la Fase 6 esta pantalla solo la consumía por sondeo cada 20s; ahora
+// además se suscribe en vivo (WebSocket) a cada envío que se muestra aquí, y
+// actualiza su posición al instante en cuanto llega un ping -- el sondeo de
+// 20s se mantiene tal cual como red de seguridad, por si el canal en vivo no
+// está disponible (sin romper nada de lo que ya funcionaba).
 const POLL_INTERVAL_MS = 20_000;
 
 interface StopLite {
@@ -52,11 +54,13 @@ function timeAgo(iso: string): string {
 
 export default function SeguimientoPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const queryKey = ["shipments", "en-curso"];
 
   // "En curso" = ya cargado o circulando -- antes de "loaded" no hay vehículo
   // en la calle todavía que tenga sentido situar en el mapa.
   const shipmentsQuery = useQuery({
-    queryKey: ["shipments", "en-curso"],
+    queryKey,
     queryFn: async () => (await api.get("/shipments")).data as { items: ShipmentRow[]; total: number },
     refetchInterval: POLL_INTERVAL_MS,
   });
@@ -65,6 +69,21 @@ export default function SeguimientoPage() {
     () => (shipmentsQuery.data?.items ?? []).filter((s) => s.status === "loaded" || s.status === "in_transit"),
     [shipmentsQuery.data]
   );
+
+  // Fase 6: un ping en vivo de cualquiera de los envíos mostrados actualiza
+  // directamente su posición en la cache, sin esperar al sondeo.
+  const realtimeStatus = useRealtimeChannel({ shipmentIds: activeShipments.map((s) => s.id) }, (msg) => {
+    if (msg.type !== "position_update") {
+      queryClient.invalidateQueries({ queryKey });
+      return;
+    }
+    const { shipmentId, lat, lng, occurredAt } = msg.payload as { shipmentId: string; lat: number; lng: number; occurredAt: string };
+    queryClient.setQueryData<{ items: ShipmentRow[]; total: number } | undefined>(queryKey, (current) =>
+      current
+        ? { ...current, items: current.items.map((s) => (s.id === shipmentId ? { ...s, lastPosition: { lat, lng, occurredAt } } : s)) }
+        : current
+    );
+  });
 
   const selected = activeShipments.find((s) => s.id === selectedId) ?? null;
 
@@ -91,8 +110,10 @@ export default function SeguimientoPage() {
     <div>
       <div className="mb-4">
         <h1 className="text-xl font-semibold text-slate-900">Seguimiento</h1>
-        <p className="text-sm text-slate-500">
-          Posición en vivo de los envíos en curso ({activeShipments.length}). Se actualiza cada 20 segundos.
+        <p className="text-sm text-slate-500 flex items-center gap-1.5">
+          Posición en vivo de los envíos en curso ({activeShipments.length}).
+          <span className={`w-1.5 h-1.5 rounded-full inline-block ${realtimeStatus === "live" ? "bg-emerald-500" : "bg-slate-300"}`} />
+          {realtimeStatus === "live" ? "Empuje instantáneo activo" : "Actualizando por sondeo cada 20s"}
         </p>
       </div>
 

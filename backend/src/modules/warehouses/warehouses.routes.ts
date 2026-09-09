@@ -3,8 +3,32 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { geocodeAddress } from "@/modules/routing/ors.service";
 
 export const warehousesRouter = Router();
+
+// Fase 6: mismo criterio que en delivery-points.routes.ts -- geocodificación
+// automática solo cuando falta lat/lng y hay dirección, puramente aditiva
+// (cualquier fallo deja el almacén guardarse igual que antes, sin coordenadas).
+async function geocodeIfMissing<T extends { address?: string; postalCode?: string; city?: string; province?: string; country?: string; lat?: number; lng?: number }>(
+  data: T
+): Promise<T> {
+  if (data.lat != null || data.lng != null || !data.address) return data;
+  try {
+    const result = await geocodeAddress({
+      address: data.address,
+      postalCode: data.postalCode,
+      city: data.city,
+      province: data.province,
+      country: data.country,
+    });
+    if (result) return { ...data, lat: result.lat, lng: result.lng };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[geocoding] no se pudo geocodificar la dirección automáticamente:", (err as Error)?.message ?? err);
+  }
+  return data;
+}
 
 const warehouseSchema = z.object({
   name: z.string().min(1),
@@ -51,7 +75,7 @@ warehousesRouter.get(
 warehousesRouter.post(
   "/",
   asyncHandler(async (req, res) => {
-    const data = warehouseSchema.parse(req.body);
+    const data = await geocodeIfMissing(warehouseSchema.parse(req.body));
     const warehouse = await prisma.warehouse.create({ data: { ...data, companyId: req.auth!.companyId } });
     res.status(201).json(warehouse);
   })
@@ -60,7 +84,7 @@ warehousesRouter.post(
 warehousesRouter.put(
   "/:id",
   asyncHandler(async (req, res) => {
-    const data = warehouseSchema.partial().parse(req.body);
+    const data = await geocodeIfMissing(warehouseSchema.partial().parse(req.body));
     const warehouse = await prisma.warehouse.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
     if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
     const updated = await prisma.warehouse.update({ where: { id: warehouse.id }, data });

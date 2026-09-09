@@ -3,8 +3,31 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { broadcastToWarehouse, broadcastToShipment } from "@/realtime/ws.server";
 
 export const shipmentsRouter = Router();
+
+// Fase 6: aviso en vivo (WebSocket) a quien esté viendo el despacho de este
+// almacén y a quien esté viendo este envío en concreto. Envuelto en
+// try/catch en cada punto de uso -- un fallo notificando en vivo nunca debe
+// impedir que la operación real (cambiar un estado, registrar una entrega)
+// se complete y responda con éxito; en el peor caso, esa pantalla se entera
+// en el siguiente sondeo en vez de al instante.
+async function notifyShipmentChange(shipmentId: string, type: string, payload: Record<string, unknown>) {
+  try {
+    const shipment = await prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: { route: { select: { warehouseId: true } } },
+    });
+    broadcastToShipment(shipmentId, type, { shipmentId, ...payload });
+    if (shipment?.route.warehouseId) {
+      broadcastToWarehouse(shipment.route.warehouseId, type, { shipmentId, ...payload });
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[realtime] no se pudo notificar el cambio en vivo:", (err as Error)?.message ?? err);
+  }
+}
 
 shipmentsRouter.get(
   "/",
@@ -131,7 +154,49 @@ shipmentsRouter.patch(
     }
 
     const updated = await prisma.shipment.update({ where: { id: shipment.id }, data });
+    await notifyShipmentChange(shipment.id, "shipment_status_changed", { status: updated.status });
     res.json(updated);
+  })
+);
+
+// Fase 6: histórico de posiciones GPS de un envío como línea (para "repetir"
+// visualmente el recorrido en el mapa) -- usa PostGIS cuando está disponible
+// (columna `geom` sobre tracking_event, ver prisma/postgis-setup.sql) para
+// simplificar la línea a un número razonable de puntos con ST_Simplify; si
+// PostGIS todavía no está instalado en esta base de datos, o la consulta
+// falla por cualquier motivo, cae a devolver los puntos en bruto (lat/lng de
+// TrackingEvent, que siempre ha existido) sin simplificar -- el mapa sigue
+// funcionando igual, solo que con más puntos.
+shipmentsRouter.get(
+  "/:id/track",
+  asyncHandler(async (req, res) => {
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, route: { companyId: req.auth!.companyId } } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT ST_AsGeoJSON(ST_Simplify(ST_MakeLine(geom ORDER BY occurred_at), 0.0001)) AS geojson
+        FROM tracking_event
+        WHERE shipment_id = ${shipment.id}::uuid AND geom IS NOT NULL
+      `;
+      const geojson = rows[0]?.geojson ? JSON.parse(rows[0].geojson) : null;
+      if (geojson?.coordinates?.length) {
+        return res.json({
+          source: "postgis",
+          points: geojson.coordinates.map(([lng, lat]: [number, number]) => ({ lat, lng })),
+        });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[track] PostGIS no disponible o consulta fallida, se devuelven puntos sin simplificar:", (err as Error)?.message ?? err);
+    }
+
+    const events = await prisma.trackingEvent.findMany({
+      where: { shipmentId: shipment.id, lat: { not: null }, lng: { not: null } },
+      orderBy: { occurredAt: "asc" },
+      select: { lat: true, lng: true, occurredAt: true },
+    });
+    res.json({ source: "raw", points: events.map((e) => ({ lat: e.lat, lng: e.lng, occurredAt: e.occurredAt })) });
   })
 );
 
@@ -191,6 +256,13 @@ shipmentsRouter.post(
     });
 
     const stopUpdated = await prisma.routeStop.findUnique({ where: { id: stop.id }, include: { pod: true } });
+    const shipmentForStop = await prisma.shipment.findUnique({ where: { routeId: stop.routeId } });
+    if (shipmentForStop) {
+      await notifyShipmentChange(shipmentForStop.id, "stop_status_changed", {
+        routeStopId: stop.id,
+        status: stopUpdated?.status,
+      });
+    }
     res.json(stopUpdated);
   })
 );
@@ -211,6 +283,9 @@ shipmentsRouter.post(
     const event = await prisma.trackingEvent.create({
       data: { shipmentId: shipment.id, eventType: data.eventType, lat: data.lat, lng: data.lng, payload: data.payload, occurredAt: new Date() },
     });
+    if (data.lat != null && data.lng != null) {
+      await notifyShipmentChange(shipment.id, "position_update", { lat: data.lat, lng: data.lng, occurredAt: event.occurredAt });
+    }
     res.status(201).json(event);
   })
 );

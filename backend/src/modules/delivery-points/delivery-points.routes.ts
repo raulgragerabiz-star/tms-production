@@ -3,8 +3,34 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { geocodeAddress } from "@/modules/routing/ors.service";
 
 export const deliveryPointsRouter = Router();
+
+// Fase 6: si no se ha indicado lat/lng a mano pero sí una dirección, se
+// intenta geocodificar automáticamente con OpenRouteService. Puramente aditivo
+// -- si no hay clave ORS configurada, si la dirección no se reconoce, o si la
+// llamada falla por lo que sea, se guarda exactamente igual que antes (sin
+// coordenadas), nunca bloquea la creación/edición del punto de entrega.
+async function geocodeIfMissing<T extends { address?: string; postalCode?: string; city?: string; province?: string; country?: string; lat?: number; lng?: number }>(
+  data: T
+): Promise<T> {
+  if (data.lat != null || data.lng != null || !data.address) return data;
+  try {
+    const result = await geocodeAddress({
+      address: data.address,
+      postalCode: data.postalCode,
+      city: data.city,
+      province: data.province,
+      country: data.country,
+    });
+    if (result) return { ...data, lat: result.lat, lng: result.lng };
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[geocoding] no se pudo geocodificar la dirección automáticamente:", (err as Error)?.message ?? err);
+  }
+  return data;
+}
 
 const dpSchema = z.object({
   customerId: z.string().uuid(),
@@ -47,7 +73,7 @@ deliveryPointsRouter.post(
       where: { id: data.customerId, companyId: req.auth!.companyId },
     });
     if (!customer) throw HttpError.notFound("Cliente no encontrado");
-    const dp = await prisma.deliveryPoint.create({ data });
+    const dp = await prisma.deliveryPoint.create({ data: await geocodeIfMissing(data) });
     res.status(201).json(dp);
   })
 );
@@ -60,7 +86,7 @@ deliveryPointsRouter.put(
       where: { id: req.params.id, customer: { companyId: req.auth!.companyId } },
     });
     if (!dp) throw HttpError.notFound("Punto de entrega no encontrado");
-    const updated = await prisma.deliveryPoint.update({ where: { id: dp.id }, data });
+    const updated = await prisma.deliveryPoint.update({ where: { id: dp.id }, data: await geocodeIfMissing(data) });
     res.json(updated);
   })
 );

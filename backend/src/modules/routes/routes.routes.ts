@@ -3,7 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
-import { estimateRoute, estimateStopEtas, suggestVehicleType } from "@/modules/routing/routing.service";
+import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, STOP_SERVICE_MINUTES } from "@/modules/routing/routing.service";
+import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
+import { broadcastToWarehouse } from "@/realtime/ws.server";
 
 export const routesRouter = Router();
 
@@ -99,7 +101,7 @@ export async function recalculateLoadPlan(routeId: string) {
   if (hasAllCoords && route) {
     const startAt = new Date(route.routeDate);
     startAt.setHours(8, 0, 0, 0);
-    const etas = estimateStopEtas(routePoints as { lat: number; lng: number }[], startAt);
+    const etas = await estimateStopEtas(routePoints as { lat: number; lng: number }[], startAt);
     await Promise.all(stops.map((s, idx) => prisma.routeStop.update({ where: { id: s.id }, data: { eta: etas[idx] } })));
   } else if (stops.length > 0) {
     // Sin coordenadas completas no se puede calcular con garantías -- se
@@ -298,14 +300,234 @@ routesRouter.get(
       },
     });
 
-    res.json({
-      items: routes.map((r) => {
+    // Fase 6: geometría real de cada ruta (siguiendo carretera, vía
+    // OpenRouteService) para pintarla en el mapa en vez de líneas rectas.
+    // Reutiliza la misma cache por coordenadas que ya llena
+    // recalculateLoadPlan -- si esa ruta se recalculó hace poco, esto no
+    // gasta cuota extra. Sin clave ORS configurada, o si la llamada falla,
+    // `geometry` queda en null y el mapa simplemente no dibuja esa línea.
+    const itemsWithGeometry = await Promise.all(
+      routes.map(async (r) => {
         const { shipment, ...rest } = r;
-        if (!shipment) return { ...rest, shipment: null };
+        const points = [
+          r.warehouse?.lat != null && r.warehouse?.lng != null ? { lat: r.warehouse.lat, lng: r.warehouse.lng } : null,
+          ...r.stops.map((s) =>
+            s.order.deliveryPoint.lat != null && s.order.deliveryPoint.lng != null
+              ? { lat: s.order.deliveryPoint.lat, lng: s.order.deliveryPoint.lng }
+              : null
+          ),
+        ];
+        const geometry = points.every((p) => p !== null) ? await getRouteGeometry(points as { lat: number; lng: number }[]) : null;
+        if (!shipment) return { ...rest, shipment: null, geometry };
         const { trackingEvents, ...shipmentRest } = shipment;
-        return { ...rest, shipment: { ...shipmentRest, lastPosition: trackingEvents[0] ?? null } };
-      }),
-      unassignedOrdersCount,
+        return { ...rest, shipment: { ...shipmentRest, lastPosition: trackingEvents[0] ?? null }, geometry };
+      })
+    );
+
+    res.json({ items: itemsWithGeometry, unassignedOrdersCount });
+  })
+);
+
+// Fase 6: planificación automática (motor de optimización VROOM vía
+// OpenRouteService) -- agrupa y secuencia geográficamente los pedidos
+// validados y todavía sin ruta de un almacén/fecha/servicio, creando rutas
+// "draft" (sin transportista/vehículo concreto todavía, igual que si se
+// hubieran montado a mano con "+ Nueva ruta"). La asignación de
+// transportista/vehículo/conductor sigue siendo el flujo ya existente
+// (RouteAssignmentModal / POST /optimization/:routeId/simulate) -- esto solo
+// resuelve la parte que ese módulo documentaba como pendiente ("capa de
+// secuenciación geográfica, a definir en integración").
+//
+// Como no hay todavía vehículos concretos asignables en esta fase del
+// proceso, se usan "vehículos virtuales" del motor de optimización: uno por
+// cada tipo de vehículo configurado en las zonas de influencia del almacén
+// (o, si no hay ninguna configurada, los tipos de vehículo activos de la
+// empresa), repetido varias veces para que el motor decida solo cuántas
+// rutas hacen falta. Cada vehículo virtual sale y vuelve al almacén.
+//
+// Acotado a propósito para respetar la capa gratuita de ORS Optimization:
+// como mucho MAX_JOBS pedidos y MAX_VEHICLES vehículos virtuales por
+// llamada -- si hay más pedidos pendientes, se planifican los de mayor
+// prioridad primero y el resto queda disponible para una siguiente pasada
+// (mismo pedido, se puede volver a lanzar).
+const MAX_AUTO_PLAN_JOBS = 45;
+const MAX_AUTO_PLAN_VEHICLES = 18;
+const UNITS_PER_KG = 1; // capacidad en kg enteros
+const UNITS_PER_PALLET = 10; // un decimal de precisión en palés (VROOM exige enteros)
+
+function timeStringToSeconds(hhmm: string | null | undefined): number | null {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 3600 + m * 60;
+}
+
+routesRouter.post(
+  "/auto-plan",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({
+      warehouseId: z.string().uuid(),
+      routeDate: z.coerce.date(),
+      serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]),
+    });
+    const data = schema.parse(req.body);
+    const companyId = req.auth!.companyId;
+
+    const warehouse = await prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId } });
+    if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+    if (warehouse.lat == null || warehouse.lng == null) {
+      throw HttpError.badRequest("El almacén no tiene coordenadas -- añádelas antes de planificar automáticamente");
+    }
+
+    const pendingOrders = await prisma.order.findMany({
+      where: {
+        companyId,
+        warehouseId: data.warehouseId,
+        status: "validated",
+        serviceType: data.serviceType,
+        requestedDeliveryDate: data.routeDate,
+      },
+      include: {
+        deliveryPoint: { select: { lat: true, lng: true } },
+        lines: { include: { product: { select: { unitsPerPallet: true } } } },
+      },
+      orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+      take: MAX_AUTO_PLAN_JOBS + 50, // margen para poder informar de cuántos quedan fuera tras descartar sin coordenadas
+    });
+
+    const withCoords = pendingOrders.filter((o) => o.deliveryPoint.lat != null && o.deliveryPoint.lng != null);
+    const withoutCoords = pendingOrders.length - withCoords.length;
+    const selected = withCoords.slice(0, MAX_AUTO_PLAN_JOBS);
+    const leftForNextRun = withCoords.length - selected.length;
+
+    if (selected.length === 0) {
+      return res.json({
+        routesCreated: 0,
+        ordersPlanned: 0,
+        ordersUnassigned: 0,
+        ordersWithoutCoords: withoutCoords,
+        ordersLeftForNextRun: 0,
+        message: "No hay pedidos validados con coordenadas para planificar en ese almacén/fecha/servicio.",
+      });
+    }
+
+    // Vehículos virtuales: tipos de vehículo de las zonas de influencia del
+    // almacén (criterio ya usado en suggestVehicleType); si no hay ninguna
+    // configurada, se cae a los tipos de vehículo activos de la empresa.
+    const zoneTypes = await prisma.influenceZone.findMany({
+      where: { warehouseId: data.warehouseId },
+      include: { vehicleType: true },
+      distinct: ["vehicleTypeId"],
+    });
+    const vehicleTypes =
+      zoneTypes.length > 0
+        ? zoneTypes.map((zone) => zone.vehicleType)
+        : await prisma.vehicleType.findMany({ take: 3 });
+
+    if (vehicleTypes.length === 0) {
+      throw HttpError.badRequest("No hay tipos de vehículo configurados con los que planificar rutas");
+    }
+
+    const warehouseCoord: [number, number] = [warehouse.lng, warehouse.lat];
+    const vehicles: VroomVehicle[] = [];
+    let vehicleIdx = 0;
+    // Como mucho tantas unidades por tipo como hagan falta para poder cubrir
+    // todos los pedidos seleccionados en el peor caso (uno por vehículo),
+    // repartidas entre los tipos disponibles, sin pasar del límite global.
+    const unitsPerType = Math.max(1, Math.ceil(MAX_AUTO_PLAN_VEHICLES / vehicleTypes.length));
+    for (const vt of vehicleTypes) {
+      for (let i = 0; i < unitsPerType && vehicles.length < MAX_AUTO_PLAN_VEHICLES; i++) {
+        vehicles.push({
+          id: vehicleIdx++,
+          start: warehouseCoord,
+          end: warehouseCoord,
+          capacity: [
+            Math.round(Number(vt.maxWeightKg) * UNITS_PER_KG),
+            Math.round(vt.maxPallets * UNITS_PER_PALLET),
+          ],
+        });
+      }
+    }
+
+    const jobs: VroomJob[] = selected.map((order, idx) => {
+      const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
+      const pallets = order.lines.reduce((acc, l) => {
+        const upp = l.product.unitsPerPallet ?? 1;
+        return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
+      }, 0);
+      const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
+      const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
+      return {
+        id: idx,
+        location: [order.deliveryPoint.lng as number, order.deliveryPoint.lat as number],
+        service: STOP_SERVICE_MINUTES * 60,
+        delivery: [Math.round(weightKg * UNITS_PER_KG), Math.round(pallets * UNITS_PER_PALLET)],
+        ...(fromSec != null && toSec != null ? { time_windows: [[fromSec, toSec]] as [number, number][] } : {}),
+        priority: order.priority === "urgent" ? 100 : 0,
+      };
+    });
+
+    let result;
+    try {
+      result = await optimizePlan({ jobs, vehicles });
+    } catch (err) {
+      if (err instanceof OrsNotConfiguredError) {
+        throw HttpError.badRequest(
+          "La planificación automática necesita una clave de OpenRouteService configurada (ORS_API_KEY) -- todavía no lo está."
+        );
+      }
+      throw HttpError.badRequest(`No se pudo completar la optimización: ${(err as Error).message}`);
+    }
+
+    const routesCreated: string[] = [];
+    for (const vroomRoute of result.routes) {
+      const jobSteps = vroomRoute.steps.filter((s) => s.type === "job" && s.job != null);
+      if (jobSteps.length === 0) continue;
+
+      const route = await prisma.$transaction(async (tx) => {
+        const created = await tx.route.create({
+          data: {
+            companyId,
+            warehouseId: data.warehouseId,
+            routeDate: data.routeDate,
+            serviceType: data.serviceType,
+            status: "draft",
+          },
+        });
+        await tx.routeStop.createMany({
+          data: jobSteps.map((step, seqIdx) => ({
+            routeId: created.id,
+            orderId: selected[step.job as number].id,
+            sequence: seqIdx + 1,
+          })),
+        });
+        await tx.order.updateMany({
+          where: { id: { in: jobSteps.map((step) => selected[step.job as number].id) } },
+          data: { status: "planned" },
+        });
+        return created;
+      });
+
+      await recalculateLoadPlan(route.id);
+      routesCreated.push(route.id);
+    }
+
+    broadcastToWarehouse(data.warehouseId, "auto_plan_completed", {
+      warehouseId: data.warehouseId,
+      routeDate: data.routeDate,
+      routesCreated: routesCreated.length,
+    });
+
+    res.json({
+      routesCreated: routesCreated.length,
+      ordersPlanned: jobs.length - result.unassigned.length,
+      ordersUnassigned: result.unassigned.length,
+      ordersWithoutCoords: withoutCoords,
+      ordersLeftForNextRun: leftForNextRun,
+      unassignedReasons: result.unassigned.map((u) => ({
+        orderNumber: selected[u.id]?.orderNumber ?? "?",
+        reason: u.reason ?? "sin especificar",
+      })),
     });
   })
 );
@@ -445,6 +667,14 @@ routesRouter.patch(
     });
 
     if (data.vehicleId) await recalculateLoadPlan(route.id);
+
+    // Fase 6: aviso en vivo al despacho (vista Despacho / Tablero abiertos en
+    // otras pestañas) de que el estado de esta ruta ha cambiado, sin esperar
+    // a su próximo sondeo.
+    broadcastToWarehouse(updated.warehouseId, "route_status_changed", {
+      routeId: updated.id,
+      status: updated.status,
+    });
 
     res.json(updated);
   })
