@@ -139,17 +139,35 @@ async function resolveCustomerAndDeliveryPoint(
     summary.clientesCreados.push({ customerId: customer.id, businessCode: customer.businessCode, legalName: customer.legalName });
   }
 
-  if (!parsed.address || !parsed.city || !parsed.province || !parsed.postalCode) {
+  // El Excel de pedidos exportado por el ERP no siempre trae la dirección de
+  // entrega (en el ERP vive en la ficha del socio/cliente, no en la línea de
+  // pedido) -- si al pedido le falta algún dato, se completa con la
+  // dirección por defecto del cliente (cargada aparte con el maestro de
+  // clientes, ver customer-master-import.service.ts). El dato del propio
+  // pedido, cuando existe, tiene siempre prioridad sobre el valor por
+  // defecto del cliente.
+  const address = parsed.address || customer.defaultAddress || undefined;
+  const city = parsed.city || customer.defaultCity || undefined;
+  const province = parsed.province || customer.defaultProvince || undefined;
+  const postalCode = parsed.postalCode || customer.defaultPostalCode || undefined;
+
+  // Población y provincia son solo informativas (no las usa ni la
+  // planificación ni la segmentación) así que se admiten en blanco; la
+  // dirección y el código postal sí son imprescindibles -- el código postal
+  // en particular porque es lo que usa la consulta pública de estado
+  // (ver tracking.routes.ts).
+  if (!address || !postalCode) {
     throw new Error(
-      "Faltan datos de la dirección de entrega (dirección, población, provincia y/o código postal son obligatorios)"
+      `Faltan datos de la dirección de entrega para el cliente ${businessCode} (dirección y código postal son obligatorios). ` +
+        'Indícalos en el Excel de Pedidos o carga antes la dirección de este cliente desde Maestros > Clientes > "Importar direcciones".'
     );
   }
 
   const existingDp = await tx.deliveryPoint.findFirst({
     where: {
       customerId: customer.id,
-      address: { equals: parsed.address, mode: "insensitive" },
-      postalCode: parsed.postalCode,
+      address: { equals: address, mode: "insensitive" },
+      postalCode,
       deletedAt: null,
     },
   });
@@ -159,10 +177,10 @@ async function resolveCustomerAndDeliveryPoint(
     (await tx.deliveryPoint.create({
       data: {
         customerId: customer.id,
-        address: parsed.address,
-        city: parsed.city,
-        province: parsed.province,
-        postalCode: parsed.postalCode,
+        address,
+        city,
+        province,
+        postalCode,
         country: "ES",
         contactPhone: parsed.contactPhone,
         contactEmail: parsed.customerEmail,

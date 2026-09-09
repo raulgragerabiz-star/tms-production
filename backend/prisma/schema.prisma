@@ -196,6 +196,18 @@ model Customer {
   legalName      String          @map("legal_name")
   commercialName String?         @map("commercial_name")
   taxId          String?         @map("tax_id")
+  // Dirección por defecto del cliente, cargada desde el maestro de
+  // clientes/socios (ver customer-master-import.service.ts). El ERP exporta
+  // el pedido con el código de cliente pero sin su dirección -- esa vive en
+  // la ficha del socio dentro del propio ERP -- así que estos 4 campos
+  // opcionales permiten resolver la dirección de entrega de un pedido por su
+  // código de cliente cuando el Excel de pedidos no la trae. Totalmente
+  // aditivo: nunca sustituye la dirección real de un pedido si el Excel de
+  // pedidos ya la incluye.
+  defaultAddress    String?       @map("default_address")
+  defaultCity       String?       @map("default_city")
+  defaultProvince   String?       @map("default_province")
+  defaultPostalCode String?       @map("default_postal_code")
   active         Boolean         @default(true)
   deletedAt      DateTime?       @map("deleted_at")
   createdAt      DateTime        @default(now()) @map("created_at")
