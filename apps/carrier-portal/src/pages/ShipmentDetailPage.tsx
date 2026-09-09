@@ -2,6 +2,23 @@ import { FormEvent, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import Chip, { ChipColor } from "@/components/Chip";
+
+const stopStatusLabel: Record<string, string> = {
+  pending: "Pendiente",
+  arrived: "Llegada",
+  completed: "Completada",
+  failed: "Fallida",
+  returned: "Devuelta",
+};
+
+const stopStatusColor: Record<string, ChipColor> = {
+  pending: "slate",
+  arrived: "amber",
+  completed: "teal",
+  failed: "red",
+  returned: "amber",
+};
 
 interface StopRow {
   id: string;
@@ -94,9 +111,9 @@ export default function ShipmentDetailPage() {
         <h3 className="text-sm font-semibold text-slate-700 mb-2">Paradas</h3>
         <div className="space-y-2">
           {shipment.route.stops.map((stop) => (
-            <div key={stop.id} className="bg-white rounded-lg border border-slate-200 p-3 flex items-center justify-between text-sm">
+            <div key={stop.id} className="bg-white rounded-xl border border-slate-200 p-3 flex items-center justify-between text-sm">
               <div>
-                <p className="font-medium text-slate-800">
+                <p className="font-mono font-semibold text-slate-800">
                   #{stop.sequence} — {stop.order.orderNumber}
                 </p>
                 <p className="text-xs text-slate-500">
@@ -104,7 +121,7 @@ export default function ShipmentDetailPage() {
                 </p>
               </div>
               <div className="text-right">
-                <span className="text-xs bg-slate-100 px-2 py-0.5 rounded-full text-slate-600">{stop.status}</span>
+                <Chip color={stopStatusColor[stop.status] ?? "slate"}>{stopStatusLabel[stop.status] ?? stop.status}</Chip>
                 {!stop.pod && stop.status !== "completed" && (
                   <button
                     onClick={() => podMutation.mutate(stop.id)}
@@ -142,7 +159,7 @@ export default function ShipmentDetailPage() {
 
       <section>
         <h3 className="text-sm font-semibold text-slate-700 mb-2">Chat con planificación</h3>
-        <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2 max-h-52 overflow-y-auto mb-2">
+        <div className="bg-white rounded-xl border border-slate-200 p-3 space-y-2 max-h-52 overflow-y-auto mb-2">
           {messagesQuery.data?.items.length === 0 && <p className="text-xs text-slate-400">Sin mensajes todavía.</p>}
           {messagesQuery.data?.items.map((m) => (
             <div key={m.id} className={`text-sm ${m.senderType === "carrier_portal" ? "text-right" : ""}`}>

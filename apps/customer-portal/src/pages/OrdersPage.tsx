@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { logoutCustomerPortal } from "@/api/auth";
+import Chip, { ChipColor } from "@/components/Chip";
 
 interface OrderSummary {
   id: string;
@@ -25,16 +26,16 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelado",
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  received: "bg-slate-100 text-slate-700",
-  validated: "bg-slate-100 text-slate-700",
-  planned: "bg-blue-100 text-blue-700",
-  loading: "bg-blue-100 text-blue-700",
-  dispatched: "bg-blue-100 text-blue-700",
-  in_transit: "bg-amber-100 text-amber-700",
-  delivered: "bg-green-100 text-green-700",
-  incident: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-500",
+const STATUS_COLOR: Record<string, ChipColor> = {
+  received: "slate",
+  validated: "slate",
+  planned: "blue",
+  loading: "blue",
+  dispatched: "blue",
+  in_transit: "amber",
+  delivered: "teal",
+  incident: "red",
+  cancelled: "slate",
 };
 
 export default function OrdersPage() {
@@ -80,26 +81,20 @@ export default function OrdersPage() {
 
         {isLoading && <p className="text-sm text-slate-500">Cargando pedidos...</p>}
 
-        <ul className="divide-y divide-slate-200 bg-white rounded-lg shadow">
+        <ul className="divide-y divide-slate-200 bg-white rounded-xl shadow">
           {data?.map((order) => (
             <li key={order.id}>
               <Link
                 to={`/pedidos/${order.id}`}
-                className="flex items-center justify-between px-4 py-3 hover:bg-slate-50"
+                className="flex items-center justify-between px-4 py-3 hover:bg-brand-50/60"
               >
                 <div>
-                  <p className="text-sm font-medium text-slate-800">{order.orderNumber}</p>
+                  <p className="text-sm font-mono font-semibold text-slate-800">{order.orderNumber}</p>
                   <p className="text-xs text-slate-500">
                     {order.deliveryPoint.label} — {order.deliveryPoint.city}
                   </p>
                 </div>
-                <span
-                  className={`text-xs font-medium px-2 py-1 rounded-full ${
-                    STATUS_COLOR[order.status] ?? "bg-slate-100 text-slate-700"
-                  }`}
-                >
-                  {STATUS_LABEL[order.status] ?? order.status}
-                </span>
+                <Chip color={STATUS_COLOR[order.status] ?? "slate"}>{STATUS_LABEL[order.status] ?? order.status}</Chip>
               </Link>
             </li>
           ))}

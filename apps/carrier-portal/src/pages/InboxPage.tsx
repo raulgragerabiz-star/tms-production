@@ -43,22 +43,22 @@ export default function InboxPage() {
         </h2>
         <div className="space-y-2">
           {data?.pendingAcceptance.length === 0 && (
-            <p className="text-sm text-slate-400 bg-white rounded-lg border border-slate-200 p-4">
+            <p className="text-sm text-slate-400 bg-white rounded-xl border border-slate-200 p-4">
               No tienes viajes pendientes de confirmar.
             </p>
           )}
           {data?.pendingAcceptance.map((r) => (
-            <div key={r.id} className="bg-white rounded-lg border border-slate-200 p-4 flex items-center justify-between">
+            <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-800">
                   {new Date(r.routeDate).toLocaleDateString("es-ES")} — {r.warehouse.name}
                 </p>
-                <p className="text-xs text-slate-500">{r.stops.length} paradas</p>
+                <p className="text-xs text-slate-500 font-mono">{r.stops.length} paradas</p>
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => acceptMutation.mutate(r.id)}
-                  className="text-xs font-medium bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg"
+                  className="text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg"
                 >
                   Aceptar
                 </button>
@@ -83,18 +83,18 @@ export default function InboxPage() {
         </h2>
         <div className="space-y-2">
           {data?.activeShipments.length === 0 && (
-            <p className="text-sm text-slate-400 bg-white rounded-lg border border-slate-200 p-4">Sin viajes activos.</p>
+            <p className="text-sm text-slate-400 bg-white rounded-xl border border-slate-200 p-4">Sin viajes activos.</p>
           )}
           {data?.activeShipments.map((s) => (
             <Link
               key={s.id}
               to={`/viajes/${s.id}`}
-              className="block bg-white rounded-lg border border-slate-200 p-4 hover:border-brand-300"
+              className="block bg-white rounded-xl border border-slate-200 p-4 hover:border-brand-300"
             >
               <p className="text-sm font-medium text-slate-800">
                 {new Date(s.route.routeDate).toLocaleDateString("es-ES")} — {s.route.warehouse.name}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 font-mono">
                 Vehículo {s.vehicle.plate} · Estado: {s.status}
               </p>
             </Link>
@@ -108,7 +108,7 @@ export default function InboxPage() {
         </h2>
         <div className="space-y-2">
           {data?.openIncidents.length === 0 && (
-            <p className="text-sm text-slate-400 bg-white rounded-lg border border-slate-200 p-4">
+            <p className="text-sm text-slate-400 bg-white rounded-xl border border-slate-200 p-4">
               Sin incidencias abiertas.
             </p>
           )}
@@ -116,7 +116,7 @@ export default function InboxPage() {
             <Link
               key={inc.id}
               to={`/viajes/${inc.shipment.id}`}
-              className="block bg-white rounded-lg border border-red-200 bg-red-50 p-4 hover:border-red-300"
+              className="block bg-white rounded-xl border border-red-200 bg-red-50 p-4 hover:border-red-300"
             >
               <p className="text-sm font-medium text-red-700 capitalize">{inc.incidentType.replace("_", " ")}</p>
               <p className="text-xs text-red-500">{inc.description ?? "Sin descripción"}</p>

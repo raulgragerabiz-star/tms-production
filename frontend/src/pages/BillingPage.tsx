@@ -28,12 +28,12 @@ export default function BillingPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Transportista</th>
               <th className="text-left px-4 py-3">Periodo</th>
-              <th className="text-left px-4 py-3">Líneas</th>
-              <th className="text-left px-4 py-3">Total</th>
+              <th className="text-right px-4 py-3">Líneas</th>
+              <th className="text-right px-4 py-3">Total</th>
               <th className="text-left px-4 py-3">Estado</th>
             </tr>
           </thead>
@@ -49,13 +49,13 @@ export default function BillingPage() {
               </tr>
             )}
             {data?.items.map((s) => (
-              <tr key={s.id} className="hover:bg-slate-50">
+              <tr key={s.id} className="hover:bg-brand-50/60">
                 <td className="px-4 py-3">{s.carrier.legalName}</td>
                 <td className="px-4 py-3 text-slate-500">
                   {new Date(s.periodFrom).toLocaleDateString("es-ES")} — {new Date(s.periodTo).toLocaleDateString("es-ES")}
                 </td>
-                <td className="px-4 py-3">{s.lines.length}</td>
-                <td className="px-4 py-3 font-medium">{Number(s.totalAmount).toFixed(2)} €</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-600">{s.lines.length}</td>
+                <td className="px-4 py-3 text-right font-mono font-semibold text-slate-800">{Number(s.totalAmount).toFixed(2)} €</td>
                 <td className="px-4 py-3">
                   <StatusBadge status={s.status} />
                 </td>

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import Chip, { ChipColor } from "@/components/Chip";
 
 interface ReturnItemRow {
   id: string;
@@ -15,6 +16,13 @@ const statusLabel: Record<string, string> = {
   claimed: "Reclamado",
   collected: "Recogido",
   reconciled: "Conciliado",
+};
+
+const statusColor: Record<string, ChipColor> = {
+  pending: "slate",
+  claimed: "amber",
+  collected: "blue",
+  reconciled: "teal",
 };
 
 export default function ReturnsPage() {
@@ -33,12 +41,12 @@ export default function ReturnsPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Cliente</th>
               <th className="text-left px-4 py-3">Envase / palé</th>
-              <th className="text-left px-4 py-3">Cantidad pendiente</th>
-              <th className="text-left px-4 py-3">Reclamaciones</th>
+              <th className="text-right px-4 py-3">Cantidad pendiente</th>
+              <th className="text-right px-4 py-3">Reclamaciones</th>
               <th className="text-left px-4 py-3">Estado</th>
             </tr>
           </thead>
@@ -54,12 +62,14 @@ export default function ReturnsPage() {
               </tr>
             )}
             {data?.items.map((r) => (
-              <tr key={r.id} className="hover:bg-slate-50">
+              <tr key={r.id} className="hover:bg-brand-50/60">
                 <td className="px-4 py-3">{r.customer.businessCode} — {r.customer.legalName}</td>
                 <td className="px-4 py-3">{r.itemDescription}</td>
-                <td className="px-4 py-3">{r.pendingQuantity}</td>
-                <td className="px-4 py-3">{r.claims.length}</td>
-                <td className="px-4 py-3">{statusLabel[r.status] ?? r.status}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-600">{r.pendingQuantity}</td>
+                <td className="px-4 py-3 text-right font-mono text-slate-600">{r.claims.length}</td>
+                <td className="px-4 py-3">
+                  <Chip color={statusColor[r.status] ?? "slate"}>{statusLabel[r.status] ?? r.status}</Chip>
+                </td>
               </tr>
             ))}
           </tbody>

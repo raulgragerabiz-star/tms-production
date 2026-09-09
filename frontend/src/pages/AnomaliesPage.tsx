@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
+import Chip, { ChipColor } from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 
 // Motor de inteligencia (1/3): detección de anomalías -- ver
@@ -34,10 +35,10 @@ const alertTypeLabel: Record<string, string> = {
   inefficient_route_distance: "Ruta ineficiente",
 };
 
-const severityStyle: Record<string, string> = {
-  low: "bg-slate-100 text-slate-600",
-  medium: "bg-amber-100 text-amber-700",
-  high: "bg-red-100 text-red-700",
+const severityStyle: Record<string, ChipColor> = {
+  low: "slate",
+  medium: "amber",
+  high: "red",
 };
 
 const severityLabel: Record<string, string> = {
@@ -112,7 +113,7 @@ export default function AnomaliesPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Detectada</th>
               <th className="text-left px-4 py-3">Tipo</th>
@@ -136,23 +137,21 @@ export default function AnomaliesPage() {
               </tr>
             )}
             {data?.alerts.map((a) => (
-              <tr key={a.id} className="hover:bg-slate-50 align-top">
-                <td className="px-4 py-3 text-slate-500 whitespace-nowrap">
+              <tr key={a.id} className="hover:bg-brand-50/60 align-top">
+                <td className="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-xs">
                   {new Date(a.detectedAt).toLocaleString("es-ES")}
                 </td>
                 <td className="px-4 py-3 text-slate-700">{alertTypeLabel[a.alertType] ?? a.alertType}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${severityStyle[a.severity]}`}>
-                    {severityLabel[a.severity] ?? a.severity}
-                  </span>
+                  <Chip color={severityStyle[a.severity]}>{severityLabel[a.severity] ?? a.severity}</Chip>
                 </td>
                 <td className="px-4 py-3 text-slate-600 max-w-md">{a.description}</td>
-                <td className="px-4 py-3 text-slate-500">{a.expectedRange ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-500 font-mono text-xs">{a.expectedRange ?? "—"}</td>
                 {status === "pending" && (
                   <td className="px-4 py-3 whitespace-nowrap">
                     <button
                       onClick={() => reviewMutation.mutate({ id: a.id, status: "reviewed" })}
-                      className="text-emerald-600 hover:text-emerald-700 text-xs font-medium mr-3"
+                      className="text-teal-600 hover:text-teal-700 text-xs font-medium mr-3"
                     >
                       Marcar revisada
                     </button>

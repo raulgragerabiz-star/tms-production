@@ -112,12 +112,14 @@ export default function SeguimientoPage() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-slate-800">{s.vehicle?.plate ?? "—"}</span>
+                  <span className="font-mono font-semibold text-slate-800">{s.vehicle?.plate ?? "—"}</span>
                   <StatusBadge status={s.status} />
                 </div>
                 <p className="text-slate-500 text-xs mt-0.5">{s.driver?.fullName ?? "Sin conductor asignado"}</p>
-                <p className="text-slate-400 text-xs">{s.route.warehouse.name} · {s.route.stops.length} paradas</p>
-                <p className="text-[11px] text-slate-400 mt-1">
+                <p className="text-slate-400 text-xs">
+                  {s.route.warehouse.name} · <span className="font-mono">{s.route.stops.length}</span> paradas
+                </p>
+                <p className="text-[11px] text-slate-400 mt-1 font-mono">
                   {s.lastPosition ? `Última posición ${timeAgo(s.lastPosition.occurredAt)}` : "Sin posición GPS todavía"}
                 </p>
               </button>
@@ -147,7 +149,7 @@ export default function SeguimientoPage() {
                 {selected.route.stops.map((stop) => (
                   <div key={stop.id} className="flex items-center justify-between text-sm border-b border-slate-100 pb-1.5">
                     <div>
-                      <span className="text-slate-400 mr-2">{stop.sequence}.</span>
+                      <span className="text-slate-400 font-mono mr-2">{stop.sequence}.</span>
                       <span className="font-medium text-slate-700">{stop.order.customer.legalName}</span>
                       <span className="text-slate-400 text-xs ml-2">
                         {stop.order.deliveryPoint.city ?? stop.order.deliveryPoint.address}

@@ -133,7 +133,7 @@ export default function InfluenceZonesPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Km mín.</th>
               <th className="text-left px-4 py-3">Km máx.</th>
@@ -198,7 +198,7 @@ function ZoneTableRow({
   useEffect(() => setWeeklyShipments(zone.weeklyShipments ?? ""), [zone.weeklyShipments]);
 
   return (
-    <tr>
+    <tr className="hover:bg-brand-50/60">
       <td className="px-4 py-2">
         <input
           type="number"

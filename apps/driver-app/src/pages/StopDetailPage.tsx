@@ -91,7 +91,7 @@ export default function StopDetailPage() {
         <button onClick={() => navigate("/")} className="text-brand-600 text-xl leading-none">
           ←
         </button>
-        <h1 className="text-base font-bold text-slate-800">Parada #{stop.sequence}</h1>
+        <h1 className="text-base font-mono font-bold text-slate-800">Parada #{stop.sequence}</h1>
       </header>
 
       <main className="px-4 pt-4 max-w-lg mx-auto space-y-4">
@@ -145,7 +145,7 @@ export default function StopDetailPage() {
             <button
               onClick={() => completeMutation.mutate()}
               disabled={completeMutation.isPending}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl py-4 text-base font-semibold shadow"
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white rounded-2xl py-4 text-base font-semibold shadow"
             >
               ✓ Confirmar entrega
             </button>
@@ -188,9 +188,9 @@ export default function StopDetailPage() {
         )}
 
         {stop.status === "completed" && stop.pod && (
-          <div className="bg-emerald-50 rounded-2xl p-4 text-center">
-            <p className="text-emerald-700 font-medium">Entrega confirmada</p>
-            <p className="text-xs text-emerald-600 mt-1">
+          <div className="bg-teal-50 rounded-2xl p-4 text-center">
+            <p className="text-teal-700 font-medium">Entrega confirmada</p>
+            <p className="text-xs text-teal-600 mt-1 font-mono">
               {new Date(stop.pod.deliveredAt).toLocaleString("es-ES")}
               {stop.pod.receivedByName ? ` · ${stop.pod.receivedByName}` : ""}
             </p>

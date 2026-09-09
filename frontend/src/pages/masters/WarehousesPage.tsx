@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
+import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewWarehouseModal from "@/pages/masters/NewWarehouseModal";
 
@@ -44,7 +45,7 @@ export default function WarehousesPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-slate-500 text-xs uppercase">
+          <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
             <tr>
               <th className="text-left px-4 py-3">Nombre</th>
               <th className="text-left px-4 py-3">Dirección</th>
@@ -67,19 +68,17 @@ export default function WarehousesPage() {
               </tr>
             )}
             {data?.items.map((w) => (
-              <tr key={w.id} className="hover:bg-slate-50">
+              <tr key={w.id} className="hover:bg-brand-50/60">
                 <td className="px-4 py-3 font-medium">{w.name}</td>
                 <td className="px-4 py-3 text-slate-500">{w.address ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-500">{w.city ?? "—"}</td>
                 <td className="px-4 py-3 text-slate-500">{w.province ?? "—"}</td>
-                <td className="px-4 py-3 text-slate-400 text-xs">
+                <td className="px-4 py-3 text-slate-400 text-xs font-mono">
                   {w.lat && w.lng ? `${w.lat.toFixed(4)}, ${w.lng.toFixed(4)}` : "—"}
                 </td>
-                <td className="px-4 py-3 text-slate-400 text-xs font-mono">{w.externalCode ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs font-mono font-semibold">{w.externalCode ?? "—"}</td>
                 <td className="px-4 py-3">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${w.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-500"}`}>
-                    {w.active ? "Activo" : "Inactivo"}
-                  </span>
+                  <Chip color={w.active ? "teal" : "slate"}>{w.active ? "Activo" : "Inactivo"}</Chip>
                 </td>
               </tr>
             ))}

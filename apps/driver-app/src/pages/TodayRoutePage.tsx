@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
 import { endShift, getCurrentShift, startShift } from "@/api/driverApp";
+import Chip, { ChipColor } from "@/components/Chip";
 
 // Mejor esfuerzo: si el navegador da permiso y ubicación en menos de 3s se
 // adjunta al fichaje; si no, se ficha igualmente sin coordenadas -- la
@@ -51,12 +52,12 @@ interface TodayRouteResponse {
   } | null;
 }
 
-const statusStyle: Record<string, string> = {
-  pending: "bg-slate-100 text-slate-600",
-  arrived: "bg-amber-100 text-amber-700",
-  completed: "bg-emerald-100 text-emerald-700",
-  failed: "bg-red-100 text-red-700",
-  returned: "bg-slate-200 text-slate-700",
+const statusStyle: Record<string, ChipColor> = {
+  pending: "slate",
+  arrived: "amber",
+  completed: "teal",
+  failed: "red",
+  returned: "slate",
 };
 
 const statusLabel: Record<string, string> = {
@@ -134,11 +135,11 @@ export default function TodayRoutePage() {
           <div>
             {shiftQuery.data?.shift ? (
               <>
-                <p className="text-sm font-semibold text-emerald-700">
+                <p className="text-sm font-semibold text-teal-700">
                   Jornada iniciada ·{" "}
                   {new Date(shiftQuery.data.shift.startedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                 </p>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-400 font-mono">
                   {shiftQuery.data.shift.vehicle?.plate ? `Vehículo ${shiftQuery.data.shift.vehicle.plate}` : "Vehículo pendiente de vincular"}
                 </p>
               </>
@@ -186,8 +187,8 @@ export default function TodayRoutePage() {
           <>
             <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
               <p className="text-sm text-slate-500">{data.shipment.route.warehouse.name}</p>
-              <p className="text-lg font-semibold text-slate-900">Vehículo {data.shipment.vehicle.plate}</p>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-lg font-semibold text-slate-900 font-mono">Vehículo {data.shipment.vehicle.plate}</p>
+              <p className="text-xs text-slate-400 mt-1 font-mono">
                 {data.shipment.route.stops.length} paradas ·{" "}
                 {data.shipment.route.stops.filter((s) => s.status === "completed").length} completadas
               </p>
@@ -210,10 +211,8 @@ export default function TodayRoutePage() {
                   className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:scale-[0.99] transition shadow-sm"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-bold text-slate-800">#{stop.sequence} — {stop.order.orderNumber}</span>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${statusStyle[stop.status]}`}>
-                      {statusLabel[stop.status]}
-                    </span>
+                    <span className="text-sm font-mono font-bold text-slate-800">#{stop.sequence} — {stop.order.orderNumber}</span>
+                    <Chip color={statusStyle[stop.status] ?? "slate"}>{statusLabel[stop.status]}</Chip>
                   </div>
                   <p className="text-sm text-slate-600">{stop.order.customer.legalName}</p>
                   <p className="text-sm text-slate-400">
