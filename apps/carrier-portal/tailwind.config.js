@@ -3,20 +3,33 @@ export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
-      // 2026-09-09: mismo rediseño visual (acento ámbar) que Backoffice y el
-      // resto de apps -- ver frontend/tailwind.config.js para el detalle.
+      // 2026-09-09 (Fase 5, identidad BigMat): mismo cambio de marca (azul y
+      // rojo corporativos reales de BigMat) que Backoffice y el resto de
+      // apps -- ver frontend/tailwind.config.js para el detalle.
       colors: {
         brand: {
-          50: "#fdf6ec",
-          100: "#fbebd3",
-          200: "#f5d3a0",
-          300: "#eebb6d",
-          400: "#f2a33d",
-          500: "#e08e22",
-          600: "#c9791f",
-          700: "#a35f18",
-          800: "#7c4812",
-          900: "#56330d",
+          50: "#f0f4f8",
+          100: "#dee6f0",
+          200: "#b8cadf",
+          300: "#8eaacb",
+          400: "#547eb1",
+          500: "#21589a",
+          600: "#03418c",
+          700: "#023573",
+          800: "#022c5f",
+          900: "#02234c",
+        },
+        red: {
+          50: "#fdf1f1",
+          100: "#fbe2e1",
+          200: "#f7c0bf",
+          300: "#f29998",
+          400: "#ec6563",
+          500: "#e63835",
+          600: "#e31d1a",
+          700: "#ba1815",
+          800: "#9a1412",
+          900: "#7b100e",
         },
       },
     },

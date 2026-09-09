@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import SignaturePad from "@/components/SignaturePad";
 import PhotoCapture from "@/components/PhotoCapture";
+import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
 interface TodayRouteResponse {
   shipment: {
@@ -35,6 +36,12 @@ export default function StopDetailPage() {
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [showIncidentForm, setShowIncidentForm] = useState(false);
   const [failureReason, setFailureReason] = useState("");
+  // 2026-09-09 (Fase 5, App Conductor estilo Bringg): la barra inferior fija
+  // de acciones (Foto / Firma / Incidencia) no mueve estos campos de sitio --
+  // siguen siendo el mismo bloque en línea de siempre, solo que ahora se
+  // puede saltar a ellos desde la barra con un scroll suave.
+  const photoSectionRef = useRef<HTMLDivElement>(null);
+  const signatureSectionRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["today-route"],
@@ -87,14 +94,21 @@ export default function StopDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 pb-10">
-      <header className="bg-white border-b border-slate-200 px-4 py-4 flex items-center gap-3 sticky top-0 z-10">
-        <button onClick={() => navigate("/")} className="text-brand-600 text-xl leading-none">
-          ←
-        </button>
-        <h1 className="text-base font-mono font-bold text-slate-800">Parada #{stop.sequence}</h1>
+      <header className="bg-white border-b border-slate-200 px-4 py-4 flex items-center justify-between gap-3 sticky top-0 z-10">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate("/")} className="text-brand-600 text-xl leading-none">
+            ←
+          </button>
+          <h1 className="text-base font-mono font-bold text-slate-800">Parada #{stop.sequence}</h1>
+        </div>
+        <img src={bigmatWordmark} alt="BigMat" className="h-5" />
       </header>
 
-      <main className="px-4 pt-4 max-w-lg mx-auto space-y-4">
+      <main
+        className={`px-4 pt-4 max-w-lg mx-auto space-y-4 ${
+          (stop.status === "pending" || stop.status === "arrived") && !showIncidentForm ? "pb-40" : "pb-4"
+        }`}
+      >
         <div className="bg-white rounded-2xl border border-slate-200 p-4">
           <p className="text-lg font-semibold text-slate-900">{stop.order.customer.legalName}</p>
           <p className="text-sm text-slate-500">
@@ -131,30 +145,66 @@ export default function StopDetailPage() {
         )}
 
         {(stop.status === "pending" || stop.status === "arrived") && !showIncidentForm && (
-          <div className="space-y-3">
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-              <input
-                value={receivedByName}
-                onChange={(e) => setReceivedByName(e.target.value)}
-                placeholder="Nombre de quien recibe (opcional)"
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base"
-              />
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+            <input
+              value={receivedByName}
+              onChange={(e) => setReceivedByName(e.target.value)}
+              placeholder="Nombre de quien recibe (opcional)"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base"
+            />
+            <div ref={signatureSectionRef}>
               <SignaturePad onChange={setSignatureUrl} />
+            </div>
+            <div ref={photoSectionRef}>
               <PhotoCapture onChange={setPhotoUrls} />
             </div>
-            <button
-              onClick={() => completeMutation.mutate()}
-              disabled={completeMutation.isPending}
-              className="w-full bg-teal-600 hover:bg-teal-700 text-white rounded-2xl py-4 text-base font-semibold shadow"
-            >
-              ✓ Confirmar entrega
-            </button>
-            <button
-              onClick={() => setShowIncidentForm(true)}
-              className="w-full bg-white border border-red-300 text-red-600 rounded-2xl py-3 text-sm font-medium"
-            >
-              Incidencia / Retorno
-            </button>
+          </div>
+        )}
+
+        {/* 2026-09-09 (Fase 5): barra inferior fija estilo Bringg -- Foto /
+            Firma / Incidencia son accesos directos a las mismas secciones de
+            arriba (scroll suave, no abren nada nuevo), más el botón grande de
+            completar entrega. A propósito NO se añaden "Formularios" ni
+            "Escanear" como en la referencia de Bringg: esta app no tiene
+            formularios configurables ni escaneo de códigos, y añadir esos
+            botones sería una función decorativa que no hace nada real. */}
+        {(stop.status === "pending" || stop.status === "arrived") && !showIncidentForm && (
+          <div className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] z-20">
+            <div className="max-w-lg mx-auto space-y-2">
+              <div className="flex items-center justify-around">
+                <button
+                  type="button"
+                  onClick={() => photoSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  className="flex flex-col items-center gap-0.5 text-slate-600"
+                >
+                  <span className="text-xl leading-none">📷</span>
+                  <span className="text-[11px] font-medium">Foto</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => signatureSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                  className="flex flex-col items-center gap-0.5 text-slate-600"
+                >
+                  <span className="text-xl leading-none">✍️</span>
+                  <span className="text-[11px] font-medium">Firma</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowIncidentForm(true)}
+                  className="flex flex-col items-center gap-0.5 text-red-600"
+                >
+                  <span className="text-xl leading-none">⚠️</span>
+                  <span className="text-[11px] font-medium">Incidencia</span>
+                </button>
+              </div>
+              <button
+                onClick={() => completeMutation.mutate()}
+                disabled={completeMutation.isPending}
+                className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-2xl py-4 text-base font-semibold shadow disabled:opacity-50"
+              >
+                ✓ Completar entrega
+              </button>
+            </div>
           </div>
         )}
 

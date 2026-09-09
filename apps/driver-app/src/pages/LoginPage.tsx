@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
+import bigmatLogo from "@/assets/bigmat-logo.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("conductor@tms.local");
@@ -33,6 +34,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-md p-8">
+        <img src={bigmatLogo} alt="BigMat" className="h-14 mx-auto mb-4" />
         <h1 className="text-2xl font-semibold text-brand-700 mb-1">App Conductor</h1>
         <p className="text-sm text-slate-500 mb-6">Login simple para uso en cabina</p>
 

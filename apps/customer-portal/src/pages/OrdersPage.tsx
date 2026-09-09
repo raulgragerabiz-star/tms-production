@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { apiClient } from "@/api/client";
 import { logoutCustomerPortal } from "@/api/auth";
 import Chip, { ChipColor } from "@/components/Chip";
+import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
 interface OrderSummary {
   id: string;
@@ -58,7 +59,10 @@ export default function OrdersPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-800">Mis pedidos</h1>
+        <div className="flex items-center gap-3">
+          <img src={bigmatWordmark} alt="BigMat" className="h-6" />
+          <h1 className="text-lg font-semibold text-slate-800">Mis pedidos</h1>
+        </div>
         <button
           onClick={() => {
             logoutCustomerPortal();

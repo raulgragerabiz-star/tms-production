@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth-store";
+import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
 const navItems = [
   { to: "/", label: "Inicio", end: true },
@@ -49,7 +50,8 @@ export default function AppLayout() {
     <div className="min-h-screen flex">
       <aside className="w-64 bg-white border-r border-slate-200 flex flex-col">
         <div className="px-4 py-5 border-b border-slate-100">
-          <h1 className="text-lg font-bold text-brand-700">TMS Expediciones</h1>
+          <img src={bigmatWordmark} alt="BigMat" className="h-7 mb-1.5" />
+          <h1 className="text-xs font-semibold text-slate-500">TMS Expediciones</h1>
           <p className="text-xs text-slate-400 mt-0.5">{user?.fullName}</p>
         </div>
 

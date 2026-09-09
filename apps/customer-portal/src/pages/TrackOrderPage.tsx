@@ -6,6 +6,7 @@ import {
   TrackingResult,
 } from "@/api/tracking";
 import TrackingMap from "@/components/TrackingMap";
+import bigmatLogo from "@/assets/bigmat-logo.png";
 
 // Consulta pública de estado de pedido: acceso único para cualquiera, sin
 // usuario ni contraseña -- decisión explícita de Raúl para no tener que dar
@@ -119,6 +120,7 @@ export default function TrackOrderPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4 py-10">
       <div className="bg-white shadow rounded-lg p-8 w-full max-w-sm space-y-4">
+        <img src={bigmatLogo} alt="BigMat" className="h-12 mx-auto" />
         <h1 className="text-xl font-semibold text-slate-800">Consultar mi pedido</h1>
         <p className="text-sm text-slate-500">
           Introduce el número de pedido y el código postal de la entrega para ver su estado.

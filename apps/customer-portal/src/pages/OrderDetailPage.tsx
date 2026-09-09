@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/api/client";
+import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
 interface TimelineStep {
   key: string;
@@ -122,11 +123,14 @@ export default function OrderDetailPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b px-6 py-4 flex items-center gap-3">
-        <Link to="/" className="text-sm text-slate-500 hover:text-slate-800">
-          ← Volver
-        </Link>
-        <h1 className="text-lg font-semibold text-slate-800">{order.orderNumber}</h1>
+      <header className="bg-white border-b px-6 py-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link to="/" className="text-sm text-slate-500 hover:text-slate-800">
+            ← Volver
+          </Link>
+          <h1 className="text-lg font-semibold text-slate-800">{order.orderNumber}</h1>
+        </div>
+        <img src={bigmatWordmark} alt="BigMat" className="h-6" />
       </header>
 
       <main className="max-w-3xl mx-auto px-6 py-6 space-y-6">

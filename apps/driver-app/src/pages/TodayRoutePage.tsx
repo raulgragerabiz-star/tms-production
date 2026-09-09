@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
 import { endShift, getCurrentShift, startShift } from "@/api/driverApp";
 import Chip, { ChipColor } from "@/components/Chip";
+import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
 // Mejor esfuerzo: si el navegador da permiso y ubicación en menos de 3s se
 // adjunta al fichaje; si no, se ficha igualmente sin coordenadas -- la
@@ -118,9 +119,12 @@ export default function TodayRoutePage() {
   return (
     <div className="min-h-screen pb-8">
       <header className="bg-white border-b border-slate-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
-        <div>
-          <h1 className="text-lg font-bold text-brand-700">Ruta de hoy</h1>
-          <p className="text-xs text-slate-400">{user?.fullName}</p>
+        <div className="flex items-center gap-3">
+          <img src={bigmatWordmark} alt="BigMat" className="h-6" />
+          <div>
+            <h1 className="text-lg font-bold text-brand-700">Ruta de hoy</h1>
+            <p className="text-xs text-slate-400">{user?.fullName}</p>
+          </div>
         </div>
         <button onClick={handleLogout} className="text-sm text-slate-500">
           Salir

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { loginCustomerPortal } from "@/api/auth";
+import bigmatLogo from "@/assets/bigmat-logo.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -29,6 +30,7 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
         className="bg-white shadow rounded-lg p-8 w-full max-w-sm space-y-4"
       >
+        <img src={bigmatLogo} alt="BigMat" className="h-12 mx-auto" />
         <h1 className="text-xl font-semibold text-slate-800">Portal Cliente</h1>
         <p className="text-sm text-slate-500">
           Consulta el estado de tus pedidos y tus retornos pendientes.
