@@ -13,6 +13,9 @@ const customerSchema = z.object({
   commercialName: z.string().optional(),
   taxId: z.string().optional(),
   active: z.boolean().optional(),
+  // Fase 8: circuito de reparto (ver DeliveryZone) -- opcional, se puede
+  // reasignar en cualquier momento sin afectar a nada más de la ficha.
+  deliveryZoneId: z.string().uuid().optional().nullable(),
 });
 
 // Carga del maestro de clientes/socios (Código, Nombre, Dirección completa)
@@ -89,7 +92,10 @@ customersRouter.get(
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { legalName: "asc" },
-        include: { _count: { select: { deliveryPoints: true } } },
+        include: {
+          _count: { select: { deliveryPoints: true } },
+          deliveryZone: { select: { id: true, name: true } },
+        },
       }),
       prisma.customer.count({ where }),
     ]);

@@ -25,7 +25,14 @@ interface ZoneRow {
 
 const cellCls = "w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm";
 
-export default function InfluenceZonesPage() {
+// Fase 8: "embedded" -- se usa desde "Flota y Transportistas" (pestaña
+// "Tipos de vehículo y zonas"), donde se agrupó junto a los tipos de
+// vehículo para reducir el panel izquierdo (antes era un acceso de menú
+// aparte, "Zonas de influencia"). Con `embedded` solo se oculta el título
+// propio; el resto de la pantalla (selector de almacén, tabla de franjas)
+// funciona exactamente igual. Sin el prop (por si algo la sigue montando
+// suelta) el comportamiento no cambia en nada.
+export default function InfluenceZonesPage({ embedded = false }: { embedded?: boolean }) {
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
   const [warehouseId, setWarehouseId] = useState<string>("");
@@ -103,7 +110,7 @@ export default function InfluenceZonesPage() {
     <div>
       <div className="flex items-center justify-between mb-1">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">Zonas de influencia</h1>
+          {!embedded && <h1 className="text-xl font-semibold text-slate-900">Zonas de influencia</h1>}
           <p className="text-sm text-slate-500">
             Franjas de km desde cada almacén y el vehículo que se les asigna.
           </p>

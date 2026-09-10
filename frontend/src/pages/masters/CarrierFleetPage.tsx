@@ -1,36 +1,32 @@
 import { useState } from "react";
-import CarriersPage from "@/pages/masters/CarriersPage";
-import RatesPage from "@/pages/RatesPage";
+import TransportistasTab from "@/pages/masters/TransportistasTab";
 import VehiclesPage from "@/pages/masters/VehiclesPage";
+import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 
-// 2026-09-09: petición explícita de Raúl -- "para ahorrar tiempos y evitar
-// tanta segmentación, deberíamos compactar todo lo relacionado con
-// transportista y flotas [en] un solo acceso en el menú lateral + pestañas
-// con cada uno de los campos (empresa, tarifas, vehículos, conductores,
-// tipo de vehículo)". Antes esto eran 3 accesos de menú distintos
-// (Maestros > Transportistas, Maestros > Flota -- que a su vez tenía sus
-// propias 3 sub-pestañas -- y el "Tarifas" de nivel superior). Ahora es un
-// único acceso ("Flota y Transportistas") con las 5 pestañas que pidió, en
-// el orden que las nombró.
+// Fase 8: petición explícita de Raúl -- reducir esto de 5 pestañas
+// (Empresa/Tarifas/Vehículos/Conductores/Tipo de vehículo) a menos,
+// agrupando conceptos para "reducir el panel izquierdo". A partir de la
+// plantilla real que aportó (circuitos de reparto, transportistas
+// colaboradores y sus tarifas), se sustituyen "Empresa" + "Tarifas" +
+// "Vehículos" por una única tabla ("Transportistas": una fila por circuito↔
+// transportista, con checkboxes de tipo de vehículo y columnas por
+// tipología de tarifa en vez de las de analítica) y se fusiona "Tipo de
+// vehículo" con "Zonas de influencia" (que antes era un acceso de menú
+// aparte) en una sola sub-pestaña.
 //
-// Cada pestaña reutiliza la pantalla ya existente (misma lógica, mismas
-// consultas, mismos modales) en modo "embedded": solo se oculta el título
-// propio de cada una (esta pantalla ya pone uno) y, en el caso de
-// Vehículos/Conductores/Tipo de vehículo, la sub-barra de pestañas propia
-// de VehiclesPage se sustituye por esta barra única -- el contenido y el
-// comportamiento de cada tabla no cambian en nada.
-type Tab = "empresa" | "tarifas" | "vehiculos" | "conductores" | "tipos";
+// "Conductores" no cambia -- sigue siendo la misma pantalla de siempre
+// (VehiclesPage en modo embedded), solo que ahora es la segunda pestaña en
+// vez de la cuarta.
+type Tab = "transportistas" | "conductores" | "tipos-zonas";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "empresa", label: "Empresa" },
-  { id: "tarifas", label: "Tarifas" },
-  { id: "vehiculos", label: "Vehículos" },
+  { id: "transportistas", label: "Transportistas" },
   { id: "conductores", label: "Conductores" },
-  { id: "tipos", label: "Tipo de vehículo" },
+  { id: "tipos-zonas", label: "Tipo de vehículo y zonas" },
 ];
 
 export default function CarrierFleetPage() {
-  const [tab, setTab] = useState<Tab>("empresa");
+  const [tab, setTab] = useState<Tab>("transportistas");
 
   return (
     <div>
@@ -38,9 +34,9 @@ export default function CarrierFleetPage() {
         <h1 className="text-xl font-semibold text-slate-900">Flota y Transportistas</h1>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        Todo lo relacionado con los transportistas subcontratados en un solo sitio: su ficha, las
-        tarifas que tienen contratadas, sus vehículos, sus conductores y los tipos de vehículo
-        disponibles.
+        Los circuitos de reparto y los transportistas que colaboran en cada uno, con su tarifa y el
+        tipo de vehículo que aportan; sus conductores; y los tipos de vehículo y zonas de influencia
+        que usa el planificador automático.
       </p>
 
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -57,13 +53,21 @@ export default function CarrierFleetPage() {
         ))}
       </div>
 
-      {tab === "empresa" && <CarriersPage embedded />}
-      {tab === "tarifas" && <RatesPage embedded />}
-      {(tab === "vehiculos" || tab === "conductores" || tab === "tipos") && (
-        <VehiclesPage
-          embedded
-          activeTab={tab === "vehiculos" ? "vehicles" : tab === "conductores" ? "drivers" : "types"}
-        />
+      {tab === "transportistas" && <TransportistasTab />}
+      {tab === "conductores" && <VehiclesPage embedded activeTab="drivers" />}
+      {tab === "tipos-zonas" && (
+        <div className="space-y-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Tipos de vehículo</p>
+            <VehiclesPage embedded activeTab="types" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
+              Zonas de influencia (franjas de km del auto-planificador)
+            </p>
+            <InfluenceZonesPage embedded />
+          </div>
+        </div>
       )}
     </div>
   );

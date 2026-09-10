@@ -37,6 +37,9 @@ model Company {
   FuelIndexReading        FuelIndexReading[]
   anomalyAlerts           AnomalyAlert[]
   demandForecasts         DemandForecast[]
+  // Fase 8: circuitos de reparto (agrupación de clientes por zona de
+  // destino) -- ver modelo DeliveryZone más abajo.
+  deliveryZones           DeliveryZone[]
   // Motor de inteligencia (3/3): auto-asignación de transportista cuando la
   // confianza del modelo de puntuación supera este umbral. Opt-in real --
   // `false` por defecto, nunca se activa sola; se gestiona desde la nueva
@@ -113,6 +116,9 @@ model Warehouse {
   // almacén (ver DemandForecast más abajo).
   demandForecasts  DemandForecast[]
   company          Company  @relation(fields: [companyId], references: [id])
+  // Fase 8: circuitos de reparto que parten de este almacén (opcional --
+  // un circuito puede no tener almacén asignado todavía).
+  deliveryZones    DeliveryZone[]
 
   @@index([companyId, active])
   @@map("warehouse")
@@ -220,17 +226,24 @@ model Customer {
   defaultCity       String?       @map("default_city")
   defaultProvince   String?       @map("default_province")
   defaultPostalCode String?       @map("default_postal_code")
+  // Fase 8: circuito de reparto al que pertenece este cliente (agrupación de
+  // clientes por zona de destino, p.ej. "MAD1"/"ASTURIAS (Pinto)" -- ver
+  // modelo DeliveryZone). Opcional y aditivo: un cliente sin circuito
+  // asignado sigue funcionando exactamente igual que hasta ahora.
+  deliveryZoneId String?         @map("delivery_zone_id")
   active         Boolean         @default(true)
   deletedAt      DateTime?       @map("deleted_at")
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")
   company        Company         @relation(fields: [companyId], references: [id])
+  deliveryZone   DeliveryZone?   @relation(fields: [deliveryZoneId], references: [id])
   customerRates  CustomerRate[]
   deliveryPoints DeliveryPoint[]
   orders         Order[]
   returnItems    ReturnItem[]
 
   @@unique([companyId, businessCode])
+  @@index([deliveryZoneId])
   @@map("customer")
 }
 
@@ -325,6 +338,13 @@ model Carrier {
   shipments             Shipment[]
   vehicles              Vehicle[]
   zoneRates             ZoneRate[]
+  // Fase 8: tarifas por circuito de reparto que tiene contratadas este
+  // transportista (ver DeliveryZoneRate) y tipos de vehículo que declara
+  // poder aportar (checkboxes en "Flota y Transportistas" -- ver
+  // CarrierVehicleType). Ambas aditivas, no sustituyen fullTruckRates/
+  // palletRates/vehicles, que siguen funcionando igual.
+  deliveryZoneRates     DeliveryZoneRate[]
+  vehicleTypeOfferings  CarrierVehicleType[]
 
   @@map("carrier")
 }
@@ -345,6 +365,8 @@ model VehicleType {
   vehicles               Vehicle[]
   // Objetivo 2: tipo de vehículo asignado a una franja de zona de influencia.
   influenceZones         InfluenceZone[]
+  // Fase 8: transportistas que declaran poder aportar este tipo de vehículo.
+  carrierOfferings       CarrierVehicleType[]
 
   @@map("vehicle_type")
 }
@@ -517,6 +539,83 @@ model ZoneRate {
   carrier     Carrier     @relation(fields: [carrierId], references: [id])
 
   @@map("zone_rate")
+}
+
+// Fase 8: "circuito" de reparto -- agrupación de clientes por zona de destino
+// pedida por Raúl (plantilla real con columna "Rutas": "MAD1", "ASTURIAS
+// (Pinto)", etc.), para poder ver y tarificar de un vistazo qué
+// transportistas colaboran en cada circuito. Es un concepto DISTINTO de
+// InfluenceZone (franjas de km desde un almacén que usa el auto-planificador
+// para elegir tipo de vehículo -- ese modelo no se toca ni se sustituye) y
+// también distinto del `zoneName` de texto libre de ZoneRate (tarifa por
+// zona/provincia del motor de tarifas de Fase 9, sin relación a ninguna
+// tabla). DeliveryZone es puramente organizativo/comercial: agrupa clientes
+// y sirve de base a DeliveryZoneRate (la tarifa que cada transportista tiene
+// pactada para ese circuito). Totalmente aditivo.
+model DeliveryZone {
+  id          String             @id @default(uuid())
+  companyId   String             @map("company_id")
+  warehouseId String?            @map("warehouse_id")
+  name        String
+  active      Boolean            @default(true)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  company     Company            @relation(fields: [companyId], references: [id])
+  warehouse   Warehouse?         @relation(fields: [warehouseId], references: [id])
+  customers   Customer[]
+  rates       DeliveryZoneRate[]
+
+  @@unique([companyId, name])
+  @@map("delivery_zone")
+}
+
+// Tarifa que un transportista concreto tiene pactada para un circuito
+// concreto (puede haber varios transportistas por circuito, colaborando
+// para destinos distintos dentro de él -- exactamente el caso "si se repiten
+// por rutas es porque colaboran para diferentes destinos" que describió
+// Raúl). Mismo patrón de vigencias que FullTruckRate/PalletRate
+// (validFrom/validTo, sin solape -- validado en delivery-zones.routes.ts con
+// la misma rangesOverlap() de siempre). Los 4 campos de importe replican
+// las columnas de la plantilla real ("€", "€/Tn", "Descarga", "Ingreso
+// €/tn socios"); todos opcionales porque no todas las filas de la plantilla
+// traen los 4 rellenos.
+model DeliveryZoneRate {
+  id                  String       @id @default(uuid())
+  deliveryZoneId      String       @map("delivery_zone_id")
+  carrierId           String       @map("carrier_id")
+  validFrom           DateTime     @map("valid_from")
+  validTo             DateTime?    @map("valid_to")
+  flatFee             Decimal?     @map("flat_fee") @db.Decimal(12, 4)
+  pricePerTon         Decimal?     @map("price_per_ton") @db.Decimal(12, 4)
+  unloadFee           Decimal?     @map("unload_fee") @db.Decimal(12, 4)
+  partnerIncomePerTon Decimal?     @map("partner_income_per_ton") @db.Decimal(12, 4)
+  scheduleNote        String?      @map("schedule_note")
+  currency            String       @default("EUR") @db.Char(3)
+  createdAt           DateTime     @default(now()) @map("created_at")
+  deliveryZone        DeliveryZone @relation(fields: [deliveryZoneId], references: [id])
+  carrier             Carrier      @relation(fields: [carrierId], references: [id])
+
+  @@index([deliveryZoneId])
+  @@index([carrierId])
+  @@map("delivery_zone_rate")
+}
+
+// Capacidad declarada de un transportista: qué tipos de vehículo puede
+// aportar (checkboxes en la fila de "Flota y Transportistas" > Transportistas
+// que pidió Raúl). Es una simple tabla de relación muchos-a-muchos, no
+// sustituye a Vehicle (que sigue siendo la matrícula real dada de alta) --
+// esto es "este transportista PUEDE traer un frigorífico" antes incluso de
+// tener uno matriculado en el sistema.
+model CarrierVehicleType {
+  id            String      @id @default(uuid())
+  carrierId     String      @map("carrier_id")
+  vehicleTypeId String      @map("vehicle_type_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  carrier       Carrier     @relation(fields: [carrierId], references: [id])
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
+
+  @@unique([carrierId, vehicleTypeId])
+  @@map("carrier_vehicle_type")
 }
 
 model Order {

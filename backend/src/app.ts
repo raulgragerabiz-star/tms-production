@@ -21,6 +21,7 @@ import { billingRouter } from "@/modules/billing/billing.routes";
 import { dashboardRouter } from "@/modules/dashboard/dashboard.routes";
 import { warehousesRouter } from "@/modules/warehouses/warehouses.routes";
 import { zonesRouter } from "@/modules/zones/zones.routes";
+import { deliveryZonesRouter } from "@/modules/delivery-zones/delivery-zones.routes";
 import { carrierPortalRouter } from "@/modules/portal/carrier-portal.routes";
 import { driverAppRouter } from "@/modules/portal/driver-app.routes";
 import { customerPortalRouter } from "@/modules/portal/customer-portal.routes";
@@ -112,6 +113,7 @@ export function createApp() {
   app.use("/api/dashboard", requireAuth, dashboardRouter);
   app.use("/api/warehouses", requireAuth, warehousesRouter);
   app.use("/api/zones", requireAuth, zonesRouter);
+  app.use("/api/delivery-zones", requireAuth, deliveryZonesRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
   // Motor de inteligencia (1/3): detección de anomalías -- ver
   // anomaly-detection.service.ts.

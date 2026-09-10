@@ -19,15 +19,20 @@ const navItems = [
 // transportista y flotas [en] un solo acceso en el menú lateral + pestañas".
 // Transportistas, Flota (que ya tenía Vehículos/Conductores/Tipos como
 // sub-pestañas) y el "Tarifas" de nivel superior de arriba se sustituyen por
-// un único acceso -- ver CarrierFleetPage, con las 5 pestañas que pidió
-// (Empresa, Tarifas, Vehículos, Conductores, Tipo de vehículo).
+// un único acceso -- ver CarrierFleetPage.
+//
+// Fase 8: siguiendo el mismo criterio ("reducimos el panel izquierdo
+// agrupando conceptos"), "Zonas de influencia" deja de ser un acceso de menú
+// aparte y pasa a ser una sub-pestaña dentro de "Flota y Transportistas"
+// (junto a "Tipo de vehículo", con quien comparte configuración). La ruta
+// /maestros/zonas-influencia se mantiene activa por si algo enlaza
+// directamente a ella -- solo se quita el enlace del menú.
 const masterItems = [
   { to: "/maestros/clientes", label: "Clientes" },
   { to: "/maestros/productos", label: "Productos" },
   { to: "/maestros/flota-transportistas", label: "Flota y Transportistas" },
   { to: "/maestros/usuarios", label: "Usuarios" },
   { to: "/maestros/almacenes", label: "Almacenes" },
-  { to: "/maestros/zonas-influencia", label: "Zonas de influencia" },
 ];
 
 function linkClass({ isActive }: { isActive: boolean }) {
