@@ -77,11 +77,13 @@ export default function RutasTab({ warehouseId, routeDate, onManageRoute, onSucc
   });
 
   function handleDeleteRoute(r: RouteRow) {
-    if (
-      window.confirm(
-        `¿Eliminar esta ruta (${r.stops.length} paradas)? Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`
-      )
-    ) {
+    // Fase 8k: ahora también se puede borrar una ruta con envío en curso
+    // (no entregado) -- se avisa de que eso se lleva también su seguimiento
+    // e incidencias registradas hasta ahora.
+    const warning = r.shipment
+      ? `¿Eliminar esta ruta (${r.stops.length} paradas)? Ya tiene un envío en curso: se borrarán también su seguimiento, incidencias y albaranes registrados hasta ahora. Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`
+      : `¿Eliminar esta ruta (${r.stops.length} paradas)? Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`;
+    if (window.confirm(warning)) {
       deleteRouteMutation.mutate(r.id);
     }
   }

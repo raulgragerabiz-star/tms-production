@@ -10,12 +10,28 @@
 // independiente del estado general del envío, pero no tiene endpoint montado
 // -- no llamar todavía.
 
-import { apiClient } from "./client"; // cliente ya existente en la app
+import { apiClient, api } from "./client"; // cliente ya existente en la app
 import { enqueueAction } from "@/offline/offlineQueue";
 
 export async function bindVehicleByQrToken(token: string) {
   const res = await apiClient.post("/driver-app/session/bind-vehicle", { token });
   return res.data as { vehicleId: string; plate: string; vehicleType: string; carrier: string };
+}
+
+// Fase 8k: login solo-con-QR -- a diferencia de bindVehicleByQrToken (que
+// requiere ya tener sesión iniciada), esta llamada es la que arranca la
+// sesión: escanear el QR del vehículo basta para entrar en la App Conductor,
+// sin email/contraseña. Usa `api` en vez de `apiClient` a propósito: en este
+// momento no hay ningún token todavía (es indiferente cuál se use, son la
+// misma instancia -- ver client.ts -- pero así queda más claro en el nombre
+// que es una llamada "pre-login").
+export async function loginWithVehicleQr(token: string) {
+  const res = await api.post("/auth/driver-qr-login", { token });
+  return res.data as {
+    token: string;
+    user: { id: string; email: string; fullName: string; userType: string; driverId: string | null };
+    vehicle: { plate: string; vehicleType?: string; carrier?: string };
+  };
 }
 
 // Jornada (inicio/fin de turno) -- QR de conductor + jornada.

@@ -17,6 +17,9 @@ export interface WarehouseEditable {
   lat: number | null;
   lng: number | null;
   externalCode: string | null;
+  // Fase 8k: jornada laboral máxima (horas) admitida para una ruta que sale
+  // de este almacén -- ver comentario en el modelo Warehouse (schema.prisma).
+  maxRouteDurationHours: number | null;
 }
 
 interface Props {
@@ -41,6 +44,7 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [externalCode, setExternalCode] = useState("");
+  const [maxRouteDurationHours, setMaxRouteDurationHours] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +56,7 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
     setLat(warehouse?.lat != null ? String(warehouse.lat) : "");
     setLng(warehouse?.lng != null ? String(warehouse.lng) : "");
     setExternalCode(warehouse?.externalCode ?? "");
+    setMaxRouteDurationHours(warehouse?.maxRouteDurationHours != null ? String(warehouse.maxRouteDurationHours) : "");
   }, [open, warehouse]);
 
   const mutation = useMutation({
@@ -65,6 +70,7 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
         lat: lat ? Number(lat) : undefined,
         lng: lng ? Number(lng) : undefined,
         externalCode: externalCode || undefined,
+        maxRouteDurationHours: maxRouteDurationHours ? Number(maxRouteDurationHours) : undefined,
       };
       if (isEdit) return (await api.put(`/warehouses/${warehouse!.id}`, payload)).data;
       return (await api.post("/warehouses", payload)).data;
@@ -118,6 +124,21 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
           hint="Opcional — identificador para enlazar este almacén con otro sistema (p. ej. un proyecto de layout de almacén)"
         >
           <input className={inputCls} value={externalCode} onChange={(e) => setExternalCode(e.target.value)} />
+        </Field>
+        <Field
+          label="Jornada laboral máxima (horas)"
+          hint="Opcional — por tacógrafo/jornada, una ruta que salga de este almacén no se podrá confirmar si su duración estimada la supera. Si también hay un límite en el transportista, se aplica el más restrictivo de los dos."
+        >
+          <input
+            type="number"
+            step="0.5"
+            min="0"
+            max="24"
+            className={inputCls}
+            value={maxRouteDurationHours}
+            onChange={(e) => setMaxRouteDurationHours(e.target.value)}
+            placeholder="Sin límite propio"
+          />
         </Field>
 
         <div className="flex justify-end gap-2 pt-2">

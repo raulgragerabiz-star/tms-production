@@ -39,6 +39,8 @@ interface CarrierRow {
   temperatureCapability: string;
   notes: string | null;
   active: boolean;
+  // Fase 8k: ver comentario en NewCarrierModal.tsx / schema.prisma.
+  maxRouteDurationHours: number | null;
   _count: { vehicles: number };
   vehicleTypeOfferings: { vehicleType: { id: string; name: string } }[];
 }

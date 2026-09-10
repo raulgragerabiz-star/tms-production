@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { requireDriverApp } from "@/middleware/scoped-auth";
-import { resolveVehicleFromQrToken } from "@/modules/vehicles/vehicle-qr.service";
+import { resolveVehicleFromQrToken, bindVehicleToDriverToday } from "@/modules/vehicles/vehicle-qr.service";
 import { broadcastToShipment, broadcastToWarehouse } from "@/realtime/ws.server";
 import { maybeRecalculateEta } from "@/modules/routing/eta-recalc.service";
 
@@ -31,20 +31,32 @@ async function notifyShipmentChange(shipmentId: string, type: string, payload: R
 }
 
 // Ruta diaria: paradas del día en orden, con dirección, ventana horaria y resumen del pedido.
+//
+// Fase 8k: petición de Raúl -- "necesita también un selector de fecha
+// dentro de la app. para consultas pasadas o para gestiones como las de
+// ahora, que las rutas de prueba tienen fecha del 09/09 pero al estar a
+// 10/09 no figura nada en su app". Antes solo miraba SIEMPRE la fecha real
+// de hoy (new Date()), así que una ruta de prueba con fecha pasada nunca
+// aparecía. Ahora acepta `?date=YYYY-MM-DD` opcional (por defecto, hoy --
+// ningún cliente que no mande el parámetro nota ningún cambio). También se
+// añade "finished" a los estados aceptados: para una fecha pasada tiene
+// sentido poder consultar una ruta ya entregada, no solo las activas.
 driverAppRouter.get(
   "/today-route",
   asyncHandler(async (req, res) => {
     const driverId = req.auth!.driverId!;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateParam = req.query.date as string | undefined;
+    const day = dateParam ? new Date(`${dateParam}T00:00:00`) : new Date();
+    if (Number.isNaN(day.getTime())) throw HttpError.badRequest("Fecha no válida");
+    day.setHours(0, 0, 0, 0);
+    const nextDay = new Date(day);
+    nextDay.setDate(nextDay.getDate() + 1);
 
     const shipment = await prisma.shipment.findFirst({
       where: {
         driverId,
-        status: { in: ["programmed", "loaded", "in_transit"] },
-        route: { routeDate: { gte: today, lt: tomorrow } },
+        status: { in: ["programmed", "loaded", "in_transit", "finished"] },
+        route: { routeDate: { gte: day, lt: nextDay } },
       },
       include: {
         vehicle: { include: { vehicleType: true } },
@@ -83,23 +95,7 @@ driverAppRouter.post(
     const driverId = req.auth!.driverId!;
 
     const vehicle = await resolveVehicleFromQrToken(token);
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
-    const todayShipment = await prisma.shipment.findFirst({
-      where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
-    });
-    if (todayShipment) {
-      await prisma.shipment.update({ where: { id: todayShipment.id }, data: { vehicleId: vehicle.id } });
-    }
-
-    const openShift = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
-    if (openShift) {
-      await prisma.driverShift.update({ where: { id: openShift.id }, data: { vehicleId: vehicle.id } });
-    }
+    await bindVehicleToDriverToday(driverId, vehicle.id);
 
     res.json({
       vehicleId: vehicle.id,

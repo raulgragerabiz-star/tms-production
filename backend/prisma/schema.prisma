@@ -103,6 +103,13 @@ model Warehouse {
   isCrossDock      Boolean  @default(false) @map("is_cross_dock")
   externalCode     String?  @unique @map("external_code")
   layoutJson       Json?    @map("layout_json")
+  // Fase 8k: jornada laboral máxima (horas) que se admite para una ruta que
+  // sale de este almacén -- petición de Raúl tras ver una ruta de prueba
+  // confirmada de 10:22 a 22:39 (más de 12h), que excede los límites reales
+  // de jornada/tacógrafo. Opcional (null = sin límite propio, se usa el del
+  // transportista si lo tiene -- ver Carrier.maxRouteDurationHours y la
+  // validación en routes.routes.ts, PATCH /:id/status).
+  maxRouteDurationHours Decimal? @map("max_route_duration_hours") @db.Decimal(4, 2)
   active           Boolean  @default(true)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
@@ -322,6 +329,12 @@ model Carrier {
   ownsFleet             Boolean               @default(false) @map("owns_fleet")
   temperatureCapability TemperatureCapability @default(ambient) @map("temperature_capability")
   notes                 String?
+  // Fase 8k: jornada laboral máxima (horas) admitida para los conductores de
+  // este transportista -- límite legal de conducción/tacógrafo. Opcional
+  // (null = sin límite propio del transportista, se usa el del almacén si lo
+  // tiene). Si ambos están configurados, se aplica el más restrictivo (ver
+  // validación en routes.routes.ts, PATCH /:id/status).
+  maxRouteDurationHours Decimal?              @map("max_route_duration_hours") @db.Decimal(4, 2)
   active                Boolean               @default(true)
   deletedAt             DateTime?             @map("deleted_at")
   createdAt             DateTime              @default(now()) @map("created_at")

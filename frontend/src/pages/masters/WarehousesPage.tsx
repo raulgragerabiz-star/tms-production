@@ -17,6 +17,8 @@ interface WarehouseRow {
   lng: number | null;
   externalCode: string | null;
   active: boolean;
+  // Fase 8k: ver comentario en NewWarehouseModal.tsx / schema.prisma.
+  maxRouteDurationHours: number | null;
 }
 
 export default function WarehousesPage() {
@@ -69,6 +71,7 @@ export default function WarehousesPage() {
               <th className="text-left px-4 py-3">Provincia</th>
               <th className="text-left px-4 py-3">Coordenadas</th>
               <th className="text-left px-4 py-3">Código externo</th>
+              <th className="text-left px-4 py-3">Jornada máx.</th>
               <th className="text-left px-4 py-3">Estado</th>
               <th className="text-left px-4 py-3">Acción</th>
             </tr>
@@ -76,12 +79,12 @@ export default function WarehousesPage() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {!isLoading && data?.items.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Sin almacenes registrados.</td>
+                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Sin almacenes registrados.</td>
               </tr>
             )}
             {data?.items.map((w) => (
@@ -94,6 +97,7 @@ export default function WarehousesPage() {
                   {w.lat && w.lng ? `${w.lat.toFixed(4)}, ${w.lng.toFixed(4)}` : "—"}
                 </td>
                 <td className="px-4 py-3 text-slate-400 text-xs font-mono font-semibold">{w.externalCode ?? "—"}</td>
+                <td className="px-4 py-3 text-slate-500">{w.maxRouteDurationHours != null ? `${w.maxRouteDurationHours} h` : "—"}</td>
                 <td className="px-4 py-3">
                   <Chip color={w.active ? "teal" : "slate"}>{w.active ? "Activo" : "Inactivo"}</Chip>
                 </td>

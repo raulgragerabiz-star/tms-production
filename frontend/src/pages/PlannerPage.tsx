@@ -159,7 +159,15 @@ export default function PlannerPage() {
         />
       )}
 
-      {view === "despacho" && <DispatchBoard warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />}
+      {view === "despacho" && (
+        <DispatchBoard
+          warehouseId={warehouseId}
+          routeDate={routeDate}
+          onManageRoute={setAssigningRouteId}
+          onSuccess={showSuccess}
+          onError={showError}
+        />
+      )}
 
       <NewRouteModal
         open={modalOpen}

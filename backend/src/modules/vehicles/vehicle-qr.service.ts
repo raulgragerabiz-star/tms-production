@@ -32,3 +32,27 @@ export async function resolveVehicleFromQrToken(token: string) {
 
   return record.vehicle;
 }
+
+// Fase 8k: extraído tal cual del handler POST /driver-app/session/bind-vehicle
+// (driver-app.routes.ts) para poder reutilizarlo también desde el nuevo login
+// solo-con-QR (auth.service.ts, loginWithVehicleQrToken) -- mismo efecto
+// exacto, sin duplicar lógica: actualiza el vehículo del envío de hoy (si lo
+// hay) y de la jornada abierta (si la hay).
+export async function bindVehicleToDriverToday(driverId: string, vehicleId: string) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const todayShipment = await prisma.shipment.findFirst({
+    where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
+  });
+  if (todayShipment) {
+    await prisma.shipment.update({ where: { id: todayShipment.id }, data: { vehicleId } });
+  }
+
+  const openShift = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+  if (openShift) {
+    await prisma.driverShift.update({ where: { id: openShift.id }, data: { vehicleId } });
+  }
+}

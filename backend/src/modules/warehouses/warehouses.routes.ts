@@ -46,6 +46,9 @@ const warehouseSchema = z.object({
   // el proyecto de layout necesite leer/escribir, sin acoplar el TMS a un formato fijo.
   externalCode: z.string().optional(),
   layoutJson: z.any().optional(),
+  // Fase 8k: jornada laboral máxima (horas) admitida para una ruta que sale
+  // de este almacén -- ver comentario en el modelo Warehouse (schema.prisma).
+  maxRouteDurationHours: z.number().positive().max(24).optional(),
 });
 
 warehousesRouter.get(

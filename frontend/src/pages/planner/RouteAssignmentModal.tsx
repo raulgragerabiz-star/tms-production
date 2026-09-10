@@ -193,6 +193,31 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo confirmar la ruta"),
   });
 
+  // Fase 8k: petición de Raúl -- "las rutas asignadas, también tienen que
+  // poder borrarse si han tenido algún error. Las únicas que no deberían
+  // poder borrarse son las que ya han sido entregadas a destino final". A
+  // diferencia del resto de acciones de este modal, esta se ofrece también
+  // cuando la ruta está "bloqueada" (LOCKED_STATUSES) -- justo el caso que
+  // motivó la petición (rutas ya asignadas/confirmadas/en curso con algún
+  // error), y se cierra el modal al terminar porque la ruta deja de existir.
+  const deleteRouteMutation = useMutation({
+    mutationFn: async () => api.delete(`/routes/${routeId}`),
+    onSuccess: () => {
+      invalidateAll();
+      onSuccess("Ruta eliminada. Sus pedidos han vuelto a estar pendientes de planificar.");
+      onClose();
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo eliminar la ruta"),
+  });
+
+  function handleDeleteRoute() {
+    if (!route) return;
+    const warning = route.shipment
+      ? `¿Eliminar esta ruta (${route.stops.length} paradas)? Ya tiene un envío en curso: se borrarán también su seguimiento, incidencias y albaranes registrados hasta ahora. Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`
+      : `¿Eliminar esta ruta (${route.stops.length} paradas)? Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`;
+    if (window.confirm(warning)) deleteRouteMutation.mutate();
+  }
+
   if (!routeId) return null;
 
   return (
@@ -404,6 +429,21 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                 </div>
               )}
             </>
+          )}
+
+          {/* Fase 8k: eliminar ruta -- disponible siempre (incluso bloqueada
+              por LOCKED_STATUSES) salvo que el envío ya esté "finished"
+              (entregado a destino final), ver comentario en la mutación. */}
+          {route.shipment?.status !== "finished" && (
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={handleDeleteRoute}
+                disabled={deleteRouteMutation.isPending}
+                className="text-xs font-medium text-red-500 hover:text-red-600 disabled:opacity-50"
+              >
+                Eliminar ruta
+              </button>
+            </div>
           )}
         </div>
       )}

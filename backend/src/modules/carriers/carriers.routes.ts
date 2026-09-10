@@ -15,6 +15,9 @@ const carrierSchema = z.object({
   ownsFleet: z.boolean().optional(),
   temperatureCapability: z.enum(["ambient", "refrigerated", "frozen", "mixed"]).optional(),
   notes: z.string().optional(),
+  // Fase 8k: jornada laboral máxima (horas) admitida para los conductores de
+  // este transportista -- ver comentario en el modelo Carrier (schema.prisma).
+  maxRouteDurationHours: z.number().positive().max(24).optional(),
 });
 
 // Fase 8: se incluye qué tipos de vehículo declara poder aportar cada

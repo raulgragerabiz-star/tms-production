@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import PlannerMap, { MapLine, MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
@@ -75,6 +75,11 @@ interface Props {
   warehouseId: string;
   routeDate: string;
   onManageRoute: (routeId: string) => void;
+  // Fase 8k: "eliminar ruta" desde el mismo panel de detalle donde ya está
+  // "Llamar al conductor" -- necesita avisar de éxito/error igual que el
+  // resto de pestañas del Planificador (RutasTab, PlanificacionTab).
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
 }
 
 // Qué se muestra en el panel central: nada (lista de rutas por defecto), una
@@ -96,7 +101,18 @@ function initials(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] ?? "")).toUpperCase();
 }
 
-export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }: Props) {
+// Fase 8k: petición de Raúl -- "el contacto al driver debería dar dos
+// opciones, llamada o mensaje (whatsapp) ya que desde el PC por ejemplo no
+// se puede realizar una llamada". wa.me necesita el número completo con
+// prefijo de país, sin "+" ni ceros iniciales -- si el teléfono guardado es
+// un número español "corto" (9 dígitos, sin prefijo, el caso habitual aquí)
+// se antepone 34; si ya trae prefijo de país no se toca.
+function toWhatsAppDigits(phone: string): string {
+  const digits = phone.replace(/\D/g, "").replace(/^0+/, "");
+  return digits.length === 9 ? `34${digits}` : digits;
+}
+
+export default function DispatchBoard({ warehouseId, routeDate, onManageRoute, onSuccess, onError }: Props) {
   const [selection, setSelection] = useState<Selection>(null);
   const queryClient = useQueryClient();
   const queryKey = ["dispatch-board", warehouseId, routeDate];
@@ -109,6 +125,31 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
       ).data as DispatchBoardData,
     refetchInterval: POLL_INTERVAL_MS,
   });
+
+  // Fase 8k: petición de Raúl -- "las rutas asignadas, también tienen que
+  // poder borrarse si han tenido algún error. Las únicas que no deberían
+  // poder borrarse son las que ya han sido entregadas a destino final". Este
+  // es justo el panel donde se ve una ruta ya asignada/confirmada/en curso
+  // (el caso que motivó la petición), así que se ofrece aquí también, no
+  // solo en la pestaña "Rutas".
+  const deleteRouteMutation = useMutation({
+    mutationFn: async (routeId: string) => api.delete(`/routes/${routeId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ["planner-board"] });
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      setSelection(null);
+      onSuccess("Ruta eliminada. Sus pedidos han vuelto a estar pendientes de planificar.");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo eliminar la ruta"),
+  });
+
+  function handleDeleteRoute(r: RouteRow) {
+    const warning = r.shipment
+      ? `¿Eliminar esta ruta (${r.stops.length} paradas)? Ya tiene un envío en curso: se borrarán también su seguimiento, incidencias y albaranes registrados hasta ahora. Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`
+      : `¿Eliminar esta ruta (${r.stops.length} paradas)? Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`;
+    if (window.confirm(warning)) deleteRouteMutation.mutate(r.id);
+  }
 
   // Fase 6: canal en vivo -- cuando llega un evento de posición/estado, se
   // actualiza directamente la cache de React Query (sin esperar al próximo
@@ -480,12 +521,26 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
                   </span>
                 )}
                 {selectedEntry.route.shipment?.driver?.phone ? (
-                  <a
-                    href={`tel:${selectedEntry.route.shipment.driver.phone}`}
-                    className="text-xs bg-slate-900 hover:bg-slate-800 text-white rounded-md px-2.5 py-1.5"
-                  >
-                    📞 Llamar al conductor
-                  </a>
+                  <>
+                    <a
+                      href={`tel:${selectedEntry.route.shipment.driver.phone}`}
+                      className="text-xs bg-slate-900 hover:bg-slate-800 text-white rounded-md px-2.5 py-1.5"
+                    >
+                      📞 Llamar
+                    </a>
+                    {/* Fase 8k: petición de Raúl -- "el contacto al driver
+                        debería dar dos opciones, llamada o mensaje (whatsapp)
+                        ya que desde el PC por ejemplo no se puede realizar
+                        una llamada". */}
+                    <a
+                      href={`https://wa.me/${toWhatsAppDigits(selectedEntry.route.shipment.driver.phone)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-2.5 py-1.5"
+                    >
+                      💬 WhatsApp
+                    </a>
+                  </>
                 ) : (
                   <span className="text-xs bg-slate-50 text-slate-400 rounded-md px-2.5 py-1.5">Sin teléfono de conductor</span>
                 )}
@@ -495,6 +550,18 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
                 >
                   Gestionar ruta
                 </button>
+                {/* Fase 8k: eliminar ruta desde el propio panel de Despacho --
+                    salvo que el envío ya esté "finished" (entregado a
+                    destino final). */}
+                {selectedEntry.route.shipment?.status !== "finished" && (
+                  <button
+                    onClick={() => handleDeleteRoute(selectedEntry.route)}
+                    disabled={deleteRouteMutation.isPending}
+                    className="text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-md px-2.5 py-1.5 disabled:opacity-50"
+                  >
+                    🗑️ Eliminar ruta
+                  </button>
+                )}
               </div>
 
               {/* Ficha de la parada, si la selección es una parada concreta */}

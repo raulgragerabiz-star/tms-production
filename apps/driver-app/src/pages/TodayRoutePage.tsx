@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
@@ -85,10 +86,20 @@ export default function TodayRoutePage() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
 
+  // Fase 8k: selector de fecha -- petición de Raúl para poder consultar
+  // rutas de otros días (pruebas con fecha pasada, o revisar el histórico),
+  // no solo la de hoy. Por defecto sigue siendo hoy, así que nada cambia si
+  // no se toca. Solo se refresca en vivo (refetchInterval) cuando se está
+  // viendo el día de hoy -- no tiene sentido sondear cada 30s una fecha
+  // pasada que ya no va a cambiar.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [selectedDate, setSelectedDate] = useState(todayIso);
+  const isToday = selectedDate === todayIso;
+
   const { data, isLoading } = useQuery({
-    queryKey: ["today-route"],
-    queryFn: async () => (await api.get("/driver-app/today-route")).data as TodayRouteResponse,
-    refetchInterval: 30000,
+    queryKey: ["today-route", selectedDate],
+    queryFn: async () => (await api.get("/driver-app/today-route", { params: { date: selectedDate } })).data as TodayRouteResponse,
+    refetchInterval: isToday ? 30000 : false,
   });
 
   // QR de conductor + jornada: estado de turno independiente de la ruta del
@@ -118,17 +129,26 @@ export default function TodayRoutePage() {
 
   return (
     <div className="min-h-screen pb-8">
-      <header className="bg-white border-b border-slate-200 px-4 py-4 flex items-center justify-between sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <img src={bigmatWordmark} alt="BigMat" className="h-6" />
-          <div>
-            <h1 className="text-lg font-bold text-brand-700">Ruta de hoy</h1>
-            <p className="text-xs text-slate-400">{user?.fullName}</p>
+      <header className="bg-white border-b border-slate-200 px-4 py-4 sticky top-0 z-10">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src={bigmatWordmark} alt="BigMat" className="h-6" />
+            <div>
+              <h1 className="text-lg font-bold text-brand-700">{isToday ? "Ruta de hoy" : "Ruta del día"}</h1>
+              <p className="text-xs text-slate-400">{user?.fullName}</p>
+            </div>
           </div>
+          <button onClick={handleLogout} className="text-sm text-slate-500">
+            Salir
+          </button>
         </div>
-        <button onClick={handleLogout} className="text-sm text-slate-500">
-          Salir
-        </button>
+        {/* Fase 8k: selector de fecha -- ver comentario más arriba. */}
+        <input
+          type="date"
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+          className="mt-3 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+        />
       </header>
 
       {/* QR de conductor + jornada: fichaje de turno, separado del estado del
@@ -183,7 +203,11 @@ export default function TodayRoutePage() {
 
         {!isLoading && !data?.shipment && (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center mt-6">
-            <p className="text-slate-500">No tienes ninguna ruta asignada para hoy.</p>
+            <p className="text-slate-500">
+              {isToday
+                ? "No tienes ninguna ruta asignada para hoy."
+                : `No tienes ninguna ruta para el ${new Date(`${selectedDate}T00:00:00`).toLocaleDateString("es-ES")}.`}
+            </p>
           </div>
         )}
 
@@ -196,7 +220,10 @@ export default function TodayRoutePage() {
                 {data.shipment.route.stops.length} paradas ·{" "}
                 {data.shipment.route.stops.filter((s) => s.status === "completed").length} completadas
               </p>
-              {NEXT_SHIPMENT_STATUS[data.shipment.status] && (
+              {/* Fase 8k: solo tiene sentido avanzar el estado del envío en
+                  el día de hoy -- viendo una fecha pasada esto es solo
+                  consulta de histórico. */}
+              {isToday && NEXT_SHIPMENT_STATUS[data.shipment.status] && (
                 <button
                   onClick={() => shipmentStatusMutation.mutate(NEXT_SHIPMENT_STATUS[data.shipment!.status]!.next)}
                   disabled={shipmentStatusMutation.isPending}

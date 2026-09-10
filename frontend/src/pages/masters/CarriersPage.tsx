@@ -15,6 +15,8 @@ interface CarrierRow {
   ownsFleet: boolean;
   temperatureCapability: string;
   notes: string | null;
+  // Fase 8k: ver comentario en NewCarrierModal.tsx / schema.prisma.
+  maxRouteDurationHours: number | null;
   _count: { vehicles: number };
 }
 

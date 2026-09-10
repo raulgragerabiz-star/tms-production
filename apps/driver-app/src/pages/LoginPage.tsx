@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
 import bigmatLogo from "@/assets/bigmat-logo.png";
@@ -37,6 +37,22 @@ export default function LoginPage() {
         <img src={bigmatLogo} alt="BigMat" className="h-14 mx-auto mb-4" />
         <h1 className="text-2xl font-semibold text-brand-700 mb-1">App Conductor</h1>
         <p className="text-sm text-slate-500 mb-6">Login simple para uso en cabina</p>
+
+        {/* Fase 8k: forma de entrar recomendada -- escanear el QR pegado en
+            el vehículo entra directamente, sin contraseña (ver
+            ScanToLoginPage.tsx / loginWithVehicleQrToken). El formulario de
+            abajo sigue disponible para cuando no se puede escanear. */}
+        <Link
+          to="/escanear-acceso"
+          className="block w-full text-center bg-slate-900 hover:bg-slate-800 text-white rounded-xl py-3 text-base font-medium mb-4"
+        >
+          📷 Escanear QR del vehículo
+        </Link>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="flex-1 h-px bg-slate-200" />
+          <span className="text-xs text-slate-400">o con email y contraseña</span>
+          <div className="flex-1 h-px bg-slate-200" />
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <input

@@ -828,6 +828,25 @@ routesRouter.post(
   })
 );
 
+// Fase 8k: jornada laboral máxima (tacógrafo) -- petición de Raúl tras ver
+// una ruta de prueba confirmada de 10:22 a 22:39 (más de 12h), que no es
+// real. `warehouse`/`carrier` llegan tal cual del cliente Prisma; se leen
+// con este helper en vez de acceso directo porque el cliente generado en
+// este entorno de pruebas puede no incluir todavía el campo nuevo
+// (maxRouteDurationHours) en su tipado -- el propio valor en base de datos
+// sí existe una vez aplicado el schema. Si hay límite en almacén Y en
+// transportista, se aplica el más restrictivo (el mínimo de los dos).
+function resolveMaxRouteDurationHours(warehouse: unknown, carrier: unknown): number | null {
+  const readHours = (entity: unknown): number | null => {
+    const raw = (entity as { maxRouteDurationHours?: unknown } | null | undefined)?.maxRouteDurationHours;
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isNaN(n) ? null : n;
+  };
+  const candidates = [readHours(warehouse), readHours(carrier)].filter((h): h is number => h != null);
+  return candidates.length > 0 ? Math.min(...candidates) : null;
+}
+
 routesRouter.patch(
   "/:id/status",
   asyncHandler(async (req, res) => {
@@ -838,8 +857,34 @@ routesRouter.patch(
     });
     const data = schema.parse(req.body);
 
-    const route = await prisma.route.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    const route = await prisma.route.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+      include: { warehouse: true, carrier: true, loadPlan: true },
+    });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
+
+    // Fase 8k: se valida justo antes de confirmar -- es el punto de no
+    // retorno antes de que la ruta sea visible/operativa para el
+    // transportista/conductor. No se bloquean los pasos intermedios
+    // (draft/optimized/assigned) para no entorpecer el trabajo de
+    // planificación mientras se ajusta.
+    if (data.status === "confirmed") {
+      const effectiveCarrierId = data.carrierId ?? route.carrierId;
+      const carrier =
+        effectiveCarrierId && effectiveCarrierId !== route.carrier?.id
+          ? await prisma.carrier.findUnique({ where: { id: effectiveCarrierId } })
+          : route.carrier;
+      const maxHours = resolveMaxRouteDurationHours(route.warehouse, carrier);
+      const estimatedMin = route.loadPlan?.estimatedDurationMin;
+      if (maxHours != null && estimatedMin != null) {
+        const estimatedHours = Number(estimatedMin) / 60;
+        if (estimatedHours > maxHours) {
+          throw HttpError.badRequest(
+            `La duración estimada de esta ruta (${estimatedHours.toFixed(1)} h) supera la jornada laboral máxima configurada (${maxHours} h) -- no se puede confirmar así. Ajusta la ruta o revisa el límite en Almacenes / Flota y Transportistas.`
+          );
+        }
+      }
+    }
 
     const updated = await prisma.route.update({
       where: { id: route.id },
@@ -862,13 +907,22 @@ routesRouter.patch(
 
 // Fase 8j: petición explícita de Raúl -- "debe poder eliminarse rutas
 // creadas, por si se ha cometido algún error y que no se queden ahí fijas".
-// Solo se permite mientras no exista ya un envío (Shipment) creado a partir
-// de esta ruta -- a partir de ahí puede tener seguimiento/incidencias/firma
-// real en curso y borrarla a ciegas perdería ese histórico; para esos casos
-// hay que anular el envío desde Seguimiento antes. Los pedidos que llevaba
-// la ruta vuelven a "validated" (pendientes de planificar) -- si no, se
-// quedarían en "planned" apuntando a una ruta que ya no existe y
-// desaparecerían para siempre del Planificador.
+//
+// Fase 8k: petición de ampliación -- "las rutas asignadas, también tienen
+// que poder borrarse si han tenido algún error. Las únicas que no deberían
+// poder borrarse son las que ya han sido entregadas a destino final". Se
+// relaja el guard original: ya no basta con que exista un envío (Shipment)
+// para bloquear el borrado -- ahora solo bloquea si ese envío ya está
+// "finished" (entrega completa, pasa a formar parte del histórico real). Si
+// el envío existe pero no está finalizado (programado, cargado o en
+// reparto), se borra también él y todo lo que cuelga de él (incidencias,
+// reclamaciones de retorno, líneas de liquidación, mensajes, eventos de
+// seguimiento y albaranes digitales/POD de sus paradas) para poder borrar la
+// ruta sin dejar registros huérfanos ni chocar con las restricciones de
+// clave foránea de esas tablas. Los pedidos que llevaba la ruta vuelven a
+// "validated" (pendientes de planificar) -- si no, se quedarían en
+// "planned" apuntando a una ruta que ya no existe y desaparecerían para
+// siempre del Planificador.
 routesRouter.delete(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -878,15 +932,34 @@ routesRouter.delete(
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
 
-    if (route.shipment) {
+    if (route.shipment?.status === "finished") {
       throw HttpError.badRequest(
-        "Esta ruta ya tiene un envío creado -- anúlalo primero desde Seguimiento antes de eliminar la ruta."
+        "Esta ruta ya se entregó por completo a destino final -- no se puede eliminar, forma parte del histórico."
       );
     }
 
+    const stopIds = route.stops.map((s: { id: string }) => s.id);
     const orderIds = route.stops.map((s: { orderId: string }) => s.orderId);
+    const shipmentId = route.shipment?.id;
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      if (shipmentId) {
+        // Se borra primero todo lo que cuelga del envío -- estas tablas no
+        // tienen onDelete: Cascade hacia shipment/route_stop en el schema,
+        // así que dejarlas intactas haría fallar el borrado de la ruta (o
+        // dejaría registros huérfanos apuntando a una parada/envío que ya no
+        // existe).
+        if (stopIds.length > 0) {
+          await tx.proofOfDelivery.deleteMany({ where: { routeStopId: { in: stopIds } } });
+        }
+        await tx.incident.deleteMany({ where: { shipmentId } });
+        await tx.returnClaim.deleteMany({ where: { shipmentId } });
+        await tx.settlementLine.deleteMany({ where: { shipmentId } });
+        await tx.shipmentMessage.deleteMany({ where: { shipmentId } });
+        await tx.trackingEvent.deleteMany({ where: { shipmentId } });
+        await tx.shipment.delete({ where: { id: shipmentId } });
+      }
+
       if (orderIds.length > 0) {
         await tx.order.updateMany({ where: { id: { in: orderIds } }, data: { status: "validated" } });
       }

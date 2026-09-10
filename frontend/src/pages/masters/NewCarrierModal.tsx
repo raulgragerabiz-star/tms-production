@@ -19,6 +19,9 @@ export interface CarrierEditable {
   ownsFleet: boolean;
   temperatureCapability: string;
   notes: string | null;
+  // Fase 8k: jornada laboral máxima (horas) admitida para los conductores de
+  // este transportista -- ver comentario en el modelo Carrier (schema.prisma).
+  maxRouteDurationHours: number | null;
 }
 
 interface Props {
@@ -56,6 +59,7 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
   const [ownsFleet, setOwnsFleet] = useState(false);
   const [temperatureCapability, setTemperatureCapability] = useState("ambient");
   const [notes, setNotes] = useState("");
+  const [maxRouteDurationHours, setMaxRouteDurationHours] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -67,6 +71,7 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
     setOwnsFleet(carrier?.ownsFleet ?? false);
     setTemperatureCapability(carrier?.temperatureCapability ?? "ambient");
     setNotes(carrier?.notes ?? "");
+    setMaxRouteDurationHours(carrier?.maxRouteDurationHours != null ? String(carrier.maxRouteDurationHours) : "");
   }, [open, carrier]);
 
   const mutation = useMutation({
@@ -80,6 +85,7 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
         ownsFleet,
         temperatureCapability,
         notes: notes.trim() || undefined,
+        maxRouteDurationHours: maxRouteDurationHours ? Number(maxRouteDurationHours) : undefined,
       };
       if (isEdit) return (await api.put(`/carriers/${carrier!.id}`, payload)).data;
       return (await api.post("/carriers", payload)).data;
@@ -144,6 +150,21 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
           <input type="checkbox" checked={ownsFleet} onChange={(e) => setOwnsFleet(e.target.checked)} className="rounded border-slate-300" />
           Tiene flota propia
         </label>
+        <Field
+          label="Jornada laboral máxima (horas)"
+          hint="Opcional — por tacógrafo/jornada, una ruta con este transportista no se podrá confirmar si su duración estimada la supera. Si también hay un límite en el almacén, se aplica el más restrictivo de los dos."
+        >
+          <input
+            type="number"
+            step="0.5"
+            min="0"
+            max="24"
+            className={inputCls}
+            value={maxRouteDurationHours}
+            onChange={(e) => setMaxRouteDurationHours(e.target.value)}
+            placeholder="Sin límite propio"
+          />
+        </Field>
         <Field label="Notas">
           <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>

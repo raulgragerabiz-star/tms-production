@@ -4,6 +4,7 @@ import LoginPage from "@/pages/LoginPage";
 import TodayRoutePage from "@/pages/TodayRoutePage";
 import StopDetailPage from "@/pages/StopDetailPage";
 import ScanVehicleQrPage from "@/pages/ScanVehicleQrPage";
+import ScanToLoginPage from "@/pages/ScanToLoginPage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.token);
@@ -15,6 +16,9 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Fase 8k: acceso solo-con-QR, sin ProtectedRoute -- todavía no hay
+          ningún token en este punto (ver ScanToLoginPage.tsx). */}
+      <Route path="/escanear-acceso" element={<ScanToLoginPage />} />
       <Route
         path="/"
         element={

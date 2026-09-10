@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { login } from "./auth.service";
+import { login, loginWithVehicleQrToken } from "./auth.service";
 import { asyncHandler } from "@/utils/async-handler";
 import { requireAuth } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
@@ -17,6 +17,21 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
     const result = await login(email, password);
+    res.json(result);
+  })
+);
+
+// Fase 8k: login solo-con-QR para la App Conductor -- ver el comentario en
+// loginWithVehicleQrToken (auth.service.ts). Deliberadamente público (mismo
+// nivel que /login, sin requireAuth): un conductor que arranca el día no
+// tiene todavía ningún JWT que mandar.
+const qrLoginSchema = z.object({ token: z.string().min(10) });
+
+authRouter.post(
+  "/driver-qr-login",
+  asyncHandler(async (req, res) => {
+    const { token } = qrLoginSchema.parse(req.body);
+    const result = await loginWithVehicleQrToken(token);
     res.json(result);
   })
 );
