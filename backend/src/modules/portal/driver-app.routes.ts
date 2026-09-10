@@ -68,6 +68,11 @@ driverAppRouter.get(
               include: {
                 order: { include: { deliveryPoint: true, customer: true, lines: { include: { product: true } } } },
                 pod: true,
+                // Fase 8L: necesario para que la App Conductor pueda marcar
+                // el icono "Formularios" (antes "Incidencia") como
+                // completado/pendiente en la barra de acciones -- ver
+                // StopDetailPage.tsx.
+                incidents: true,
               },
             },
           },
@@ -184,6 +189,56 @@ driverAppRouter.post(
       await notifyShipmentChange(shipment.id, "stop_status_changed", { routeStopId: stop.id, status: "arrived" });
     }
     res.json(updated);
+  })
+);
+
+// Fase 8L (rediseño App Conductor): nota libre por parada, editable desde la
+// barra de acciones ("Notas"). Campo nuevo (RouteStop.driverNotes,
+// schema.prisma) -- el cliente de Prisma de este sandbox no puede
+// regenerarse (sin red hacia el CDN de Prisma), así que se castea el `data`
+// de escritura; en el entorno real, tras "prisma generate", queda tipado
+// sin más, igual que ya pasó con maxRouteDurationHours en la Fase 8k.
+driverAppRouter.patch(
+  "/stops/:routeStopId/notes",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ note: z.string().max(2000) });
+    const { note } = schema.parse(req.body);
+
+    const stop = await prisma.routeStop.findFirst({
+      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+    });
+    if (!stop) throw HttpError.notFound("Parada no encontrada");
+
+    const updated = await prisma.routeStop.update({
+      where: { id: stop.id },
+      data: { driverNotes: note || null } as any,
+    });
+    res.json({ driverNotes: (updated as any).driverNotes ?? null });
+  })
+);
+
+// Fase 8L: escáner de códigos (palet/bulto) por parada, como verificación de
+// mercancía en ruta -- barra de acciones ("Escáner de códigos"). Campo nuevo
+// (RouteStop.scannedCodes, JSON) con el mismo casteo defensivo que arriba.
+driverAppRouter.post(
+  "/stops/:routeStopId/scan",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ code: z.string().min(1).max(200) });
+    const { code } = schema.parse(req.body);
+
+    const stop = await prisma.routeStop.findFirst({
+      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+    });
+    if (!stop) throw HttpError.notFound("Parada no encontrada");
+
+    const current = Array.isArray((stop as any).scannedCodes) ? (stop as any).scannedCodes : [];
+    const next = [...current, { code, scannedAt: new Date().toISOString() }];
+
+    const updated = await prisma.routeStop.update({
+      where: { id: stop.id },
+      data: { scannedCodes: next } as any,
+    });
+    res.json({ scannedCodes: (updated as any).scannedCodes ?? [] });
   })
 );
 

@@ -50,6 +50,19 @@ export async function endShift(coords?: { lat: number; lng: number }) {
   return res.data as { shift: { id: string; startedAt: string; endedAt: string } };
 }
 
+// Fase 8L (rediseño App Conductor): nota de conductor y escáner de códigos
+// por parada -- llamadas directas (no en cola offline) porque son acciones
+// puntuales del propio conductor, no fichajes críticos como el GPS.
+export async function saveStopNotes(stopId: string, note: string) {
+  const res = await apiClient.patch(`/driver-app/stops/${stopId}/notes`, { note });
+  return res.data as { driverNotes: string | null };
+}
+
+export async function scanStopCode(stopId: string, code: string) {
+  const res = await apiClient.post(`/driver-app/stops/${stopId}/scan`, { code });
+  return res.data as { scannedCodes: { code: string; scannedAt: string }[] };
+}
+
 export function confirmShipmentLoad(shipmentId: string) {
   // Ya no es async-directo: se encola y se resuelve en segundo plano.
   // La UI debe optimistically asumir éxito y dejar que el OfflineBanner

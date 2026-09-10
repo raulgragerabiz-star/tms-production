@@ -12,12 +12,15 @@
     "@tanstack/react-query": "^5.56.2",
     "axios": "^1.7.7",
     "html5-qrcode": "^2.3.8",
+    "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.26.2",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^26.4.1",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",

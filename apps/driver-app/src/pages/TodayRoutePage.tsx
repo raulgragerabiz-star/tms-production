@@ -129,16 +129,21 @@ export default function TodayRoutePage() {
 
   return (
     <div className="min-h-screen pb-8">
-      <header className="bg-white border-b border-slate-200 px-4 py-4 sticky top-0 z-10">
+      {/* Fase 8L: cabecera en color corporativo, mismo tratamiento que
+          StopDetailPage.tsx, para que la app tenga una identidad visual
+          consistente en vez de header blanco aquí y azul en la parada. */}
+      <header className="bg-brand-600 text-white px-4 py-4 sticky top-0 z-10 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src={bigmatWordmark} alt="BigMat" className="h-6" />
+            <span className="bg-white rounded-lg px-1.5 py-1 shrink-0">
+              <img src={bigmatWordmark} alt="BigMat" className="h-5 block" />
+            </span>
             <div>
-              <h1 className="text-lg font-bold text-brand-700">{isToday ? "Ruta de hoy" : "Ruta del día"}</h1>
-              <p className="text-xs text-slate-400">{user?.fullName}</p>
+              <h1 className="text-lg font-bold">{isToday ? "Ruta de hoy" : "Ruta del día"}</h1>
+              <p className="text-xs text-brand-100">{user?.fullName}</p>
             </div>
           </div>
-          <button onClick={handleLogout} className="text-sm text-slate-500">
+          <button onClick={handleLogout} className="text-sm text-brand-100 font-medium">
             Salir
           </button>
         </div>
@@ -147,7 +152,7 @@ export default function TodayRoutePage() {
           type="date"
           value={selectedDate}
           onChange={(e) => setSelectedDate(e.target.value)}
-          className="mt-3 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+          className="mt-3 w-full rounded-xl border border-slate-300 px-3 py-2 text-base text-slate-800"
         />
       </header>
 
@@ -245,8 +250,8 @@ export default function TodayRoutePage() {
                     <span className="text-sm font-mono font-bold text-slate-800">#{stop.sequence} — {stop.order.orderNumber}</span>
                     <Chip color={statusStyle[stop.status] ?? "slate"}>{statusLabel[stop.status]}</Chip>
                   </div>
-                  <p className="text-sm text-slate-600">{stop.order.customer.legalName}</p>
-                  <p className="text-sm text-slate-400">
+                  <p className="text-base font-medium text-slate-700">{stop.order.customer.legalName}</p>
+                  <p className="text-sm text-slate-500">
                     {stop.order.deliveryPoint.address}
                     {stop.order.deliveryPoint.city ? `, ${stop.order.deliveryPoint.city}` : ""}
                   </p>

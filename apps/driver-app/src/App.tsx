@@ -5,6 +5,7 @@ import TodayRoutePage from "@/pages/TodayRoutePage";
 import StopDetailPage from "@/pages/StopDetailPage";
 import ScanVehicleQrPage from "@/pages/ScanVehicleQrPage";
 import ScanToLoginPage from "@/pages/ScanToLoginPage";
+import ScanStopCodePage from "@/pages/ScanStopCodePage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.token);
@@ -40,6 +41,16 @@ export default function App() {
         element={
           <ProtectedRoute>
             <ScanVehicleQrPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* Fase 8L: "Escáner de códigos" de la barra de acciones de una
+          parada -- ver ScanStopCodePage.tsx. */}
+      <Route
+        path="/paradas/:id/escanear"
+        element={
+          <ProtectedRoute>
+            <ScanStopCodePage />
           </ProtectedRoute>
         }
       />

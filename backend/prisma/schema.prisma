@@ -775,6 +775,17 @@ model RouteStop {
   sequence  Int
   eta       DateTime?
   status    RouteStopStatus  @default(pending)
+  // Fase 8L (rediseño App Conductor): nota libre que el conductor puede
+  // añadir/editar para esta parada desde la barra de acciones ("Notas"),
+  // aparte de las observaciones del pedido (Order.notes, fijas desde
+  // Backoffice) -- pensada para algo puntual de la entrega de hoy (p.ej.
+  // "cliente pide dejarlo en portería"). Opcional, no se usaba hasta ahora.
+  driverNotes String? @map("driver_notes")
+  // Fase 8L: códigos escaneados (palet/bulto) desde la barra de acciones
+  // ("Escáner de códigos"), como registro de verificación de mercancía en
+  // ruta -- lista de {code, scannedAt} en JSON. Opcional, no se usaba hasta
+  // ahora.
+  scannedCodes Json?           @map("scanned_codes")
   incidents Incident[]
   pod       ProofOfDelivery?
   order     Order            @relation(fields: [orderId], references: [id])
