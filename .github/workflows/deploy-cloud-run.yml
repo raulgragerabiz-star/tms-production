@@ -12,6 +12,16 @@ name: Deploy a Cloud Run
 # secretos en GitHub (Settings → Secrets and variables → Actions). Sin guion bajo
 # a propósito (el signo "_" dio problemas al crear el secreto GCP_SA_KEY):
 #   GCPPROJECTID, GCPSAKEY, DATABASEURL, JWTSECRET, VITEGOOGLEMAPSAPIKEY
+#
+# ORSAPIKEY (Fase 8d) es OPCIONAL -- si no se crea este secreto, el backend
+# arranca igual y todo el sistema sigue funcionando como hasta ahora (rutas
+# por línea recta, sin geocodificación automática ni planificación con
+# VROOM, ver env.ts). Si SÍ se crea, hay que rellenarla aquí con la clave
+# real de OpenRouteService: hasta ahora este workflow no la incluía en
+# /tmp/backend-env.yaml, y como --env-vars-file reemplaza TODAS las
+# variables del servicio en cada push (ver nota más abajo), cualquier
+# ORS_API_KEY puesta a mano en la consola de Cloud Run se borraba en el
+# siguiente despliegue -- exactamente lo que le pasaba a Raúl.
 
 on:
   push:
@@ -58,6 +68,11 @@ jobs:
           # (update-backend-cors) lo vuelve a fijar al final de la ejecucion.
           DATABASE_URL_VALUE: ${{ secrets.DATABASEURL }}
           JWT_SECRET_VALUE: ${{ secrets.JWTSECRET }}
+          # Fase 8d: si el secreto ORSAPIKEY no existe todavia en GitHub, esto
+          # queda como cadena vacia y ORS_API_KEY se escribe vacia en Cloud Run
+          # -- exactamente el mismo comportamiento "sin configurar" que ya
+          # tenia el sistema hasta ahora (ver env.ts), nunca rompe el deploy.
+          ORS_API_KEY_VALUE: ${{ secrets.ORSAPIKEY }}
         run: |
           set -e
           cat > /tmp/backend-env.yaml <<EOF
@@ -65,6 +80,7 @@ jobs:
           JWT_EXPIRES_IN: "8h"
           DATABASE_URL: "${DATABASE_URL_VALUE}"
           JWT_SECRET: "${JWT_SECRET_VALUE}"
+          ORS_API_KEY: "${ORS_API_KEY_VALUE}"
           EOF
           gcloud run deploy tms-backend \
             --project="${{ secrets.GCPPROJECTID }}" \
@@ -109,9 +125,9 @@ jobs:
       - name: Build y push (backoffice)
         env:
           # Pasar los secretos por env de step (no interpolarlos directamente dentro del
-          # script de bash con ${{ secrets.X }}) evita que un caracter raro (comilla,
-          # salto de linea) que pueda tener el valor del secreto rompa la sintaxis del
-          # script -- bash siempre lo trata como una unica variable, pase lo que pase dentro.
+          # script de bash con ${{ secrets.X }}) evita que un carácter raro (comilla,
+          # salto de línea) que pueda tener el valor del secreto rompa la sintaxis del
+          # script — bash siempre lo trata como una única variable, pase lo que pase dentro.
           VITE_GOOGLE_MAPS_API_KEY_VALUE: ${{ secrets.VITEGOOGLEMAPSAPIKEY }}
           BACKEND_URL_VALUE: ${{ needs.deploy-backend.outputs.url }}
         run: |
@@ -303,6 +319,11 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+  # Los 4 frontends solo obtienen su URL pública de Cloud Run DESPUÉS de su primer
+  # despliegue (arriba), así que el CORS del backend no puede fijarse hasta este punto
+  # — de ahí este último paso, que actualiza el backend ya desplegado con los 4 orígenes
+  # reales en cuanto se conocen. En despliegues posteriores las URLs no cambian (Cloud Run
+  # las mantiene estables mientras no se borre el servicio), así que este paso es idempotente.
   update-backend-cors:
     needs: [deploy-backend, deploy-backoffice, deploy-carrier-portal, deploy-driver-app, deploy-customer-portal]
     runs-on: ubuntu-latest
