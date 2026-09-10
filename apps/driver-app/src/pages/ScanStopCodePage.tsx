@@ -6,13 +6,19 @@
 // (ScanVehicleQrPage.tsx, ScanToLoginPage.tsx) para no pelear con el ciclo
 // de vida de la cámara dentro de una pantalla con scroll.
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Html5Qrcode } from "html5-qrcode";
 import { scanStopCode } from "@/api/driverApp";
 
 export default function ScanStopCodePage() {
   const { id } = useParams<{ id: string }>();
+  // Fix: propagar la fecha seleccionada (ver StopDetailPage.tsx) para volver
+  // a la ficha correcta -- sin esto, escanear un código en una parada de un
+  // día distinto a hoy hacía perder la fecha y la ficha ya no se encontraba.
+  const [searchParams] = useSearchParams();
+  const date = searchParams.get("date");
+  const backTo = `/paradas/${id}${date ? `?date=${date}` : ""}`;
   const queryClient = useQueryClient();
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [status, setStatus] = useState<"scanning" | "success" | "error">("scanning");
@@ -35,7 +41,7 @@ export default function ScanStopCodePage() {
             queryClient.invalidateQueries({ queryKey: ["today-route"] });
             setStatus("success");
             setMessage(`Código registrado: ${decodedText}`);
-            setTimeout(() => navigate(`/paradas/${id}`), 1200);
+            setTimeout(() => navigate(backTo), 1200);
           } catch {
             setStatus("error");
             setMessage("No se pudo registrar el código. Inténtalo de nuevo.");
@@ -65,7 +71,7 @@ export default function ScanStopCodePage() {
       >
         {message}
       </p>
-      <button onClick={() => navigate(`/paradas/${id}`)} className="mt-8 text-sm text-slate-400 underline">
+      <button onClick={() => navigate(backTo)} className="mt-8 text-sm text-slate-400 underline">
         Cancelar
       </button>
     </div>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { saveStopNotes } from "@/api/driverApp";
@@ -100,8 +100,19 @@ function CompletionDot({ done }: { done: boolean }) {
 
 export default function StopDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  // Fix: esta ficha pedía siempre la ruta de HOY, ignorando la fecha que el
+  // conductor tuviera seleccionada en el listado (selector de fecha de la
+  // Fase 8k). Al ver una fecha distinta a hoy, la parada existía en el
+  // listado pero esta pantalla no la encontraba ("Parada no encontrada"),
+  // porque comparaba contra los datos de otro día. TodayRoutePage.tsx ahora
+  // enlaza aquí incluyendo ?date=, y si falta (enlace antiguo, o entrada
+  // directa) se asume hoy, igual que hacía el listado.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const date = searchParams.get("date") ?? todayIso;
   const [receivedByName, setReceivedByName] = useState("");
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
@@ -119,8 +130,8 @@ export default function StopDetailPage() {
   const notesSectionRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["today-route"],
-    queryFn: async () => (await api.get("/driver-app/today-route")).data as TodayRouteResponse,
+    queryKey: ["today-route", date],
+    queryFn: async () => (await api.get("/driver-app/today-route", { params: { date } })).data as TodayRouteResponse,
   });
 
   const stop = data?.shipment?.route.stops.find((s) => s.id === id);
@@ -148,7 +159,7 @@ export default function StopDetailPage() {
       ).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
-      navigate("/");
+      navigate(`/?date=${date}`);
     },
   });
 
@@ -156,7 +167,7 @@ export default function StopDetailPage() {
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { failed: true, failureReason })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
-      navigate("/");
+      navigate(`/?date=${date}`);
     },
   });
 
@@ -164,7 +175,7 @@ export default function StopDetailPage() {
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { returned: true, failureReason })).data,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
-      navigate("/");
+      navigate(`/?date=${date}`);
     },
   });
 
@@ -191,7 +202,7 @@ export default function StopDetailPage() {
       {/* 1. Cabecera fija corporativa: retroceso + nº de pedido real + isotipo. */}
       <header className="bg-brand-600 text-white px-4 py-3 flex items-center justify-between gap-3 sticky top-0 z-20 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
-          <button onClick={() => navigate("/")} className="text-white text-2xl leading-none shrink-0" aria-label="Volver">
+          <button onClick={() => navigate(`/?date=${date}`)} className="text-white text-2xl leading-none shrink-0" aria-label="Volver">
             ←
           </button>
           <div className="min-w-0">
@@ -477,7 +488,7 @@ export default function StopDetailPage() {
               </button>
               <button
                 type="button"
-                onClick={() => navigate(`/paradas/${id}/escanear`)}
+                onClick={() => navigate(`/paradas/${id}/escanear?date=${date}`)}
                 className="flex flex-col items-center gap-1 text-slate-600 w-14"
               >
                 <span className="relative flex items-center justify-center w-11 h-11 rounded-full bg-slate-100 text-xl">

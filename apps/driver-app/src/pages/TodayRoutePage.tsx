@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { useAuthStore } from "@/store/auth-store";
@@ -92,8 +92,14 @@ export default function TodayRoutePage() {
   // no se toca. Solo se refresca en vivo (refetchInterval) cuando se está
   // viendo el día de hoy -- no tiene sentido sondear cada 30s una fecha
   // pasada que ya no va a cambiar.
+  // Fix: al volver de una ficha de parada (o del escáner) que estaba viendo
+  // una fecha distinta a hoy, se perdía la fecha seleccionada y esta lista
+  // volvía a "hoy" -- forzando a reelegir la fecha cada vez. Ahora, si se
+  // llega aquí con ?date= en la URL (ver StopDetailPage.tsx /
+  // ScanStopCodePage.tsx), se respeta como fecha inicial.
+  const [searchParams] = useSearchParams();
   const todayIso = new Date().toISOString().slice(0, 10);
-  const [selectedDate, setSelectedDate] = useState(todayIso);
+  const [selectedDate, setSelectedDate] = useState(searchParams.get("date") ?? todayIso);
   const isToday = selectedDate === todayIso;
 
   const { data, isLoading } = useQuery({
@@ -243,7 +249,7 @@ export default function TodayRoutePage() {
               {data.shipment.route.stops.map((stop) => (
                 <button
                   key={stop.id}
-                  onClick={() => navigate(`/paradas/${stop.id}`)}
+                  onClick={() => navigate(`/paradas/${stop.id}?date=${selectedDate}`)}
                   className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:scale-[0.99] transition shadow-sm"
                 >
                   <div className="flex items-center justify-between mb-1">
