@@ -174,6 +174,13 @@ export interface VroomVehicle {
   end: [number, number];
   capacity: number[];
   time_window?: [number, number]; // segundos desde medianoche
+  // Fase 8i: sin este campo, ORS ha empezado a devolver "ORS respondió 400
+  // en /optimization: Invalid profile: car." -- el valor por defecto que
+  // aplica ORS cuando no se manda "profile" no es válido en esta cuenta.
+  // Se manda explícito con el mismo valor ya usado (y probado) en
+  // getRoadRoute/env.orsProfile ("driving-hgv" por defecto), en vez de
+  // dejarlo al criterio de ORS.
+  profile?: string;
 }
 
 export interface VroomJob {

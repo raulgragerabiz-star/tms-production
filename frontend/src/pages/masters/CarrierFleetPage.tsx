@@ -17,10 +17,20 @@ import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 // "Conductores" no cambia -- sigue siendo la misma pantalla de siempre
 // (VehiclesPage en modo embedded), solo que ahora es la segunda pestaña en
 // vez de la cuarta.
-type Tab = "transportistas" | "conductores" | "tipos-zonas";
+//
+// 2026-09-10: al reducir de 5 pestañas a 3 en la Fase 8 se dejó de montar
+// VehiclesPage con activeTab="vehicles" -- esa era la única pestaña con la
+// columna y el botón "Ver / generar QR" (el QR que el conductor escanea
+// desde la App para vincularse a su vehículo, ver VehicleQrModal). No se
+// borró ni se rompió nada del código de esa pantalla, simplemente dejó de
+// ser alcanzable desde el menú. Se repone aquí como "Vehículos" -- Raúl
+// reportó justo esto: "los conductores han perdido la opción de enlazarse
+// mediante QR".
+type Tab = "transportistas" | "vehiculos" | "conductores" | "tipos-zonas";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "transportistas", label: "Transportistas" },
+  { id: "vehiculos", label: "Vehículos" },
   { id: "conductores", label: "Conductores" },
   { id: "tipos-zonas", label: "Tipo de vehículo y zonas" },
 ];
@@ -54,6 +64,7 @@ export default function CarrierFleetPage() {
       </div>
 
       {tab === "transportistas" && <TransportistasTab />}
+      {tab === "vehiculos" && <VehiclesPage embedded activeTab="vehicles" />}
       {tab === "conductores" && <VehiclesPage embedded activeTab="drivers" />}
       {tab === "tipos-zonas" && (
         <div className="space-y-6">

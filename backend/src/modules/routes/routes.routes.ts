@@ -592,6 +592,9 @@ routesRouter.post(
           start: slot.start,
           end: warehouseCoord,
           capacity: slot.capacity,
+          // Fase 8i: ver comentario en VroomVehicle -- sin esto ORS respondía
+          // 400 "Invalid profile: car." al no mandar ninguno explícito.
+          profile: env.orsProfile,
         }));
 
         let result;

@@ -181,6 +181,37 @@ usersRouter.patch(
   })
 );
 
+// Fase 8i: hasta ahora solo se podía "Desactivar" (active=false, el usuario
+// sigue existiendo y se puede "Reactivar") -- petición explícita de Raúl de
+// poder ELIMINAR usuarios de verdad, no solo desactivarlos. A diferencia de
+// Clientes/Transportistas/Almacenes (que son bajas lógicas porque tienen
+// pedidos/facturación/historial colgando), un usuario es solo una credencial
+// de acceso -- no hay ninguna relación real con FK hacia AppUser salvo
+// UserRole, así que aquí sí se hace un borrado físico de verdad.
+usersRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const user = await prisma.appUser.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!user) throw HttpError.notFound("Usuario no encontrado");
+
+    // No permitir borrar la propia cuenta desde aquí -- se quedaría sin
+    // sesión válida a mitad de gestionar usuarios. Para eso, que lo borre
+    // otro administrador.
+    if (user.id === req.auth!.sub) {
+      throw HttpError.badRequest("No puedes eliminar tu propio usuario -- pide a otro administrador que lo haga");
+    }
+
+    // UserRole sí tiene una FK real hacia AppUser (a diferencia de
+    // AuditLog.userId, que es un String suelto sin relación y por tanto no
+    // bloquea el borrado, aunque el registro histórico quede con un id que
+    // ya no existe) -- hay que quitarla antes o el DELETE de abajo fallaría
+    // por violación de integridad referencial.
+    await prisma.userRole.deleteMany({ where: { userId: user.id } });
+    await prisma.appUser.delete({ where: { id: user.id } });
+    res.status(204).send();
+  })
+);
+
 usersRouter.post(
   "/:id/reset-password",
   asyncHandler(async (req, res) => {

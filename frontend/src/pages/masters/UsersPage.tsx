@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import Toast from "@/components/Toast";
 import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/auth-store";
 import NewUserModal from "@/pages/masters/NewUserModal";
 import EditUserModal from "@/pages/masters/EditUserModal";
 
@@ -29,6 +30,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
 
   const { data, isLoading } = useQuery({
     queryKey: ["users"],
@@ -40,6 +42,26 @@ export default function UsersPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
     onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo actualizar el usuario"),
   });
+
+  // Fase 8i: "Eliminar" de verdad (no solo desactivar) -- petición explícita
+  // de Raúl. Borrado físico en el backend (a diferencia de Clientes/
+  // Transportistas, que son bajas lógicas); por eso aquí sí hace falta una
+  // confirmación explícita, igual que ya se pide en otros borrados
+  // definitivos del proyecto.
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/users/${id}`)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      showSuccess("Usuario eliminado");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo eliminar el usuario"),
+  });
+
+  function handleDelete(u: UserRow) {
+    if (window.confirm(`¿Eliminar definitivamente al usuario "${u.fullName}" (${u.email})? Esta acción no se puede deshacer.`)) {
+      deleteMutation.mutate(u.id);
+    }
+  }
 
   return (
     <div>
@@ -90,10 +112,18 @@ export default function UsersPage() {
                   </button>
                   <button
                     onClick={() => toggleActiveMutation.mutate({ id: u.id, active: !u.active })}
-                    className="text-xs text-red-500 hover:text-red-600 font-medium"
+                    className="text-xs text-red-500 hover:text-red-600 font-medium mr-3"
                   >
                     {u.active ? "Desactivar" : "Reactivar"}
                   </button>
+                  {/* No se puede eliminar la propia cuenta desde aquí -- mismo
+                      guard que ya aplica el backend, para no dejar el botón
+                      visible ofreciendo algo que luego el servidor rechaza. */}
+                  {u.id !== currentUser?.id && (
+                    <button onClick={() => handleDelete(u)} className="text-xs text-red-700 hover:text-red-800 font-semibold">
+                      Eliminar
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
