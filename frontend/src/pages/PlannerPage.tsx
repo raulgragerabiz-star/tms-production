@@ -5,7 +5,6 @@ import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
 import NewRouteModal from "@/pages/planner/NewRouteModal";
 import RouteAssignmentModal from "@/pages/planner/RouteAssignmentModal";
-import { ServiceType } from "@/pages/planner/DragDropBoard";
 import PlanificacionTab from "@/pages/planner/PlanificacionTab";
 import RutasTab from "@/pages/planner/RutasTab";
 import DispatchBoard from "@/pages/planner/DispatchBoard";
@@ -26,12 +25,15 @@ import DispatchBoard from "@/pages/planner/DispatchBoard";
 // beneficia del arreglo de maquetación (altura completa, sin hueco vacío) ya
 // hecho en Fase 7a. El botón "+ Nueva ruta" (alta manual de una ruta) se
 // mantiene tal cual, disponible en cualquier pestaña.
-const serviceTypeOptions: { value: ServiceType; label: string }[] = [
-  { value: "paqueteria", label: "Paquetería" },
-  { value: "paleteria", label: "Paletería" },
-  { value: "paleteria_pesada", label: "Paletería pesada" },
-  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
-];
+//
+// Fase 8: se quita de aquí el desplegable de servicio (paquetería/paletería/
+// paletería pesada/gran volumen) que antes era un filtro compartido por las
+// tres pestañas -- obligaba a elegir uno solo para ver la lista de
+// Planificación, ocultando el resto de pedidos. Ahora Planificación muestra
+// todos a la vez, cada uno con su tipología como etiqueta (ver
+// PlanificacionTab). El alta manual de una ruta ("+ Nueva ruta") sigue
+// pidiendo un único servicio en su propio formulario, como siempre -- una
+// ruta manual sigue siendo de un solo tipo.
 
 interface WarehouseOption {
   id: string;
@@ -49,7 +51,6 @@ export default function PlannerPage() {
 
   const [warehouseId, setWarehouseId] = useState("");
   const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [serviceType, setServiceType] = useState<ServiceType>("paleteria");
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -135,21 +136,10 @@ export default function PlannerPage() {
           onChange={(e) => setRouteDate(e.target.value)}
           className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
         />
-        <select
-          value={serviceType}
-          onChange={(e) => setServiceType(e.target.value as ServiceType)}
-          className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
-        >
-          {serviceTypeOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
       </div>
 
       {view === "planificacion" && (
-        <PlanificacionTab warehouseId={warehouseId} routeDate={routeDate} serviceType={serviceType} onPlanned={handlePlanned} />
+        <PlanificacionTab warehouseId={warehouseId} routeDate={routeDate} onPlanned={handlePlanned} />
       )}
 
       {view === "rutas" && <RutasTab warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />}
@@ -166,7 +156,6 @@ export default function PlannerPage() {
         onError={showError}
         presetOrderId={presetOrderId}
         presetWarehouseId={warehouseId || undefined}
-        presetServiceType={serviceType}
       />
       <RouteAssignmentModal
         routeId={assigningRouteId}

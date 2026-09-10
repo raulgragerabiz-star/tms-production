@@ -1,21 +1,40 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
+import Chip, { ChipColor } from "@/components/Chip";
 
 // Fase 7b: primera pestaña del Planificador reestructurado, estilo Bringg --
-// lista de pedidos pendientes de este almacén/fecha/servicio con casillas,
-// para elegir cuáles entran en esta pasada de planificación automática (en
-// vez de que el motor coja siempre "los N de mayor prioridad" sin más
-// control). Al terminar, PlannerPage cambia solo a la pestaña "Rutas" para
-// ver el resultado ya montado. Sustituye al antiguo botón suelto
-// "Planificar automáticamente" de la pestaña Despacho (ese seguía
-// funcionando exactamente igual por debajo, en /routes/auto-plan -- ahora
-// simplemente se dispara desde aquí, con selección explícita).
+// lista de pedidos pendientes de este almacén/fecha con casillas, para
+// elegir cuáles entran en esta pasada de planificación automática (en vez
+// de que el motor coja siempre "los N de mayor prioridad" sin más control).
+// Al terminar, PlannerPage cambia solo a la pestaña "Rutas" para ver el
+// resultado ya montado. Sustituye al antiguo botón suelto "Planificar
+// automáticamente" de la pestaña Despacho (ese seguía funcionando
+// exactamente igual por debajo, en /routes/auto-plan -- ahora simplemente se
+// dispara desde aquí, con selección explícita).
+//
+// Fase 8: dos cambios pedidos por Raúl tras probar con datos reales:
+//  - Se quita el desplegable de servicio (paquetería/paletería/paletería
+//    pesada/gran volumen) que obligaba a elegir uno para poder ver la lista
+//    -- ahora se ven TODOS los pedidos pendientes a la vez, cada uno con su
+//    tipología como etiqueta (ya calculada por peso/palés al crearse, ver
+//    classifyOrder) en vez de como filtro. Al planificar, si la selección
+//    mezcla tipologías, el backend crea una ruta por cada una (una ruta solo
+//    puede ser de un servicio).
+//  - Se añade un selector de "Estado del pedido": por defecto "Validado"
+//    (los pendientes de planificar de siempre -- nada cambia si no se
+//    toca), pero se puede elegir otro estado para hacer planificaciones de
+//    prueba con pedidos recién importados que aún no se han validado uno a
+//    uno. Esto era lo que de verdad impedía ver pedidos de fechas pasadas
+//    en las pruebas -- no había ningún bloqueo real de fechas, sino que
+//    todo pedido importado (Excel/ERP) entra como "Recibido" y no
+//    aparecía aquí hasta validarlo a mano.
 
 interface PendingOrder {
   id: string;
   orderNumber: string;
   priority: string;
+  serviceType: string;
   requestedDeliveryDate: string;
   deliveryTimeWindowFrom: string | null;
   deliveryTimeWindowTo: string | null;
@@ -27,7 +46,6 @@ interface PendingOrder {
 interface Props {
   warehouseId: string;
   routeDate: string;
-  serviceType: string;
   onPlanned: (summary: string, ok: boolean) => void;
 }
 
@@ -37,17 +55,48 @@ const priorityLabel: Record<string, string> = {
   low: "Baja",
 };
 
-export default function PlanificacionTab({ warehouseId, routeDate, serviceType, onPlanned }: Props) {
+const serviceTypeLabel: Record<string, string> = {
+  paqueteria: "Paquetería",
+  paleteria: "Paletería",
+  paleteria_pesada: "Paletería pesada",
+  gran_volumen: "Gran volumen",
+};
+
+const serviceTypeColor: Record<string, ChipColor> = {
+  paqueteria: "blue",
+  paleteria: "teal",
+  paleteria_pesada: "amber",
+  gran_volumen: "purple",
+};
+
+// Fase 8: estados de pedido seleccionables para pruebas -- "Validado" es el
+// único que importaba hasta ahora (el paso normal antes de planificar) y se
+// mantiene como opción por defecto; el resto sirve para probar la
+// planificación con pedidos que aún no han pasado por ese paso.
+const statusOptions: { value: string; label: string }[] = [
+  { value: "validated", label: "Validado (pendientes de planificar)" },
+  { value: "received", label: "Recibido (sin validar todavía)" },
+  { value: "planned", label: "Planificado" },
+  { value: "loading", label: "En carga" },
+  { value: "dispatched", label: "Despachado" },
+  { value: "in_transit", label: "En tránsito" },
+  { value: "incident", label: "Con incidencia" },
+  { value: "delivered", label: "Entregado" },
+  { value: "cancelled", label: "Cancelado" },
+];
+
+export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState("validated");
 
-  const queryKey = ["planner-board", warehouseId, routeDate, serviceType];
+  const queryKey = ["planner-board", warehouseId, routeDate, status];
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async () =>
       (
         await api.get("/routes/planner-board", {
-          params: { warehouseId: warehouseId || undefined, date: routeDate || undefined, serviceType },
+          params: { warehouseId: warehouseId || undefined, date: routeDate || undefined, status },
         })
       ).data as { pendingOrders: PendingOrder[] },
   });
@@ -77,7 +126,7 @@ export default function PlanificacionTab({ warehouseId, routeDate, serviceType, 
         await api.post("/routes/auto-plan", {
           warehouseId,
           routeDate,
-          serviceType,
+          status,
           orderIds: Array.from(selected),
         })
       ).data,
@@ -106,6 +155,29 @@ export default function PlanificacionTab({ warehouseId, routeDate, serviceType, 
         </p>
       )}
 
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          Estado del pedido
+          <select
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setSelected(new Set());
+            }}
+            className="rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {status !== "validated" && (
+          <p className="text-xs text-amber-600">Planificación de prueba: normalmente aquí solo se ve "Validado".</p>
+        )}
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex-1 flex flex-col min-h-0">
         <div className="flex-1 overflow-y-auto">
           <table className="w-full text-sm">
@@ -123,6 +195,7 @@ export default function PlanificacionTab({ warehouseId, routeDate, serviceType, 
                 <th className="text-left px-3 py-2">Cliente</th>
                 <th className="text-left px-3 py-2">Destino</th>
                 <th className="text-left px-3 py-2">Ventana</th>
+                <th className="text-left px-3 py-2">Tipología</th>
                 <th className="text-left px-3 py-2">Prioridad</th>
                 <th className="text-right px-3 py-2">Peso</th>
               </tr>
@@ -130,15 +203,15 @@ export default function PlanificacionTab({ warehouseId, routeDate, serviceType, 
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
                     Cargando…
                   </td>
                 </tr>
               )}
               {!isLoading && pendingOrders.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
-                    No hay pedidos pendientes de planificar para este almacén/fecha/servicio.
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                    No hay pedidos en ese estado para este almacén/fecha.
                   </td>
                 </tr>
               )}
@@ -166,6 +239,9 @@ export default function PlanificacionTab({ warehouseId, routeDate, serviceType, 
                       {o.deliveryTimeWindowFrom || o.deliveryTimeWindowTo
                         ? `${o.deliveryTimeWindowFrom ?? "—"} - ${o.deliveryTimeWindowTo ?? "—"}`
                         : "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      <Chip color={serviceTypeColor[o.serviceType] ?? "slate"}>{serviceTypeLabel[o.serviceType] ?? o.serviceType}</Chip>
                     </td>
                     <td className="px-3 py-2 text-xs">{priorityLabel[o.priority] ?? o.priority}</td>
                     <td className="px-3 py-2 text-right font-mono text-slate-600">{Math.round(o.totalWeightKg)} kg</td>

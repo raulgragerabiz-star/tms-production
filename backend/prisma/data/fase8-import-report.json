@@ -1,0 +1,505 @@
+{
+  "empresa": {
+    "id": "cf3a2776-9199-4555-a832-9fc61a88d557",
+    "nombre": "Distribuidora Demo, S.L."
+  },
+  "circuitos": {
+    "total": 8,
+    "creados": [
+      "MAD1",
+      "MAD2",
+      "MAD3",
+      "EXTREMADURA 1",
+      "EXTREMADURA 2",
+      "AVILA-SEGOVIA LEON",
+      "MADRID",
+      "PORTU 4"
+    ]
+  },
+  "transportistas": {
+    "creados": [
+      {
+        "legalName": "Sediur",
+        "taxId": "PENDIENTE-SEDIUR"
+      },
+      {
+        "legalName": "Pantany",
+        "taxId": "PENDIENTE-PANTANY"
+      },
+      {
+        "legalName": "Melen Logística",
+        "taxId": "PENDIENTE-MELEN-LOGISTICA"
+      },
+      {
+        "legalName": "Esquivel",
+        "taxId": "PENDIENTE-ESQUIVEL"
+      },
+      {
+        "legalName": "Diego Hernández",
+        "taxId": "PENDIENTE-DIEGO-HERNANDEZ"
+      },
+      {
+        "legalName": "Ttes. Pereira",
+        "taxId": "PENDIENTE-TTES-PEREIRA"
+      },
+      {
+        "legalName": "tavanera",
+        "taxId": "PENDIENTE-TAVANERA"
+      },
+      {
+        "legalName": "PANTANY LOGISTIC SL",
+        "taxId": "PENDIENTE-PANTANY-LOGISTIC-SL"
+      },
+      {
+        "legalName": "TransTDF",
+        "taxId": "PENDIENTE-TRANSTDF"
+      },
+      {
+        "legalName": "Trans TDF",
+        "taxId": "PENDIENTE-TRANS-TDF"
+      }
+    ]
+  },
+  "filasProvTteDescartadas": [
+    {
+      "row": 12,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 39,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 42,
+      "value": "Desc. Adicional"
+    },
+    {
+      "row": 60,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 69,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 70,
+      "value": "Paradas"
+    },
+    {
+      "row": 72,
+      "value": "Paradas"
+    },
+    {
+      "row": 81,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 87,
+      "value": 652917452
+    },
+    {
+      "row": 96,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 112,
+      "value": " €/tn transp."
+    },
+    {
+      "row": 113,
+      "value": "Media ingreso €/tn Centr. Log."
+    }
+  ],
+  "gruposConTarifaInconsistente": [
+    {
+      "zone": "MAD1",
+      "carrier": "Pantany",
+      "campo": "pricePerTon",
+      "valores": [
+        35.39,
+        38.08,
+        34.83
+      ]
+    },
+    {
+      "zone": "MAD1",
+      "carrier": "Pantany",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        31.6,
+        34,
+        31.1
+      ]
+    },
+    {
+      "zone": "MAD2",
+      "carrier": "Melen Logística",
+      "campo": "pricePerTon",
+      "valores": [
+        20.95,
+        33.62,
+        30.91,
+        35.39,
+        35.84
+      ]
+    },
+    {
+      "zone": "MAD2",
+      "carrier": "Melen Logística",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        31.03,
+        30.02,
+        27.6,
+        31.6,
+        32
+      ]
+    },
+    {
+      "zone": "MAD2",
+      "carrier": "Sediur",
+      "campo": "pricePerTon",
+      "valores": [
+        34.75,
+        17.95
+      ]
+    },
+    {
+      "zone": "MAD3",
+      "carrier": "Sediur",
+      "campo": "pricePerTon",
+      "valores": [
+        17.95,
+        35.39
+      ]
+    },
+    {
+      "zone": "MAD3",
+      "carrier": "Sediur",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        27.6,
+        31.6,
+        31.03
+      ]
+    },
+    {
+      "zone": "MAD3",
+      "carrier": "Melen Logística",
+      "campo": "pricePerTon",
+      "valores": [
+        34.75,
+        35.39,
+        38.1,
+        20.01
+      ]
+    },
+    {
+      "zone": "MAD3",
+      "carrier": "Melen Logística",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        31.03,
+        31.6,
+        34.02
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 1",
+      "carrier": "Esquivel",
+      "campo": "pricePerTon",
+      "valores": [
+        42.76,
+        43.92
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 1",
+      "carrier": "Esquivel",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        38.18,
+        39.22
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 1",
+      "carrier": "Pantany",
+      "campo": "pricePerTon",
+      "valores": [
+        43.92,
+        42.76,
+        44.05
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 1",
+      "carrier": "Pantany",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        39.21,
+        38.18,
+        39.33,
+        39.15
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 1",
+      "carrier": "Diego Hernández",
+      "campo": "pricePerTon",
+      "valores": [
+        43.92,
+        38.64
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 2",
+      "carrier": "Esquivel",
+      "campo": "pricePerTon",
+      "valores": [
+        43.92,
+        38.64
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 2",
+      "carrier": "Diego Hernández",
+      "campo": "pricePerTon",
+      "valores": [
+        43.92,
+        43.93,
+        41.44
+      ]
+    },
+    {
+      "zone": "EXTREMADURA 2",
+      "carrier": "Diego Hernández",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        39.22,
+        37
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "PANTANY LOGISTIC SL",
+      "campo": "pricePerTon",
+      "valores": [
+        77.28,
+        64.55,
+        65.17
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "PANTANY LOGISTIC SL",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        69,
+        58.19
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "Pantany",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        60,
+        58.19
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "TransTDF",
+      "campo": "pricePerTon",
+      "valores": [
+        71.61,
+        65.17
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "TransTDF",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        63.94,
+        58.19
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "Trans TDF",
+      "campo": "pricePerTon",
+      "valores": [
+        46.37,
+        71.61,
+        74.97
+      ]
+    },
+    {
+      "zone": "PORTU 4",
+      "carrier": "Trans TDF",
+      "campo": "partnerIncomePerTon",
+      "valores": [
+        41.4,
+        63.94,
+        66.94
+      ]
+    }
+  ],
+  "tarifas": {
+    "creadas": 20,
+    "yaExistian": 0
+  },
+  "clientes": {
+    "asignadosAhora": 71,
+    "yaEstabanEnEsaZona": 0,
+    "codigosSinClienteEnBD": []
+  },
+  "chequeoCruzadoHoja1": {
+    "totalHoja1": 106,
+    "cubiertosPorHoja2": 71,
+    "noEncontradosEnHoja2": [
+      {
+        "cod": "558002",
+        "cliente": "MOSAICOS ALONSO BIG MAT"
+      },
+      {
+        "cod": "478001",
+        "cliente": "TERRAZOS PEÑALABRA, S.L."
+      },
+      {
+        "cod": "562001",
+        "cliente": "BIGMAT TALAVERA"
+      },
+      {
+        "cod": "547119",
+        "cliente": "ALMACENES ANLOMA 2 S.L."
+      },
+      {
+        "cod": "575783",
+        "cliente": "JOSE PORRAS PISONERO"
+      },
+      {
+        "cod": "518001",
+        "cliente": "ESTRATEGIAS Y OBJETIVOS INMOBILIARIOS"
+      },
+      {
+        "cod": "547147",
+        "cliente": "STRUXENTIA GROUP, S.L."
+      },
+      {
+        "cod": "480000",
+        "cliente": "MADECON, S.A."
+      },
+      {
+        "cod": "547051",
+        "cliente": "CARRION AREXNA, S.L.U."
+      },
+      {
+        "cod": "482000",
+        "cliente": "ALMACEN DE MATERIALES DE CONST. LA FABRICA"
+      },
+      {
+        "cod": "571000",
+        "cliente": "MARTIN GARCIA 2005, S.L."
+      },
+      {
+        "cod": "409000",
+        "cliente": "FERRETERIA Y MATERIALES ALVAREZ S.A."
+      },
+      {
+        "cod": "534000",
+        "cliente": "MANUEL SANFRUTOS"
+      },
+      {
+        "cod": "547082",
+        "cliente": "LA GAVIA INVERSIONES Y PROYECTOS,S.L."
+      },
+      {
+        "cod": "571001",
+        "cliente": "MARTIN GARCIA 2005, SL (CASTELLANOS)"
+      },
+      {
+        "cod": "480002",
+        "cliente": "CITY AVILA SUMINISTROS, S.L.U (Madecon)"
+      },
+      {
+        "cod": "318001",
+        "cliente": "PROYECTOS Y MATERIALES COPI, S.L."
+      },
+      {
+        "cod": "570002",
+        "cliente": "SYRO ARGENTI SL"
+      },
+      {
+        "cod": "570003",
+        "cliente": "BRICO PRO REFORMANDO HOGARES SL"
+      },
+      {
+        "cod": "547153",
+        "cliente": "CANTERAS Y ARIDOS DE LA ALCARRIA SL"
+      },
+      {
+        "cod": "547156",
+        "cliente": "BRICODECOR MADRID SL"
+      },
+      {
+        "cod": "614095",
+        "cliente": "JUAN PABLO TORIBIO MATERIALES DE CONSTRUCCIÓN"
+      },
+      {
+        "cod": "595000",
+        "cliente": "ALMACENES SAN GREGORIO, S.L."
+      },
+      {
+        "cod": "585002",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (ALCALA)"
+      },
+      {
+        "cod": "585003",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (ALCOBENDAS)"
+      },
+      {
+        "cod": "585004",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (GETAFE)"
+      },
+      {
+        "cod": "585007",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (ALCORCON)"
+      },
+      {
+        "cod": "585008",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (ATOCHA)"
+      },
+      {
+        "cod": "585009",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (GARCIA NOBLEJAS)"
+      },
+      {
+        "cod": "585015",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (VALLADOLID)"
+      },
+      {
+        "cod": "585016",
+        "cliente": "ESTRATEGIAS BIGMAT ,S.L.U (Palencia)"
+      },
+      {
+        "cod": "585017",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (Benavente)"
+      },
+      {
+        "cod": "576000",
+        "cliente": "BIGWIN COMERCIAL DE VENTANAS, S.L."
+      },
+      {
+        "cod": "610000",
+        "cliente": "CUBIK SURFACE MADRID, S.L."
+      },
+      {
+        "cod": "585019",
+        "cliente": "ESTRATEGIAS BIGMAT, S.L.U (FUENLABRADA)"
+      }
+    ]
+  }
+}

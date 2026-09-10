@@ -145,17 +145,27 @@ routesRouter.get(
     const companyId = req.auth!.companyId;
     const warehouseId = req.query.warehouseId as string | undefined;
     const date = req.query.date as string | undefined;
-    // Fase 7b: filtro de servicio opcional -- lo usa la nueva pestaña
-    // "Planificación" (selección de pedidos + planificar automáticamente),
-    // que agrupa por almacén/fecha/servicio igual que /auto-plan. Sin este
-    // parámetro, se comporta exactamente igual que antes (todos los servicios
-    // mezclados) -- lo sigue usando así el Tablero/Mapa existente.
+    // Fase 7b: filtro de servicio opcional -- ya no lo usa la pestaña
+    // "Planificación" (Fase 8: ahora se ve la tipología de cada pedido como
+    // etiqueta según su peso, en vez de obligar a elegir un único servicio
+    // que ocultaba el resto de la lista), pero se mantiene por compatibilidad
+    // con cualquier otro llamador. Sin este parámetro, todos los servicios
+    // salen mezclados.
     const serviceType = req.query.serviceType as string | undefined;
+    // Fase 8: "el sistema necesita poder reconocer fechas pasadas, sobre todo
+    // para pruebas de funcionamiento" -- el bloqueo real no eran las fechas
+    // (ninguna consulta ni el selector de fecha las restringían), sino que
+    // esto exigía siempre status "validated": un pedido recién importado por
+    // Excel o ERP entra como "received" y no aparecía aquí hasta validarlo
+    // uno a uno. Ahora el estado es un filtro explícito, con "validated" como
+    // valor por defecto (el mismo de siempre -- nada cambia si no se manda),
+    // para poder elegir otro estado ex profeso al hacer pruebas.
+    const status = (req.query.status as string | undefined) ?? "validated";
 
     const pendingOrders = await prisma.order.findMany({
       where: {
         companyId,
-        status: "validated",
+        status: status as any,
         ...(warehouseId ? { warehouseId } : {}),
         ...(date ? { requestedDeliveryDate: new Date(date) } : {}),
         ...(serviceType ? { serviceType: serviceType as any } : {}),
@@ -375,7 +385,21 @@ routesRouter.post(
     const schema = z.object({
       warehouseId: z.string().uuid(),
       routeDate: z.coerce.date(),
-      serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]),
+      // Fase 8: deja de ser obligatorio -- la pestaña "Planificación" ya no
+      // fuerza a elegir un único servicio antes de poder ver/seleccionar
+      // pedidos (eso ocultaba el resto de la lista). Si no se manda, cada
+      // pedido seleccionado se planifica con SU PROPIO servicio (ya
+      // calculado por peso/palés al crearlo -- ver classifyOrder), agrupando
+      // en una ruta por cada servicio distinto que haya entre los
+      // seleccionados. Si se manda (compatibilidad con cualquier otro
+      // llamador), se comporta exactamente como antes: todo un único
+      // servicio.
+      serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]).optional(),
+      // Fase 8: mismo motivo que en /planner-board -- por defecto solo
+      // pedidos "validated" (como siempre), pero se puede pedir otro estado
+      // ex profeso para probar la planificación con pedidos recién
+      // importados que todavía no se han validado uno a uno.
+      status: z.string().optional(),
       // Fase 7b: la pestaña "Planificación" deja elegir con casillas qué
       // pedidos concretos entran en esta pasada (estilo Bringg: seleccionas
       // de la lista y le das a planificar). Si no se manda -- por
@@ -385,6 +409,7 @@ routesRouter.post(
     });
     const data = schema.parse(req.body);
     const companyId = req.auth!.companyId;
+    const status = data.status ?? "validated";
 
     const warehouse = await prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId } });
     if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
@@ -396,13 +421,13 @@ routesRouter.post(
       where: {
         companyId,
         warehouseId: data.warehouseId,
-        status: "validated",
-        serviceType: data.serviceType,
+        status: status as any,
+        ...(data.serviceType ? { serviceType: data.serviceType } : {}),
         requestedDeliveryDate: data.routeDate,
-        // Siempre acotado a este almacén/fecha/servicio y a pedidos todavía
-        // validados (no a cualquier id que llegue en el body) -- así una
-        // selección manipulada o desactualizada nunca puede colar un pedido
-        // de otra empresa, otro día o ya planificado.
+        // Siempre acotado a este almacén/fecha/estado (no a cualquier id que
+        // llegue en el body) -- así una selección manipulada o desactualizada
+        // nunca puede colar un pedido de otra empresa, otro día o ya
+        // planificado.
         ...(data.orderIds && data.orderIds.length > 0 ? { id: { in: data.orderIds } } : {}),
       },
       include: {
@@ -425,13 +450,15 @@ routesRouter.post(
         ordersUnassigned: 0,
         ordersWithoutCoords: withoutCoords,
         ordersLeftForNextRun: 0,
-        message: "No hay pedidos validados con coordenadas para planificar en ese almacén/fecha/servicio.",
+        message: "No hay pedidos con coordenadas para planificar en ese almacén/fecha/estado.",
       });
     }
 
     // Vehículos virtuales: tipos de vehículo de las zonas de influencia del
     // almacén (criterio ya usado en suggestVehicleType); si no hay ninguna
     // configurada, se cae a los tipos de vehículo activos de la empresa.
+    // No depende del servicio, así que se calcula una sola vez para todos
+    // los grupos.
     const zoneTypes = await prisma.influenceZone.findMany({
       where: { warehouseId: data.warehouseId },
       include: { vehicleType: true },
@@ -447,87 +474,118 @@ routesRouter.post(
     }
 
     const warehouseCoord: [number, number] = [warehouse.lng, warehouse.lat];
-    const vehicles: VroomVehicle[] = [];
-    let vehicleIdx = 0;
-    // Como mucho tantas unidades por tipo como hagan falta para poder cubrir
-    // todos los pedidos seleccionados en el peor caso (uno por vehículo),
-    // repartidas entre los tipos disponibles, sin pasar del límite global.
-    const unitsPerType = Math.max(1, Math.ceil(MAX_AUTO_PLAN_VEHICLES / vehicleTypes.length));
-    for (const vt of vehicleTypes) {
-      for (let i = 0; i < unitsPerType && vehicles.length < MAX_AUTO_PLAN_VEHICLES; i++) {
-        vehicles.push({
-          id: vehicleIdx++,
-          start: warehouseCoord,
-          end: warehouseCoord,
-          capacity: [
-            Math.round(Number(vt.maxWeightKg) * UNITS_PER_KG),
-            Math.round(vt.maxPallets * UNITS_PER_PALLET),
-          ],
-        });
+
+    function buildVehicles(): VroomVehicle[] {
+      const vehicles: VroomVehicle[] = [];
+      let vehicleIdx = 0;
+      // Como mucho tantas unidades por tipo como hagan falta para poder cubrir
+      // todos los pedidos seleccionados en el peor caso (uno por vehículo),
+      // repartidas entre los tipos disponibles, sin pasar del límite global.
+      const unitsPerType = Math.max(1, Math.ceil(MAX_AUTO_PLAN_VEHICLES / vehicleTypes.length));
+      for (const vt of vehicleTypes) {
+        for (let i = 0; i < unitsPerType && vehicles.length < MAX_AUTO_PLAN_VEHICLES; i++) {
+          vehicles.push({
+            id: vehicleIdx++,
+            start: warehouseCoord,
+            end: warehouseCoord,
+            capacity: [
+              Math.round(Number(vt.maxWeightKg) * UNITS_PER_KG),
+              Math.round(vt.maxPallets * UNITS_PER_PALLET),
+            ],
+          });
+        }
       }
+      return vehicles;
     }
 
-    const jobs: VroomJob[] = selected.map((order, idx) => {
-      const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
-      const pallets = order.lines.reduce((acc, l) => {
-        const upp = l.product.unitsPerPallet ?? 1;
-        return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
-      }, 0);
-      const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
-      const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
-      return {
-        id: idx,
-        location: [order.deliveryPoint.lng as number, order.deliveryPoint.lat as number],
-        service: STOP_SERVICE_MINUTES * 60,
-        delivery: [Math.round(weightKg * UNITS_PER_KG), Math.round(pallets * UNITS_PER_PALLET)],
-        ...(fromSec != null && toSec != null ? { time_windows: [[fromSec, toSec]] as [number, number][] } : {}),
-        priority: order.priority === "urgent" ? 100 : 0,
-      };
-    });
-
-    let result;
-    try {
-      result = await optimizePlan({ jobs, vehicles });
-    } catch (err) {
-      if (err instanceof OrsNotConfiguredError) {
-        throw HttpError.badRequest(
-          "La planificación automática necesita una clave de OpenRouteService configurada (ORS_API_KEY) -- todavía no lo está."
-        );
-      }
-      throw HttpError.badRequest(`No se pudo completar la optimización: ${(err as Error).message}`);
+    // Fase 8: una ruta solo puede tener un `serviceType` (columna de Route),
+    // así que si la selección mezcla servicios distintos (posible ahora que
+    // la pestaña "Planificación" ya no obliga a elegir uno antes de
+    // seleccionar pedidos), se agrupan y se planifica cada grupo por
+    // separado -- una llamada a VROOM y, como mucho, una o varias rutas por
+    // grupo. Con `serviceType` explícito en el body (compatibilidad con
+    // cualquier otro llamador) todo cae en un único grupo, igual que antes.
+    const groups = new Map<string, typeof selected>();
+    for (const order of selected) {
+      const key = data.serviceType ?? order.serviceType;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(order);
     }
 
     const routesCreated: string[] = [];
-    for (const vroomRoute of result.routes) {
-      const jobSteps = vroomRoute.steps.filter((s) => s.type === "job" && s.job != null);
-      if (jobSteps.length === 0) continue;
+    let ordersPlanned = 0;
+    let ordersUnassigned = 0;
+    const unassignedReasons: { orderNumber: string; reason: string }[] = [];
 
-      const route = await prisma.$transaction(async (tx) => {
-        const created = await tx.route.create({
-          data: {
-            companyId,
-            warehouseId: data.warehouseId,
-            routeDate: data.routeDate,
-            serviceType: data.serviceType,
-            status: "draft",
-          },
-        });
-        await tx.routeStop.createMany({
-          data: jobSteps.map((step, seqIdx) => ({
-            routeId: created.id,
-            orderId: selected[step.job as number].id,
-            sequence: seqIdx + 1,
-          })),
-        });
-        await tx.order.updateMany({
-          where: { id: { in: jobSteps.map((step) => selected[step.job as number].id) } },
-          data: { status: "planned" },
-        });
-        return created;
+    for (const [groupServiceType, groupOrders] of groups) {
+      const vehicles = buildVehicles();
+      const jobs: VroomJob[] = groupOrders.map((order, idx) => {
+        const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
+        const pallets = order.lines.reduce((acc, l) => {
+          const upp = l.product.unitsPerPallet ?? 1;
+          return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
+        }, 0);
+        const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
+        const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
+        return {
+          id: idx,
+          location: [order.deliveryPoint.lng as number, order.deliveryPoint.lat as number],
+          service: STOP_SERVICE_MINUTES * 60,
+          delivery: [Math.round(weightKg * UNITS_PER_KG), Math.round(pallets * UNITS_PER_PALLET)],
+          ...(fromSec != null && toSec != null ? { time_windows: [[fromSec, toSec]] as [number, number][] } : {}),
+          priority: order.priority === "urgent" ? 100 : 0,
+        };
       });
 
-      await recalculateLoadPlan(route.id);
-      routesCreated.push(route.id);
+      let result;
+      try {
+        result = await optimizePlan({ jobs, vehicles });
+      } catch (err) {
+        if (err instanceof OrsNotConfiguredError) {
+          throw HttpError.badRequest(
+            "La planificación automática necesita una clave de OpenRouteService configurada (ORS_API_KEY) -- todavía no lo está."
+          );
+        }
+        throw HttpError.badRequest(`No se pudo completar la optimización: ${(err as Error).message}`);
+      }
+
+      for (const vroomRoute of result.routes) {
+        const jobSteps = vroomRoute.steps.filter((s) => s.type === "job" && s.job != null);
+        if (jobSteps.length === 0) continue;
+
+        const route = await prisma.$transaction(async (tx) => {
+          const created = await tx.route.create({
+            data: {
+              companyId,
+              warehouseId: data.warehouseId,
+              routeDate: data.routeDate,
+              serviceType: groupServiceType as any,
+              status: "draft",
+            },
+          });
+          await tx.routeStop.createMany({
+            data: jobSteps.map((step, seqIdx) => ({
+              routeId: created.id,
+              orderId: groupOrders[step.job as number].id,
+              sequence: seqIdx + 1,
+            })),
+          });
+          await tx.order.updateMany({
+            where: { id: { in: jobSteps.map((step) => groupOrders[step.job as number].id) } },
+            data: { status: "planned" },
+          });
+          return created;
+        });
+
+        await recalculateLoadPlan(route.id);
+        routesCreated.push(route.id);
+      }
+
+      ordersPlanned += jobs.length - result.unassigned.length;
+      ordersUnassigned += result.unassigned.length;
+      for (const u of result.unassigned) {
+        unassignedReasons.push({ orderNumber: groupOrders[u.id]?.orderNumber ?? "?", reason: u.reason ?? "sin especificar" });
+      }
     }
 
     broadcastToWarehouse(data.warehouseId, "auto_plan_completed", {
@@ -538,14 +596,11 @@ routesRouter.post(
 
     res.json({
       routesCreated: routesCreated.length,
-      ordersPlanned: jobs.length - result.unassigned.length,
-      ordersUnassigned: result.unassigned.length,
+      ordersPlanned,
+      ordersUnassigned,
       ordersWithoutCoords: withoutCoords,
       ordersLeftForNextRun: leftForNextRun,
-      unassignedReasons: result.unassigned.map((u) => ({
-        orderNumber: selected[u.id]?.orderNumber ?? "?",
-        reason: u.reason ?? "sin especificar",
-      })),
+      unassignedReasons,
     });
   })
 );
