@@ -121,6 +121,12 @@ export default function StopDetailPage() {
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaved, setNotesSaved] = useState(false);
   const [formVisited, setFormVisited] = useState(false);
+  // Fase 8M -- fix: ninguna de las acciones de esta pantalla mostraba nada
+  // si el backend devolvía un error (ej. "He llegado" pulsado sin efecto
+  // aparente) -- el botón parecía "no responder" cuando en realidad la
+  // petición fallaba en silencio. Mismo patrón que ya usa el resto del
+  // proyecto (err?.response?.data?.message) para mostrarlo de verdad.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // La barra inferior fija de acciones no mueve estos bloques de sitio --
   // siguen siendo el mismo contenido en la página, solo que se puede saltar
@@ -145,7 +151,11 @@ export default function StopDetailPage() {
 
   const arriveMutation = useMutation({
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/arrive`)).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["today-route"] }),
+    onSuccess: () => {
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ["today-route"] });
+    },
+    onError: (err: any) => setActionError(err?.response?.data?.message ?? "No se pudo registrar la llegada. Inténtalo de nuevo."),
   });
 
   const completeMutation = useMutation({
@@ -158,33 +168,41 @@ export default function StopDetailPage() {
         })
       ).data,
     onSuccess: () => {
+      setActionError(null);
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       navigate(`/?date=${date}`);
     },
+    onError: (err: any) => setActionError(err?.response?.data?.message ?? "No se pudo completar la entrega. Inténtalo de nuevo."),
   });
 
   const failMutation = useMutation({
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { failed: true, failureReason })).data,
     onSuccess: () => {
+      setActionError(null);
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       navigate(`/?date=${date}`);
     },
+    onError: (err: any) => setActionError(err?.response?.data?.message ?? "No se pudo registrar la incidencia. Inténtalo de nuevo."),
   });
 
   const returnMutation = useMutation({
     mutationFn: async () => (await api.post(`/driver-app/stops/${id}/complete`, { returned: true, failureReason })).data,
     onSuccess: () => {
+      setActionError(null);
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       navigate(`/?date=${date}`);
     },
+    onError: (err: any) => setActionError(err?.response?.data?.message ?? "No se pudo registrar el retorno. Inténtalo de nuevo."),
   });
 
   const notesMutation = useMutation({
     mutationFn: async () => saveStopNotes(id!, notesDraft),
     onSuccess: () => {
+      setActionError(null);
       queryClient.invalidateQueries({ queryKey: ["today-route"] });
       setNotesSaved(true);
     },
+    onError: (err: any) => setActionError(err?.response?.data?.message ?? "No se pudo guardar la nota. Inténtalo de nuevo."),
   });
 
   if (isLoading) return <p className="text-base text-slate-400 text-center mt-10">Cargando…</p>;
@@ -216,6 +234,18 @@ export default function StopDetailPage() {
       </header>
 
       <main className={`max-w-lg mx-auto px-4 pt-4 space-y-4 ${editableStage ? "pb-56" : "pb-6"}`}>
+        {/* Fase 8M -- fix: aviso visible si una acción (llegada, entrega,
+            incidencia, nota) falla contra el backend -- antes no había
+            ninguna señal y el botón correspondiente parecía "no responder". */}
+        {actionError && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start justify-between gap-3">
+            <p className="text-sm text-red-700">{actionError}</p>
+            <button onClick={() => setActionError(null)} className="text-red-400 text-lg leading-none shrink-0" aria-label="Cerrar aviso">
+              ×
+            </button>
+          </div>
+        )}
+
         {/* 2 + 3. Mapa sticky del destino + tarjeta principal (estado, dirección, GPS). */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="h-40 bg-slate-100">

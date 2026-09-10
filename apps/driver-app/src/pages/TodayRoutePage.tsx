@@ -231,10 +231,17 @@ export default function TodayRoutePage() {
                 {data.shipment.route.stops.length} paradas ·{" "}
                 {data.shipment.route.stops.filter((s) => s.status === "completed").length} completadas
               </p>
-              {/* Fase 8k: solo tiene sentido avanzar el estado del envío en
-                  el día de hoy -- viendo una fecha pasada esto es solo
-                  consulta de histórico. */}
-              {isToday && NEXT_SHIPMENT_STATUS[data.shipment.status] && (
+              {/* Fase 8M -- fix: antes este botón exigía "isToday" (fecha
+                  seleccionada === fecha real del dispositivo), pensado para
+                  no tocar el estado de una ruta histórica. Pero eso también
+                  ocultaba el botón con rutas de HOY cuyos datos de prueba
+                  llevan otra fecha (ver comentario de today-route más abajo
+                  en el backend), dejando sin forma de marcar "cargado" /
+                  "salgo de reparto". El único guardarraíl que hace falta de
+                  verdad es no dejar avanzar el estado de una ruta con fecha
+                  futura; una ruta ya finalizada tampoco muestra botón,
+                  porque su estado ya no está en NEXT_SHIPMENT_STATUS. */}
+              {selectedDate <= todayIso && NEXT_SHIPMENT_STATUS[data.shipment.status] && (
                 <button
                   onClick={() => shipmentStatusMutation.mutate(NEXT_SHIPMENT_STATUS[data.shipment!.status]!.next)}
                   disabled={shipmentStatusMutation.isPending}
