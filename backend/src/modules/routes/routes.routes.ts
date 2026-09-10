@@ -145,6 +145,12 @@ routesRouter.get(
     const companyId = req.auth!.companyId;
     const warehouseId = req.query.warehouseId as string | undefined;
     const date = req.query.date as string | undefined;
+    // Fase 7b: filtro de servicio opcional -- lo usa la nueva pestaña
+    // "Planificación" (selección de pedidos + planificar automáticamente),
+    // que agrupa por almacén/fecha/servicio igual que /auto-plan. Sin este
+    // parámetro, se comporta exactamente igual que antes (todos los servicios
+    // mezclados) -- lo sigue usando así el Tablero/Mapa existente.
+    const serviceType = req.query.serviceType as string | undefined;
 
     const pendingOrders = await prisma.order.findMany({
       where: {
@@ -152,6 +158,7 @@ routesRouter.get(
         status: "validated",
         ...(warehouseId ? { warehouseId } : {}),
         ...(date ? { requestedDeliveryDate: new Date(date) } : {}),
+        ...(serviceType ? { serviceType: serviceType as any } : {}),
       },
       include: {
         customer: { select: { businessCode: true, legalName: true } },
@@ -369,6 +376,12 @@ routesRouter.post(
       warehouseId: z.string().uuid(),
       routeDate: z.coerce.date(),
       serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]),
+      // Fase 7b: la pestaña "Planificación" deja elegir con casillas qué
+      // pedidos concretos entran en esta pasada (estilo Bringg: seleccionas
+      // de la lista y le das a planificar). Si no se manda -- por
+      // compatibilidad con cualquier otro llamador -- se sigue cogiendo
+      // automáticamente por prioridad, exactamente como hasta ahora.
+      orderIds: z.array(z.string().uuid()).optional(),
     });
     const data = schema.parse(req.body);
     const companyId = req.auth!.companyId;
@@ -386,6 +399,11 @@ routesRouter.post(
         status: "validated",
         serviceType: data.serviceType,
         requestedDeliveryDate: data.routeDate,
+        // Siempre acotado a este almacén/fecha/servicio y a pedidos todavía
+        // validados (no a cualquier id que llegue en el body) -- así una
+        // selección manipulada o desactualizada nunca puede colar un pedido
+        // de otra empresa, otro día o ya planificado.
+        ...(data.orderIds && data.orderIds.length > 0 ? { id: { in: data.orderIds } } : {}),
       },
       include: {
         deliveryPoint: { select: { lat: true, lng: true } },

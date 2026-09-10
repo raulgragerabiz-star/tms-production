@@ -124,6 +124,49 @@ usersRouter.post(
   })
 );
 
+// Fase 7b: faltaba poder corregir el nombre/email de un usuario, o sus roles,
+// sin tener que darlo de baja y crear uno nuevo. Deliberadamente NO se toca
+// aquí userType/carrierId/customerId/driverId (el "scope" del usuario) ni la
+// contraseña -- esos ya tienen su propio criterio (crear de nuevo / "Restablecer
+// contraseña") y tocarlos aquí podría dejar un usuario de portal externo
+// apuntando a un transportista/cliente/conductor distinto sin querer.
+const userEditSchema = z.object({
+  email: z.string().email().optional(),
+  fullName: z.string().min(1).optional(),
+  roleIds: z.array(z.string().uuid()).optional(),
+});
+
+usersRouter.put(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const data = userEditSchema.parse(req.body);
+    const user = await prisma.appUser.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!user) throw HttpError.notFound("Usuario no encontrado");
+
+    if (data.email && data.email !== user.email) {
+      const existing = await prisma.appUser.findUnique({ where: { email: data.email } });
+      if (existing) throw HttpError.conflict("Ya existe un usuario con ese email");
+    }
+
+    const updated = await prisma.appUser.update({
+      where: { id: user.id },
+      data: { email: data.email, fullName: data.fullName },
+    });
+
+    if (data.roleIds) {
+      await prisma.userRole.deleteMany({ where: { userId: user.id } });
+      if (data.roleIds.length > 0) {
+        await prisma.userRole.createMany({
+          data: data.roleIds.map((roleId) => ({ userId: user.id, roleId })),
+          skipDuplicates: true,
+        });
+      }
+    }
+
+    res.json({ id: updated.id, email: updated.email, fullName: updated.fullName });
+  })
+);
+
 usersRouter.patch(
   "/:id/active",
   asyncHandler(async (req, res) => {

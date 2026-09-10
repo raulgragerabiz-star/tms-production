@@ -92,6 +92,21 @@ warehousesRouter.put(
   })
 );
 
+// Fase 7b: dar de baja un almacén desde la aplicación (solo existía alta y
+// edición). El modelo Warehouse no tiene columna deletedAt -- a diferencia de
+// Customer/Carrier -- así que la baja es marcarlo inactivo; GET / ya solo
+// lista los activos, y el propio almacén, sus rutas y pedidos históricos no
+// se tocan para nada.
+warehousesRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const warehouse = await prisma.warehouse.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+    await prisma.warehouse.update({ where: { id: warehouse.id }, data: { active: false } });
+    res.status(204).send();
+  })
+);
+
 // Actualización parcial específica del layout, para que el proyecto externo pueda
 // escribir solo su porción de datos sin tener que reenviar el resto de campos del almacén.
 warehousesRouter.patch(

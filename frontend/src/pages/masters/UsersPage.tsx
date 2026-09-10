@@ -5,6 +5,7 @@ import Toast from "@/components/Toast";
 import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewUserModal from "@/pages/masters/NewUserModal";
+import EditUserModal from "@/pages/masters/EditUserModal";
 
 interface UserRow {
   id: string;
@@ -13,7 +14,7 @@ interface UserRow {
   userType: string;
   active: boolean;
   createdAt: string;
-  roles: { role: { name: string } }[];
+  roles: { role: { id: string; name: string } }[];
 }
 
 const userTypeLabel: Record<string, string> = {
@@ -25,6 +26,7 @@ const userTypeLabel: Record<string, string> = {
 
 export default function UsersPage() {
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
 
@@ -82,10 +84,13 @@ export default function UsersPage() {
                 <td className="px-4 py-3">
                   <Chip color={u.active ? "teal" : "slate"}>{u.active ? "Activo" : "Inactivo"}</Chip>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <button onClick={() => setEditingUser(u)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
+                    Editar
+                  </button>
                   <button
                     onClick={() => toggleActiveMutation.mutate({ id: u.id, active: !u.active })}
-                    className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                    className="text-xs text-red-500 hover:text-red-600 font-medium"
                   >
                     {u.active ? "Desactivar" : "Reactivar"}
                   </button>
@@ -97,6 +102,13 @@ export default function UsersPage() {
       </div>
 
       <NewUserModal open={modalOpen} onClose={() => setModalOpen(false)} onSuccess={showSuccess} onError={showError} />
+      <EditUserModal
+        open={editingUser !== null}
+        user={editingUser}
+        onClose={() => setEditingUser(null)}
+        onSuccess={showSuccess}
+        onError={showError}
+      />
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
     </div>
   );

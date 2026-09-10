@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
 import Pagination from "@/components/Pagination";
 import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import ImportCustomersModal from "@/pages/masters/ImportCustomersModal";
+import NewCustomerModal, { CustomerEditable } from "@/pages/masters/NewCustomerModal";
 
 interface CustomerRow {
   id: string;
   businessCode: string;
   legalName: string;
   commercialName: string | null;
+  taxId: string | null;
   active: boolean;
   defaultAddress: string | null;
   defaultCity: string | null;
@@ -26,7 +28,26 @@ export default function CustomersPage() {
   // exportado por el ERP no traiga la dirección de entrega (esta vive en la
   // ficha del socio dentro del ERP, no en la línea de pedido).
   const [importModalOpen, setImportModalOpen] = useState(false);
+  // Fase 7b: alta/edición manual de clientes -- el mismo modal sirve para
+  // las dos cosas, según lleve o no un cliente ya cargado (ver NewCustomerModal).
+  const [editingCustomer, setEditingCustomer] = useState<CustomerEditable | "new" | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
+  const queryClient = useQueryClient();
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/customers/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      showSuccess("Cliente dado de baja correctamente");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo dar de baja el cliente"),
+  });
+
+  function handleDelete(c: CustomerRow) {
+    if (window.confirm(`¿Dar de baja al cliente "${c.legalName}"? Sus pedidos y direcciones históricas no se ven afectados.`)) {
+      deleteMutation.mutate(c.id);
+    }
+  }
 
   // Paginación: antes siempre se pedía la página 1 sin control para avanzar,
   // así que a partir del cliente 26 (tamaño de página por defecto del
@@ -66,6 +87,12 @@ export default function CustomersPage() {
           >
             Importar direcciones
           </button>
+          <button
+            onClick={() => setEditingCustomer("new")}
+            className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg whitespace-nowrap"
+          >
+            + Nuevo cliente
+          </button>
         </div>
       </div>
 
@@ -79,12 +106,13 @@ export default function CustomersPage() {
               <th className="text-left px-4 py-3">Dirección por defecto</th>
               <th className="text-right px-4 py-3">Puntos de entrega</th>
               <th className="text-left px-4 py-3">Estado</th>
+              <th className="text-left px-4 py-3">Acción</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {data?.items.map((c) => (
@@ -107,6 +135,14 @@ export default function CustomersPage() {
                 <td className="px-4 py-3">
                   <Chip color={c.active ? "teal" : "slate"}>{c.active ? "Activo" : "Inactivo"}</Chip>
                 </td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <button onClick={() => setEditingCustomer(c)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
+                    Editar
+                  </button>
+                  <button onClick={() => handleDelete(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                    Eliminar
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -126,6 +162,13 @@ export default function CustomersPage() {
       <ImportCustomersModal
         open={importModalOpen}
         onClose={() => setImportModalOpen(false)}
+        onSuccess={showSuccess}
+        onError={showError}
+      />
+      <NewCustomerModal
+        open={editingCustomer !== null}
+        customer={editingCustomer === "new" || editingCustomer === null ? null : editingCustomer}
+        onClose={() => setEditingCustomer(null)}
         onSuccess={showSuccess}
         onError={showError}
       />

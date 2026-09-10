@@ -83,7 +83,15 @@ export default function AppLayout() {
       </aside>
 
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-6">
+        {/* 2026-09-09: el ancho máximo de 1152px (max-w-6xl) dejaba un margen
+            enorme sin usar en monitores anchos -- justo la causa de que
+            pantallas como Despacho parecieran "con hueco vacío" aunque su
+            maquetación interna fuera correcta. Se sube a 1680px (sigue
+            centrado, así que en monitores muy anchos no se estira sin
+            control) para que el contenido aproveche de verdad el ancho
+            disponible. Ninguna pantalla existente depende de un ancho fijo
+            menor -- todas usan grid/flex relativo. */}
+        <div className="w-full max-w-[1680px] mx-auto p-6">
           <Outlet />
         </div>
       </main>

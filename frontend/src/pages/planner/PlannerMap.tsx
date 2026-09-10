@@ -30,7 +30,10 @@ interface Props {
   center: { lat: number; lng: number };
   points: MapPoint[];
   lines?: MapLine[];
-  height?: number;
+  // Fase 7b: admite también un alto relativo ("100%") para poder rellenar un
+  // contenedor flex de altura variable (Despacho, Rutas) -- un número en
+  // píxeles (el uso de siempre) sigue funcionando exactamente igual.
+  height?: number | string;
   // Fase 7 (Despacho más productivo): al fijar `focus` el mapa se desplaza a
   // ese punto concreto (p. ej. la parada o el vehículo seleccionado en el
   // panel lateral) en vez de reencuadrar todos los puntos. Opcional -- quien

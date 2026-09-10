@@ -308,19 +308,29 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
         {(data?.unassignedOrdersCount ?? 0) > 0 && (
           <span className="text-amber-600">
             <span className="font-mono font-semibold">{data?.unassignedOrdersCount}</span> pedidos de este día sin
-            planificar todavía (pestaña Tablero / Mapa)
+            planificar todavía (pestaña Planificación)
           </span>
         )}
       </div>
 
-      <div className="grid grid-cols-12 gap-4">
+      {/* Fase 7b: fila que ocupa la altura disponible de verdad (antes cada
+          columna tenía su propio alto fijo -- 520px la tabla, 460px el mapa
+          -- así que con pocos datos, como en las capturas de prueba, quedaba
+          un hueco vacío debajo de la tabla y del panel mientras el mapa
+          seguía siendo pequeño). Con flex + h-full en cada columna, las tres
+          crecen hasta la misma altura y el mapa aprovecha todo el ancho que
+          antes limitaba max-w-6xl (ver AppLayout.tsx). El descuento de 300px
+          es aproximado (título, pestañas, filtros y el resumen de arriba) --
+          min-h-[480px] evita que se quede demasiado apretado en pantallas
+          bajas. */}
+      <div className="flex gap-4 h-[calc(100vh-300px)] min-h-[480px]">
         {/* Tabla de paradas -- alternativa accesible del Gantt de abajo. El
             color de cada ruta se indica con un borde a la izquierda en vez de
             una columna aparte, para dejar sitio a las demás columnas. */}
-        <div className="col-span-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Paradas del día</p>
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="max-h-[520px] overflow-y-auto">
+        <div className="flex-[3] min-w-0 flex flex-col h-full">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 shrink-0">Paradas del día</p>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden flex-1 flex flex-col min-h-0">
+            <div className="flex-1 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-slate-500 text-[11px] font-semibold uppercase tracking-wide sticky top-0 z-10">
                   <tr>
@@ -372,8 +382,8 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
         {/* Fase 7: panel central -- por defecto, lista de rutas del día (con
             acceso directo a "Gestionar"); al seleccionar una parada o una
             ruta, muestra su ficha completa. Nunca queda vacío. */}
-        <div className="col-span-3">
-          <div className="flex items-center justify-between mb-2">
+        <div className="flex-[3] min-w-0 flex flex-col h-full">
+          <div className="flex items-center justify-between mb-2 shrink-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               {selectedEntry ? "Detalle" : "Rutas del día"}
             </p>
@@ -388,7 +398,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
           </div>
 
           {!selectedEntry && (
-            <div className="space-y-2 max-h-[520px] overflow-y-auto pr-0.5">
+            <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
               {routes.length === 0 && !isLoading && (
                 <p className="text-sm text-slate-400 bg-white border border-slate-200 rounded-xl p-4 text-center">
                   No hay rutas este día.
@@ -435,7 +445,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
           )}
 
           {selectedEntry && (
-            <div className="bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-3">
+            <div className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-xl p-4 text-sm space-y-3">
               {/* Cabecera: conductor si lo hay, si no transportista/vehículo */}
               <div className="flex items-center gap-2.5">
                 <span className="w-9 h-9 rounded-full bg-slate-800 text-white text-xs font-semibold flex items-center justify-center shrink-0">
@@ -544,11 +554,14 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute }:
           )}
         </div>
 
-        {/* Mapa en vivo -- más ancho y más alto que antes de la Fase 7 para
-            que sea realmente el foco de la vista de Despacho. */}
-        <div className="col-span-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Mapa en vivo</p>
-          <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height={460} focus={focusPoint} />
+        {/* Mapa en vivo -- ocupa el doble de ancho que las otras dos columnas
+            y toda la altura disponible de la fila (ver comentario de arriba),
+            de verdad el foco visual de la vista de Despacho ahora. */}
+        <div className="flex-[6] min-w-0 flex flex-col h-full">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 shrink-0">Mapa en vivo</p>
+          <div className="flex-1 min-h-0">
+            <PlannerMap center={GETAFE_CENTER} points={mapPoints} lines={mapLines} height="100%" focus={focusPoint} />
+          </div>
         </div>
       </div>
 

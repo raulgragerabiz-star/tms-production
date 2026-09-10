@@ -66,3 +66,20 @@ carriersRouter.put(
     res.json(updated);
   })
 );
+
+// Fase 7b: faltaba dar de baja un transportista desde la aplicación (solo
+// existía alta y edición). Igual que en customers.routes.ts, nunca se borra
+// físicamente -- un transportista dado de baja puede seguir referenciado por
+// rutas, envíos o liquidaciones históricas -- se marca inactivo y con fecha
+// de baja, y desaparece de los listados (GET / ya filtra deletedAt: null).
+carriersRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const carrier = await prisma.carrier.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+    });
+    if (!carrier) throw HttpError.notFound("Transportista no encontrado");
+    await prisma.carrier.update({ where: { id: carrier.id }, data: { deletedAt: new Date(), active: false } });
+    res.status(204).send();
+  })
+);
