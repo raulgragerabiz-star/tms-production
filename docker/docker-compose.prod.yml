@@ -35,6 +35,18 @@ services:
       PORT: 4000
       NODE_ENV: production
       CORS_ORIGIN: ${CORS_ORIGIN:?falta CORS_ORIGIN, ej. https://tms.tudominio.com,https://transportistas.tudominio.com,https://conductor.tudominio.com}
+      # Fase 8c: faltaba pasar estas dos variables al contenedor de producción.
+      # Esta imagen de backend usa la publicada por CD (sin bind-mount del
+      # código ni del .env), así que aunque backend/.env tenga ORS_API_KEY
+      # relleno, este compose lo ignoraba por completo -- la clave real debe
+      # venir del entorno donde se ejecuta `docker compose` (host o secreto de
+      # CI), igual que ya pasa con JWT_SECRET/POSTGRES_PASSWORD arriba. Ambas
+      # son opcionales a propósito (ver env.ts): sin ORS_API_KEY, el sistema
+      # sigue funcionando igual que hasta ahora (rutas por línea recta, sin
+      # geocodificación automática), solo que sin planificación automática
+      # por VROOM ni geocodificación.
+      ORS_API_KEY: ${ORS_API_KEY:-}
+      ORS_PROFILE: ${ORS_PROFILE:-driving-hgv}
     ports:
       - "4000:4000"
 

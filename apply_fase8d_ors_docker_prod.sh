@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ============================================================================
+# Fase 8d -- Añade ORS_API_KEY/ORS_PROFILE al compose de producción.
+#
+# Motivo: Raúl añadió ORS_API_KEY a backend/.env pero la app seguía diciendo
+# que no está configurada. docker-compose.prod.yml (despliegue con las
+# imágenes publicadas por CD, sin bind-mount del código ni del .env) define
+# explícitamente qué variables recibe el contenedor -- y ORS_API_KEY no
+# estaba en esa lista, así que por mucho que estuviera en backend/.env, ese
+# fichero ni siquiera se usa en ese tipo de despliegue.
+#
+# Si en cambio Raúl ejecuta el backend en modo desarrollo (docker/docker-
+# compose.yml con bind-mount, o "npm run dev" directamente), este fichero no
+# es la causa -- ahí basta con REINICIAR el proceso/contenedor tras editar
+# .env (dotenv solo se lee una vez, al arrancar; no se relee en caliente).
+#
+# Este script solo toca docker-compose.prod.yml. Tras aplicarlo, para que
+# tome efecto hace falta tener ORS_API_KEY como variable de entorno en la
+# máquina/pipeline donde se ejecuta "docker compose -f docker-compose.prod.yml
+# up", por ejemplo:
+#   export ORS_API_KEY="tu-clave-real-de-openrouteservice"
+#   docker compose -f docker/docker-compose.prod.yml up -d
+# ============================================================================
+
+TARGET_DIR="${1:-.}"
+cd "$TARGET_DIR"
+
+echo "Aplicando Fase 8d sobre: $(pwd)"
+echo
+
+FILES_APPLIED=(
+  "docker/docker-compose.prod.yml"
+)
+
+echo "-> docker/docker-compose.prod.yml"
+mkdir -p "$(dirname "docker/docker-compose.prod.yml")"
+base64 -d > "docker/docker-compose.prod.yml" <<'B64EOF_docker_docker_compose_prod_yml'
+dmVyc2lvbjogIjMuOSIKCiMgRWplbXBsbyBkZSBkZXNwbGllZ3VlIGVuIHByb2R1Y2Npw7NuIHVzYW5kbyBsYXMgaW3DoWdlbmVzIHB1YmxpY2FkYXMgcG9yIGVsIHdvcmtmbG93IGRlIENECiMgKGdoY3IuaW8vPG93bmVyPi90bXMtKjpsYXRlc3QpLiBObyB1c2EgYmluZC1tb3VudHMgbmkgd2F0Y2gtbW9kZTsgY2FkYSBzZXJ2aWNpbyBlamVjdXRhCiMgc3UgYnVpbGQgZGUgcHJvZHVjY2nDs24gKGJhY2tlbmQgY29tcGlsYWRvICsgYHByaXNtYSBtaWdyYXRlIGRlcGxveWAsIGZyb250ZW5kcyBzZXJ2aWRvcwojIHBvciBuZ2lueCkuIEFqdXN0YSBsYXMgdmFyaWFibGVzIGRlIGVudG9ybm8gcmVhbGVzIChkb21pbmlvcywgc2VjcmV0b3MsIG9yw61nZW5lcyBDT1JTKQojIGFudGVzIGRlIHVzYXIgZXN0byB0YWwgY3VhbCBlbiB1biBzZXJ2aWRvci4KCnNlcnZpY2VzOgogIHBvc3RncmVzOgogICAgaW1hZ2U6IHBvc3RncmVzOjE2LWFscGluZQogICAgcmVzdGFydDogdW5sZXNzLXN0b3BwZWQKICAgIGVudmlyb25tZW50OgogICAgICBQT1NUR1JFU19VU0VSOiAke1BPU1RHUkVTX1VTRVI6LXRtc30KICAgICAgUE9TVEdSRVNfUEFTU1dPUkQ6ICR7UE9TVEdSRVNfUEFTU1dPUkQ6P2ZhbHRhIFBPU1RHUkVTX1BBU1NXT1JEfQogICAgICBQT1NUR1JFU19EQjogJHtQT1NUR1JFU19EQjotdG1zX3Byb2R9CiAgICB2b2x1bWVzOgogICAgICAtIHRtc19wZ19kYXRhX3Byb2Q6L3Zhci9saWIvcG9zdGdyZXNxbC9kYXRhCiAgICBoZWFsdGhjaGVjazoKICAgICAgdGVzdDogWyJDTUQtU0hFTEwiLCAicGdfaXNyZWFkeSAtVSAke1BPU1RHUkVTX1VTRVI6LXRtc30gLWQgJHtQT1NUR1JFU19EQjotdG1zX3Byb2R9Il0KICAgICAgaW50ZXJ2YWw6IDVzCiAgICAgIHRpbWVvdXQ6IDVzCiAgICAgIHJldHJpZXM6IDEwCgogIGJhY2tlbmQ6CiAgICBpbWFnZTogZ2hjci5pby8ke0dIQ1JfT1dORVI6P2ZhbHRhIEdIQ1JfT1dORVJ9L3Rtcy1iYWNrZW5kOiR7VE1TX1ZFUlNJT046LWxhdGVzdH0KICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBkZXBlbmRzX29uOgogICAgICBwb3N0Z3JlczoKICAgICAgICBjb25kaXRpb246IHNlcnZpY2VfaGVhbHRoeQogICAgZW52aXJvbm1lbnQ6CiAgICAgIERBVEFCQVNFX1VSTDogcG9zdGdyZXNxbDovLyR7UE9TVEdSRVNfVVNFUjotdG1zfToke1BPU1RHUkVTX1BBU1NXT1JEfUBwb3N0Z3Jlczo1NDMyLyR7UE9TVEdSRVNfREI6LXRtc19wcm9kfT9zY2hlbWE9cHVibGljCiAgICAgIEpXVF9TRUNSRVQ6ICR7SldUX1NFQ1JFVDo/ZmFsdGEgSldUX1NFQ1JFVH0KICAgICAgSldUX0VYUElSRVNfSU46IDhoCiAgICAgIFBPUlQ6IDQwMDAKICAgICAgTk9ERV9FTlY6IHByb2R1Y3Rpb24KICAgICAgQ09SU19PUklHSU46ICR7Q09SU19PUklHSU46P2ZhbHRhIENPUlNfT1JJR0lOLCBlai4gaHR0cHM6Ly90bXMudHVkb21pbmlvLmNvbSxodHRwczovL3RyYW5zcG9ydGlzdGFzLnR1ZG9taW5pby5jb20saHR0cHM6Ly9jb25kdWN0b3IudHVkb21pbmlvLmNvbX0KICAgICAgIyBGYXNlIDhjOiBmYWx0YWJhIHBhc2FyIGVzdGFzIGRvcyB2YXJpYWJsZXMgYWwgY29udGVuZWRvciBkZSBwcm9kdWNjacOzbi4KICAgICAgIyBFc3RhIGltYWdlbiBkZSBiYWNrZW5kIHVzYSBsYSBwdWJsaWNhZGEgcG9yIENEIChzaW4gYmluZC1tb3VudCBkZWwKICAgICAgIyBjw7NkaWdvIG5pIGRlbCAuZW52KSwgYXPDrSBxdWUgYXVucXVlIGJhY2tlbmQvLmVudiB0ZW5nYSBPUlNfQVBJX0tFWQogICAgICAjIHJlbGxlbm8sIGVzdGUgY29tcG9zZSBsbyBpZ25vcmFiYSBwb3IgY29tcGxldG8gLS0gbGEgY2xhdmUgcmVhbCBkZWJlCiAgICAgICMgdmVuaXIgZGVsIGVudG9ybm8gZG9uZGUgc2UgZWplY3V0YSBgZG9ja2VyIGNvbXBvc2VgIChob3N0IG8gc2VjcmV0byBkZQogICAgICAjIENJKSwgaWd1YWwgcXVlIHlhIHBhc2EgY29uIEpXVF9TRUNSRVQvUE9TVEdSRVNfUEFTU1dPUkQgYXJyaWJhLiBBbWJhcwogICAgICAjIHNvbiBvcGNpb25hbGVzIGEgcHJvcMOzc2l0byAodmVyIGVudi50cyk6IHNpbiBPUlNfQVBJX0tFWSwgZWwgc2lzdGVtYQogICAgICAjIHNpZ3VlIGZ1bmNpb25hbmRvIGlndWFsIHF1ZSBoYXN0YSBhaG9yYSAocnV0YXMgcG9yIGzDrW5lYSByZWN0YSwgc2luCiAgICAgICMgZ2VvY29kaWZpY2FjacOzbiBhdXRvbcOhdGljYSksIHNvbG8gcXVlIHNpbiBwbGFuaWZpY2FjacOzbiBhdXRvbcOhdGljYQogICAgICAjIHBvciBWUk9PTSBuaSBnZW9jb2RpZmljYWNpw7NuLgogICAgICBPUlNfQVBJX0tFWTogJHtPUlNfQVBJX0tFWTotfQogICAgICBPUlNfUFJPRklMRTogJHtPUlNfUFJPRklMRTotZHJpdmluZy1oZ3Z9CiAgICBwb3J0czoKICAgICAgLSAiNDAwMDo0MDAwIgoKICBmcm9udGVuZDoKICAgIGltYWdlOiBnaGNyLmlvLyR7R0hDUl9PV05FUjo/ZmFsdGEgR0hDUl9PV05FUn0vdG1zLWZyb250ZW5kOiR7VE1TX1ZFUlNJT046LWxhdGVzdH0KICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBkZXBlbmRzX29uOgogICAgICAtIGJhY2tlbmQKICAgIHBvcnRzOgogICAgICAtICI4MDgwOjgwIgoKICBjYXJyaWVyLXBvcnRhbDoKICAgIGltYWdlOiBnaGNyLmlvLyR7R0hDUl9PV05FUjo/ZmFsdGEgR0hDUl9PV05FUn0vdG1zLWNhcnJpZXItcG9ydGFsOiR7VE1TX1ZFUlNJT046LWxhdGVzdH0KICAgIHJlc3RhcnQ6IHVubGVzcy1zdG9wcGVkCiAgICBkZXBlbmRzX29uOgogICAgICAtIGJhY2tlbmQKICAgIHBvcnRzOgogICAgICAtICI4MDgxOjgwIgoKICBkcml2ZXItYXBwOgogICAgaW1hZ2U6IGdoY3IuaW8vJHtHSENSX09XTkVSOj9mYWx0YSBHSENSX09XTkVSfS90bXMtZHJpdmVyLWFwcDoke1RNU19WRVJTSU9OOi1sYXRlc3R9CiAgICByZXN0YXJ0OiB1bmxlc3Mtc3RvcHBlZAogICAgZGVwZW5kc19vbjoKICAgICAgLSBiYWNrZW5kCiAgICBwb3J0czoKICAgICAgLSAiODA4Mjo4MCIKCnZvbHVtZXM6CiAgdG1zX3BnX2RhdGFfcHJvZDoK
+B64EOF_docker_docker_compose_prod_yml
+
+echo
+echo "Fase 8d aplicada correctamente."
+echo "Ficheros actualizados:"
+for f in "${FILES_APPLIED[@]}"; do
+  echo "  - $f"
+done
