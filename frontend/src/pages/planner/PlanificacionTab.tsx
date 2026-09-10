@@ -34,7 +34,9 @@ interface PendingOrder {
   id: string;
   orderNumber: string;
   priority: string;
-  serviceType: string;
+  // Opcional en el backend (pedidos muy antiguos, de antes del clasificador
+  // automático por peso/palés, podrían no tenerlo relleno).
+  serviceType: string | null;
   requestedDeliveryDate: string;
   deliveryTimeWindowFrom: string | null;
   deliveryTimeWindowTo: string | null;
@@ -241,7 +243,9 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
                         : "—"}
                     </td>
                     <td className="px-3 py-2">
-                      <Chip color={serviceTypeColor[o.serviceType] ?? "slate"}>{serviceTypeLabel[o.serviceType] ?? o.serviceType}</Chip>
+                      <Chip color={o.serviceType ? serviceTypeColor[o.serviceType] ?? "slate" : "slate"}>
+                        {o.serviceType ? serviceTypeLabel[o.serviceType] ?? o.serviceType : "Sin clasificar"}
+                      </Chip>
                     </td>
                     <td className="px-3 py-2 text-xs">{priorityLabel[o.priority] ?? o.priority}</td>
                     <td className="px-3 py-2 text-right font-mono text-slate-600">{Math.round(o.totalWeightKg)} kg</td>

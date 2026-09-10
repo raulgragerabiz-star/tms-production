@@ -507,7 +507,11 @@ routesRouter.post(
     // cualquier otro llamador) todo cae en un único grupo, igual que antes.
     const groups = new Map<string, typeof selected>();
     for (const order of selected) {
-      const key = data.serviceType ?? order.serviceType;
+      // order.serviceType es opcional en el esquema (pedidos muy antiguos,
+      // de antes del clasificador automático por peso/palés, podrían no
+      // tenerlo relleno) -- se cae a "paleteria" como valor por defecto,
+      // igual que ya hace el formulario manual de "+ Nueva ruta".
+      const key = data.serviceType ?? order.serviceType ?? "paleteria";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(order);
     }
