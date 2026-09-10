@@ -46,6 +46,14 @@ export const env = {
   // peligrosas), "driving-car" es el perfil genérico. Configurable porque no
   // todas las flotas son de camión pesado.
   orsProfile: process.env.ORS_PROFILE || "driving-hgv",
+  // Fase 8f: la cuenta gratuita de ORS Optimization (VROOM) impone un máximo
+  // de vehículos por llamada bastante más bajo de lo que se había asumido al
+  // escribir /routes/auto-plan (se probó con 18 y ORS respondió "Too many
+  // vehicles (18) in query, maximum is set to 3" -- HTTP 413). El límite real
+  // lo fija el plan contratado en openrouteservice.org y puede cambiar si se
+  // amplía la cuenta, así que es configurable en vez de fijo en el código;
+  // por defecto se deja en 3 (el límite confirmado en la cuenta actual).
+  orsMaxOptimizationVehicles: parseInt(process.env.ORS_MAX_OPTIMIZATION_VEHICLES ?? "3", 10),
   // Cache compartida (Fase 6): si se configura, el cliente de OpenRouteService
   // (geocodificación, rutas, optimización) cachea en Redis en vez de en
   // memoria del proceso -- necesario en cuanto el backend corra en más de una
