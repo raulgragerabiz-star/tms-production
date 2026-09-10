@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
@@ -856,5 +857,48 @@ routesRouter.patch(
     });
 
     res.json(updated);
+  })
+);
+
+// Fase 8j: petición explícita de Raúl -- "debe poder eliminarse rutas
+// creadas, por si se ha cometido algún error y que no se queden ahí fijas".
+// Solo se permite mientras no exista ya un envío (Shipment) creado a partir
+// de esta ruta -- a partir de ahí puede tener seguimiento/incidencias/firma
+// real en curso y borrarla a ciegas perdería ese histórico; para esos casos
+// hay que anular el envío desde Seguimiento antes. Los pedidos que llevaba
+// la ruta vuelven a "validated" (pendientes de planificar) -- si no, se
+// quedarían en "planned" apuntando a una ruta que ya no existe y
+// desaparecerían para siempre del Planificador.
+routesRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const route = await prisma.route.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+      include: { stops: true, shipment: true },
+    });
+    if (!route) throw HttpError.notFound("Ruta no encontrada");
+
+    if (route.shipment) {
+      throw HttpError.badRequest(
+        "Esta ruta ya tiene un envío creado -- anúlalo primero desde Seguimiento antes de eliminar la ruta."
+      );
+    }
+
+    const orderIds = route.stops.map((s: { orderId: string }) => s.orderId);
+
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      if (orderIds.length > 0) {
+        await tx.order.updateMany({ where: { id: { in: orderIds } }, data: { status: "validated" } });
+      }
+      await tx.costSimulation.deleteMany({ where: { routeId: route.id } });
+      await tx.loadPlan.deleteMany({ where: { routeId: route.id } });
+      // routeStop tiene onDelete: Cascade hacia route en el schema, así que
+      // el propio delete de la ruta ya se encarga de borrar sus paradas.
+      await tx.route.delete({ where: { id: route.id } });
+    });
+
+    broadcastToWarehouse(route.warehouseId, "route_status_changed", { routeId: route.id, status: "deleted" });
+
+    res.status(204).send();
   })
 );

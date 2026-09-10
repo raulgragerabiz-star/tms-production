@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
+import { usePlannerFiltersStore } from "@/store/planner-filters-store";
 import NewRouteModal from "@/pages/planner/NewRouteModal";
 import RouteAssignmentModal from "@/pages/planner/RouteAssignmentModal";
 import PlanificacionTab from "@/pages/planner/PlanificacionTab";
@@ -40,17 +41,23 @@ interface WarehouseOption {
   name: string;
 }
 
-type View = "planificacion" | "rutas" | "despacho";
-
 export default function PlannerPage() {
-  const [view, setView] = useState<View>("planificacion");
   const [modalOpen, setModalOpen] = useState(false);
   const [presetOrderId, setPresetOrderId] = useState<string | undefined>();
   const [assigningRouteId, setAssigningRouteId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
 
-  const [warehouseId, setWarehouseId] = useState("");
-  const [routeDate, setRouteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  // Fase 8j: almacén, fecha y pestaña activa viven ahora en un store (ver
+  // planner-filters-store.ts) en vez de useState local, para que no se
+  // pierdan al navegar fuera de "Planificador" y volver, ni al cambiar entre
+  // Planificación/Rutas/Despacho -- antes React los destruía por completo en
+  // cada desmontaje.
+  const view = usePlannerFiltersStore((s) => s.view);
+  const setView = usePlannerFiltersStore((s) => s.setView);
+  const warehouseId = usePlannerFiltersStore((s) => s.warehouseId);
+  const setWarehouseId = usePlannerFiltersStore((s) => s.setWarehouseId);
+  const routeDate = usePlannerFiltersStore((s) => s.routeDate);
+  const setRouteDate = usePlannerFiltersStore((s) => s.setRouteDate);
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -142,7 +149,15 @@ export default function PlannerPage() {
         <PlanificacionTab warehouseId={warehouseId} routeDate={routeDate} onPlanned={handlePlanned} />
       )}
 
-      {view === "rutas" && <RutasTab warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />}
+      {view === "rutas" && (
+        <RutasTab
+          warehouseId={warehouseId}
+          routeDate={routeDate}
+          onManageRoute={setAssigningRouteId}
+          onSuccess={showSuccess}
+          onError={showError}
+        />
+      )}
 
       {view === "despacho" && <DispatchBoard warehouseId={warehouseId} routeDate={routeDate} onManageRoute={setAssigningRouteId} />}
 

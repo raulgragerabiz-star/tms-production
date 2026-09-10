@@ -132,10 +132,29 @@ vehiclesRouter.get(
     const carrierId = req.query.carrierId as string | undefined;
     const items = await prisma.driver.findMany({
       where: { carrier: { companyId: req.auth!.companyId }, ...(carrierId ? { carrierId } : {}) },
-      include: { carrier: { select: { legalName: true } } },
+      include: {
+        carrier: { select: { legalName: true } },
+        // Fase 8j: petición de Raúl -- la ficha del conductor debe mostrar el
+        // vehículo al que pertenece (y su QR) directamente, sin pasar por una
+        // pestaña "Vehículos" aparte. Se toma la asignación vigente (validTo
+        // null); si hubiera más de una abierta a la vez (no debería, pero por
+        // si acaso) se queda con la más reciente.
+        vehicleAssignments: {
+          where: { validTo: null },
+          orderBy: { validFrom: "desc" },
+          take: 1,
+          include: { vehicle: { select: { id: true, plate: true } } },
+        },
+      },
       orderBy: { fullName: "asc" },
     });
-    res.json({ items, total: items.length });
+    res.json({
+      items: items.map((item: (typeof items)[number]) => {
+        const { vehicleAssignments, ...driver } = item;
+        return { ...driver, vehicle: vehicleAssignments[0]?.vehicle ?? null };
+      }),
+      total: items.length,
+    });
   })
 );
 
@@ -191,5 +210,51 @@ vehiclesRouter.get(
       orderBy: { startedAt: "desc" },
     });
     res.json({ items });
+  })
+);
+
+// Fase 8j: hasta ahora un conductor no se podía ni desactivar ni eliminar
+// desde Backoffice una vez creado. Se añade el mismo patrón ya usado en
+// Usuarios: "Desactivar/Reactivar" (active=false/true, sin tocar nada más) y
+// "Eliminar" de verdad, pero aquí SÍ hay relaciones reales con historial
+// (DriverShift, Shipment) a diferencia de AppUser -- por eso el borrado
+// físico solo se permite si el conductor todavía no tiene ninguna jornada ni
+// envío registrado; si los tiene, se pide desactivarlo en su lugar para no
+// destruir histórico real.
+vehiclesRouter.patch(
+  "/drivers/:id/active",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ active: z.boolean() });
+    const { active } = schema.parse(req.body);
+
+    const driver = await prisma.driver.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
+    if (!driver) throw HttpError.notFound("Conductor no encontrado");
+
+    const updated = await prisma.driver.update({ where: { id: driver.id }, data: { active } });
+    res.json({ id: updated.id, active: updated.active });
+  })
+);
+
+vehiclesRouter.delete(
+  "/drivers/:id",
+  asyncHandler(async (req, res) => {
+    const driver = await prisma.driver.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
+    if (!driver) throw HttpError.notFound("Conductor no encontrado");
+
+    const [shipmentCount, shiftCount] = await Promise.all([
+      prisma.shipment.count({ where: { driverId: driver.id } }),
+      prisma.driverShift.count({ where: { driverId: driver.id } }),
+    ]);
+    if (shipmentCount > 0 || shiftCount > 0) {
+      throw HttpError.badRequest(
+        `Este conductor ya tiene ${shipmentCount} envío(s) y ${shiftCount} jornada(s) registrados -- no se puede eliminar sin perder ese histórico. Desactívalo en su lugar.`
+      );
+    }
+
+    // vehicleDriver sí se puede borrar sin problema: es solo el histórico de
+    // a qué vehículo ha estado asignado, no un registro operativo en sí.
+    await prisma.vehicleDriver.deleteMany({ where: { driverId: driver.id } });
+    await prisma.driver.delete({ where: { id: driver.id } });
+    res.status(204).send();
   })
 );

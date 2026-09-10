@@ -72,6 +72,36 @@ optimizationRouter.post(
       }
     }
 
+    // Fase 8j: bug real reportado por Raúl -- "el planificador automático
+    // dice que ningún transportista tiene capacidad suficiente pese a haber
+    // vehículos configurados con hasta 33 palés". La causa: el bloque de
+    // arriba solo mira `Vehicle` (matrículas concretas dadas de alta), pero
+    // en "Flota y Transportistas" un transportista puede simplemente
+    // *declarar* qué tipos de vehículo puede aportar sin llegar a registrar
+    // ninguna matrícula todavía (checkboxes -- ver CarrierVehicleType /
+    // TransportistasTab.tsx). Antes esos transportistas nunca contaban como
+    // candidatos aquí, aunque el tipo declarado cubriera de sobra el peso y
+    // los palés de la ruta. Se añaden ahora como candidatos de refuerzo (solo
+    // si el transportista no tiene ya un vehículo real que cubra la ruta, que
+    // sigue teniendo prioridad).
+    const declaredOfferings = await prisma.carrierVehicleType.findMany({
+      where: {
+        carrier: { companyId: req.auth!.companyId, active: true },
+        vehicleType: { maxWeightKg: { gte: totalWeightKg } },
+      },
+      include: { vehicleType: true },
+    });
+    for (const offering of declaredOfferings) {
+      if (qualifyingByCarrier.has(offering.carrierId)) continue;
+      const fitsPallets =
+        offering.vehicleType.allowsExceedingPallets || offering.vehicleType.maxPallets >= totalPallets;
+      if (!fitsPallets) continue;
+      qualifyingByCarrier.set(offering.carrierId, {
+        carrierId: offering.carrierId,
+        vehicleTypeId: offering.vehicleTypeId,
+      });
+    }
+
     if (qualifyingByCarrier.size === 0) {
       throw HttpError.badRequest(
         `Ningún transportista tiene un vehículo con capacidad suficiente (${totalWeightKg}kg / ${totalPallets.toFixed(2)} palés)`

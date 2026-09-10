@@ -17,11 +17,17 @@ interface VehicleRow {
 
 interface DriverRow {
   id: string;
+  carrierId: string;
   fullName: string;
   taxId: string;
   phone: string | null;
   active: boolean;
   carrier: { legalName: string };
+  // Fase 8j: vehículo al que pertenece el conductor (asignación vigente),
+  // para poder gestionarlo -- matrícula y QR -- desde la propia fila, sin
+  // pasar por una pestaña "Vehículos" aparte (ver comentario en
+  // vehicles.routes.ts GET /drivers).
+  vehicle: { id: string; plate: string } | null;
 }
 
 // QR de conductor + jornada: turnos abiertos ahora mismo, para que despacho
@@ -63,13 +69,19 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   const [driverModalOpen, setDriverModalOpen] = useState(false);
   const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
   const [qrVehicleId, setQrVehicleId] = useState<string | null>(null);
+  // Fase 8j: reasignar/asignar el vehículo de un conductor directamente
+  // desde su fila en "Conductores" -- ver comentario en DriverVehicleCell.
+  const [assigningDriverId, setAssigningDriverId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
 
   const vehiclesQuery = useQuery({
     queryKey: ["vehicles"],
     queryFn: async () => (await api.get("/vehicles")).data as { items: VehicleRow[]; total: number },
-    enabled: tab === "vehicles",
+    // Fase 8j: también hace falta en "drivers" -- la columna "Vehículo" de
+    // Conductores necesita la lista de matrículas ya dadas de alta por
+    // transportista para poder asignarlas desde ahí.
+    enabled: tab === "vehicles" || tab === "drivers",
   });
 
   const driversQuery = useQuery({
@@ -100,10 +112,12 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   });
 
   // Objetivo 2: capacidad por volumen y dimensiones de cada tipo de vehículo.
+  // Fase 8j: también hace falta en "drivers" para poder dar de alta una
+  // matrícula nueva directamente desde la fila del conductor.
   const vehicleTypesQuery = useQuery({
     queryKey: ["vehicle-types"],
     queryFn: async () => (await api.get("/vehicles/types")).data as { items: VehicleTypeRow[]; total: number },
-    enabled: tab === "types",
+    enabled: tab === "types" || tab === "drivers",
   });
 
   const updateVehicleTypeMutation = useMutation({
@@ -130,6 +144,74 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
     },
     onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo asignar el conductor"),
   });
+
+  // Fase 8j: mismo endpoint que assignMutation (POST /vehicles/:id/assign-driver),
+  // pero disparado desde la fila del CONDUCTOR en vez de la del vehículo --
+  // es la asignación inversa, para la nueva columna "Vehículo" de Conductores.
+  const assignVehicleToDriverMutation = useMutation({
+    mutationFn: async ({ vehicleId, driverId }: { vehicleId: string; driverId: string }) =>
+      (await api.post(`/vehicles/${vehicleId}/assign-driver`, { driverId })).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+      showSuccess("Vehículo asignado correctamente");
+      setAssigningDriverId(null);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo asignar el vehículo"),
+  });
+
+  // Da de alta una matrícula nueva para el transportista del conductor y se
+  // la asigna en el mismo paso -- para cuando el transportista todavía no
+  // tiene ninguna matrícula dada de alta.
+  const createVehicleAndAssignMutation = useMutation({
+    mutationFn: async ({
+      carrierId,
+      vehicleTypeId,
+      plate,
+      driverId,
+    }: {
+      carrierId: string;
+      vehicleTypeId: string;
+      plate: string;
+      driverId: string;
+    }) => {
+      const vehicle = (await api.post("/vehicles", { carrierId, vehicleTypeId, plate })).data as { id: string };
+      await api.post(`/vehicles/${vehicle.id}/assign-driver`, { driverId });
+      return vehicle;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+      showSuccess("Vehículo dado de alta y asignado correctamente");
+      setAssigningDriverId(null);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo dar de alta el vehículo"),
+  });
+
+  // Fase 8j: "Desactivar/Reactivar" y "Eliminar" de verdad para conductores --
+  // hasta ahora un conductor creado por error no se podía ni desactivar ni
+  // quitar de la lista. Mismo patrón ya usado en Usuarios (UsersPage.tsx).
+  const toggleDriverActiveMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) =>
+      (await api.patch(`/vehicles/drivers/${id}/active`, { active })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["drivers"] }),
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo actualizar el conductor"),
+  });
+
+  const deleteDriverMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/vehicles/drivers/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      showSuccess("Conductor eliminado");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo eliminar el conductor"),
+  });
+
+  function handleDeleteDriver(d: DriverRow) {
+    if (window.confirm(`¿Eliminar definitivamente al conductor "${d.fullName}"? Esta acción no se puede deshacer.`)) {
+      deleteDriverMutation.mutate(d.id);
+    }
+  }
 
   return (
     <div>
@@ -261,19 +343,21 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                 <th className="text-left px-4 py-3">NIF</th>
                 <th className="text-left px-4 py-3">Teléfono</th>
                 <th className="text-left px-4 py-3">Transportista</th>
+                <th className="text-left px-4 py-3">Vehículo</th>
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Jornada</th>
+                <th className="text-left px-4 py-3">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {driversQuery.isLoading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {!driversQuery.isLoading && driversQuery.data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
+                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
                 </tr>
               )}
               {driversQuery.data?.items.map((d) => {
@@ -284,6 +368,22 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                     <td className="px-4 py-3 font-mono font-semibold text-xs">{d.taxId}</td>
                     <td className="px-4 py-3 text-slate-500">{d.phone ?? "—"}</td>
                     <td className="px-4 py-3">{d.carrier.legalName}</td>
+                    <td className="px-4 py-3">
+                      <DriverVehicleCell
+                        driver={d}
+                        vehicles={vehiclesQuery.data?.items ?? []}
+                        vehicleTypes={vehicleTypesQuery.data?.items ?? []}
+                        assigning={assigningDriverId === d.id}
+                        onStartAssign={() => setAssigningDriverId(d.id)}
+                        onCancelAssign={() => setAssigningDriverId(null)}
+                        onAssignExisting={(vehicleId) => assignVehicleToDriverMutation.mutate({ vehicleId, driverId: d.id })}
+                        onCreateAndAssign={(plate, vehicleTypeId) =>
+                          createVehicleAndAssignMutation.mutate({ carrierId: d.carrierId, vehicleTypeId, plate, driverId: d.id })
+                        }
+                        onShowQr={() => setQrVehicleId(d.vehicle!.id)}
+                        busy={assignVehicleToDriverMutation.isPending || createVehicleAndAssignMutation.isPending}
+                      />
+                    </td>
                     <td className="px-4 py-3">
                       <Chip color={d.active ? "teal" : "slate"}>{d.active ? "Activo" : "Baja"}</Chip>
                     </td>
@@ -298,6 +398,17 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                       ) : (
                         <span className="text-xs text-slate-400">Sin jornada abierta</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => toggleDriverActiveMutation.mutate({ id: d.id, active: !d.active })}
+                        className="text-xs text-red-500 hover:text-red-600 font-medium mr-3"
+                      >
+                        {d.active ? "Desactivar" : "Reactivar"}
+                      </button>
+                      <button onClick={() => handleDeleteDriver(d)} className="text-xs text-red-700 hover:text-red-800 font-semibold">
+                        Eliminar
+                      </button>
                     </td>
                   </tr>
                 );
@@ -353,6 +464,143 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
       )}
 
       <Toast message={toast.message} variant={toast.variant} onDismiss={dismiss} />
+    </div>
+  );
+}
+
+// Fase 8j: columna "Vehículo" de la pestaña Conductores -- petición de Raúl
+// de gestionar matrícula + QR del conductor desde su propia fila, sin una
+// pestaña "Vehículos" aparte. Tres estados: sin vehículo asignado (botón
+// "Asignar vehículo"); con vehículo (matrícula + "QR" + "Cambiar"); en modo
+// asignación (desplegable con las matrículas ya dadas de alta para ese
+// transportista, o "+ Matrícula nueva" para dar de alta una en el momento).
+function DriverVehicleCell({
+  driver,
+  vehicles,
+  vehicleTypes,
+  assigning,
+  onStartAssign,
+  onCancelAssign,
+  onAssignExisting,
+  onCreateAndAssign,
+  onShowQr,
+  busy,
+}: {
+  driver: DriverRow;
+  vehicles: VehicleRow[];
+  vehicleTypes: VehicleTypeRow[];
+  assigning: boolean;
+  onStartAssign: () => void;
+  onCancelAssign: () => void;
+  onAssignExisting: (vehicleId: string) => void;
+  onCreateAndAssign: (plate: string, vehicleTypeId: string) => void;
+  onShowQr: () => void;
+  busy: boolean;
+}) {
+  const [creatingNew, setCreatingNew] = useState(false);
+  const [newPlate, setNewPlate] = useState("");
+  const [newVehicleTypeId, setNewVehicleTypeId] = useState("");
+
+  const carrierVehicles = vehicles.filter((v) => v.carrier.legalName === driver.carrier.legalName);
+
+  if (!assigning) {
+    if (driver.vehicle) {
+      return (
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs font-semibold text-slate-700">{driver.vehicle.plate}</span>
+          <button onClick={onShowQr} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+            QR
+          </button>
+          <button onClick={onStartAssign} className="text-xs text-slate-400 hover:text-slate-600">
+            Cambiar
+          </button>
+        </div>
+      );
+    }
+    return (
+      <button onClick={onStartAssign} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+        Asignar vehículo
+      </button>
+    );
+  }
+
+  if (creatingNew) {
+    return (
+      <div className="flex flex-col gap-1.5 min-w-[220px]">
+        <div className="flex gap-1.5">
+          <input
+            autoFocus
+            placeholder="Matrícula"
+            value={newPlate}
+            onChange={(e) => setNewPlate(e.target.value)}
+            className="w-24 text-xs rounded-lg border border-slate-300 px-2 py-1"
+          />
+          <select
+            value={newVehicleTypeId}
+            onChange={(e) => setNewVehicleTypeId(e.target.value)}
+            className="flex-1 text-xs rounded-lg border border-slate-300 px-2 py-1"
+          >
+            <option value="">Tipo…</option>
+            {vehicleTypes.map((vt) => (
+              <option key={vt.id} value={vt.id}>
+                {vt.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex gap-2">
+          <button
+            disabled={!newPlate.trim() || !newVehicleTypeId || busy}
+            onClick={() => onCreateAndAssign(newPlate.trim(), newVehicleTypeId)}
+            className="text-xs font-medium text-white bg-brand-600 hover:bg-brand-700 rounded-lg px-2 py-1 disabled:opacity-50"
+          >
+            Crear y asignar
+          </button>
+          <button
+            onClick={() => {
+              setCreatingNew(false);
+              onCancelAssign();
+            }}
+            className="text-xs text-slate-400 hover:text-slate-600"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <select
+        autoFocus
+        disabled={busy}
+        className="text-xs rounded-lg border border-slate-300 px-2 py-1"
+        defaultValue=""
+        onChange={(e) => {
+          if (e.target.value === "__new__") {
+            // Ojo: NO se cancela en onBlur aquí a propósito -- elegir esta
+            // opción dispara un blur del <select> justo antes de que React
+            // pinte el formulario de alta rápida, y cancelar en ese momento
+            // cerraría la fila de golpe sin dar tiempo a verlo. Por eso el
+            // "Cancelar" es un botón aparte en vez de onBlur.
+            setCreatingNew(true);
+          } else if (e.target.value) {
+            onAssignExisting(e.target.value);
+          }
+        }}
+      >
+        <option value="">Selecciona vehículo…</option>
+        {carrierVehicles.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.plate} — {v.vehicleType.name}
+          </option>
+        ))}
+        <option value="__new__">+ Matrícula nueva…</option>
+      </select>
+      <button onClick={onCancelAssign} className="text-xs text-slate-400 hover:text-slate-600">
+        Cancelar
+      </button>
     </div>
   );
 }

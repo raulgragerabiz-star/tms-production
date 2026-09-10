@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Chip, { ChipColor } from "@/components/Chip";
+import { usePlannerFiltersStore } from "@/store/planner-filters-store";
 
 // Fase 7b: primera pestaña del Planificador reestructurado, estilo Bringg --
 // lista de pedidos pendientes de este almacén/fecha con casillas, para
@@ -90,7 +91,14 @@ const statusOptions: { value: string; label: string }[] = [
 export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [status, setStatus] = useState("validated");
+  // Fase 8j: "Estado del pedido" vive ahora en planner-filters-store.ts (no
+  // en useState local) para que no se resetee a "Validado" cada vez que se
+  // cambia de pestaña dentro del Planificador o se navega fuera y se vuelve
+  // -- justo lo que reportó Raúl. `selected` (las casillas marcadas) sigue
+  // siendo local a propósito: perder una selección de pedidos a medio hacer
+  // al navegar fuera es razonable y más seguro que arrastrarla.
+  const status = usePlannerFiltersStore((s) => s.orderStatus);
+  const setStatus = usePlannerFiltersStore((s) => s.setOrderStatus);
 
   const queryKey = ["planner-board", warehouseId, routeDate, status];
   const { data, isLoading } = useQuery({

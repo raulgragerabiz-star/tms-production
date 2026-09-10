@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import PlannerMap, { MapLine, MapPoint, PENDING_COLOR, ROUTE_COLORS, WAREHOUSE_COLOR } from "./PlannerMap";
@@ -41,15 +41,21 @@ interface Props {
   warehouseId: string;
   routeDate: string;
   onManageRoute: (routeId: string) => void;
+  // Fase 8j: petición de Raúl -- "debe poder eliminarse rutas creadas, por
+  // si se ha cometido algún error y que no se queden ahí fijas".
+  onSuccess: (message: string) => void;
+  onError: (message: string) => void;
 }
 
 const GETAFE_CENTER = { lat: 40.3058, lng: -3.7327 };
 
-export default function RutasTab({ warehouseId, routeDate, onManageRoute }: Props) {
+export default function RutasTab({ warehouseId, routeDate, onManageRoute, onSuccess, onError }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
+  const queryKey = ["dispatch-board", warehouseId, routeDate];
   const { data, isLoading } = useQuery({
-    queryKey: ["dispatch-board", warehouseId, routeDate],
+    queryKey,
     queryFn: async () =>
       (
         await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, date: routeDate } })
@@ -57,6 +63,28 @@ export default function RutasTab({ warehouseId, routeDate, onManageRoute }: Prop
   });
 
   const routes = data?.items ?? [];
+
+  const deleteRouteMutation = useMutation({
+    mutationFn: async (routeId: string) => api.delete(`/routes/${routeId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      queryClient.invalidateQueries({ queryKey: ["planner-board"] });
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      setExpandedId(null);
+      onSuccess("Ruta eliminada. Sus pedidos han vuelto a estar pendientes de planificar.");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo eliminar la ruta"),
+  });
+
+  function handleDeleteRoute(r: RouteRow) {
+    if (
+      window.confirm(
+        `¿Eliminar esta ruta (${r.stops.length} paradas)? Sus pedidos volverán a estar pendientes de planificar. Esta acción no se puede deshacer.`
+      )
+    ) {
+      deleteRouteMutation.mutate(r.id);
+    }
+  }
 
   const routeColorMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -150,9 +178,16 @@ export default function RutasTab({ warehouseId, routeDate, onManageRoute }: Prop
                         <StatusBadge status={s.status} />
                       </div>
                     ))}
-                    <div className="px-3 py-2">
+                    <div className="px-3 py-2 flex items-center justify-between">
                       <button onClick={() => onManageRoute(r.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
                         Gestionar ruta →
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRoute(r)}
+                        disabled={deleteRouteMutation.isPending}
+                        className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
+                      >
+                        Eliminar ruta
                       </button>
                     </div>
                   </div>

@@ -20,17 +20,19 @@ import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 //
 // 2026-09-10: al reducir de 5 pestañas a 3 en la Fase 8 se dejó de montar
 // VehiclesPage con activeTab="vehicles" -- esa era la única pestaña con la
-// columna y el botón "Ver / generar QR" (el QR que el conductor escanea
-// desde la App para vincularse a su vehículo, ver VehicleQrModal). No se
-// borró ni se rompió nada del código de esa pantalla, simplemente dejó de
-// ser alcanzable desde el menú. Se repone aquí como "Vehículos" -- Raúl
-// reportó justo esto: "los conductores han perdido la opción de enlazarse
-// mediante QR".
-type Tab = "transportistas" | "vehiculos" | "conductores" | "tipos-zonas";
+// columna y el botón "Ver / generar QR". Se probó a reponerla como pestaña
+// "Vehículos" propia, pero Raúl pidió quitarla otra vez: "en transportistas
+// ya figuran los vehículos de cada agencia" (los checkboxes de tipo de
+// vehículo de TransportistasTab) y el QR debe verse directamente desde la
+// ficha del conductor, no en una pantalla aparte. El QR y la matrícula
+// concreta del vehículo ahora se gestionan desde la propia pestaña
+// "Conductores" (columna "Vehículo", ver VehiclesPage.tsx) -- el código de
+// la pestaña "vehicles" de VehiclesPage sigue intacto por si hiciera falta
+// en el futuro, simplemente no se monta desde aquí.
+type Tab = "transportistas" | "conductores" | "tipos-zonas";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "transportistas", label: "Transportistas" },
-  { id: "vehiculos", label: "Vehículos" },
   { id: "conductores", label: "Conductores" },
   { id: "tipos-zonas", label: "Tipo de vehículo y zonas" },
 ];
@@ -64,7 +66,6 @@ export default function CarrierFleetPage() {
       </div>
 
       {tab === "transportistas" && <TransportistasTab />}
-      {tab === "vehiculos" && <VehiclesPage embedded activeTab="vehicles" />}
       {tab === "conductores" && <VehiclesPage embedded activeTab="drivers" />}
       {tab === "tipos-zonas" && (
         <div className="space-y-6">
