@@ -19,6 +19,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseCustomersWorkbook, type ParsedCustomerRow } from "./lib/customer-master-parser";
+import { geocodeDeliveryPointIfMissing } from "@/modules/delivery-points/delivery-points.service";
 
 export { buildCustomerMasterTemplate } from "./lib/customer-master-parser";
 
@@ -69,7 +70,7 @@ const IMPORT_CONCURRENCY = 4;
 async function ensureDeliveryPoint(
   customerId: string,
   row: ParsedCustomerRow
-): Promise<boolean> {
+): Promise<{ created: boolean; deliveryPointId: string }> {
   const address = row.address || row.addressRaw;
   const existingDp = await prisma.deliveryPoint.findFirst({
     where: {
@@ -79,9 +80,9 @@ async function ensureDeliveryPoint(
       deletedAt: null,
     },
   });
-  if (existingDp) return false;
+  if (existingDp) return { created: false, deliveryPointId: existingDp.id };
 
-  await prisma.deliveryPoint.create({
+  const created = await prisma.deliveryPoint.create({
     data: {
       customerId,
       address,
@@ -91,7 +92,7 @@ async function ensureDeliveryPoint(
       country: "ES",
     },
   });
-  return true;
+  return { created: true, deliveryPointId: created.id };
 }
 
 async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summary: CustomerMasterImportSummary): Promise<void> {
@@ -142,8 +143,15 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
     }
 
     if (hasAddress) {
-      const created = await ensureDeliveryPoint(customerId, row);
+      const { created, deliveryPointId } = await ensureDeliveryPoint(customerId, row);
       if (created) summary.puntosDeEntregaCreados += 1;
+      // Fase 8c: geocodificación "best effort" también aquí -- este maestro
+      // es precisamente el que carga la dirección por defecto que luego
+      // heredan los pedidos de ese cliente (ver comentario al inicio del
+      // fichero), así que geocodificarla aquí evita repetir la llamada por
+      // cada pedido futuro del mismo cliente (el punto de entrega, una vez
+      // geocodificado, se reutiliza tal cual).
+      await geocodeDeliveryPointIfMissing(deliveryPointId);
     }
 
     if (hasAddress && !row.postalCode) {

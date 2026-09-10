@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { computeLineWeightKg } from "@/modules/orders/lib/line-weight";
 import { classifyOrder, getActiveSegmentationRules } from "@/modules/segmentation/segmentation.service";
+import { geocodeDeliveryPointIfMissing } from "@/modules/delivery-points/delivery-points.service";
 
 export const SOURCE_SYSTEM = "erpclaud" as const;
 
@@ -171,12 +172,20 @@ export async function processErpclaudImport(companyId: string, payload: Erpclaud
         throw new Error(`SKUs no encontrados en catálogo: ${missing.join(", ")}`);
       }
 
+      // Fase 8c: se guarda fuera de la transacción para poder geocodificar el
+      // punto de entrega DESPUÉS de que el pedido ya se ha confirmado (nunca
+      // dentro de un `tx`, por ser una llamada de red externa) -- si el ERP
+      // ya manda dir.lat/dir.lng, geocodeDeliveryPointIfMissing lo detecta y
+      // no hace ninguna llamada de más.
+      let deliveryPointIdForGeocoding: string | undefined;
+
       await prisma.$transaction(async (tx) => {
         const { customerId, deliveryPointId, customerCreated } = await resolveCustomerAndDeliveryPoint(
           tx,
           companyId,
           pedido
         );
+        deliveryPointIdForGeocoding = deliveryPointId;
         if (customerCreated) summary.clientesResueltos += 1;
 
         const warehouseId = await resolveWarehouseId(tx, companyId, pedido.almacenCodigo);
@@ -247,6 +256,13 @@ export async function processErpclaudImport(companyId: string, payload: Erpclaud
         // precargadas fuera del bucle.
         await classifyOrder(tx, companyId, order.id, segmentationRules);
       });
+
+      // Fase 8c: geocodificación "best effort", ya con el pedido confirmado.
+      // Si falla, el pedido se cuenta igual como creado/actualizado -- solo
+      // se queda sin coordenadas, igual que antes de este cambio.
+      if (deliveryPointIdForGeocoding) {
+        await geocodeDeliveryPointIfMissing(deliveryPointIdForGeocoding);
+      }
     } catch (err: any) {
       summary.errores.push({
         externalOrderId: pedido.externalOrderId,

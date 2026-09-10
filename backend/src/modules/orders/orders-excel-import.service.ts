@@ -33,6 +33,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { computeLineWeightKg } from "./lib/line-weight";
 import { classifyOrder, getActiveSegmentationRules } from "@/modules/segmentation/segmentation.service";
+import { geocodeDeliveryPointIfMissing } from "@/modules/delivery-points/delivery-points.service";
 import { createImportJob, updateImportJob } from "./lib/import-jobs.store";
 import {
   parseOrdersWorkbook,
@@ -246,8 +247,16 @@ async function importOneOrder(
       return;
     }
 
+    // Fase 8c: se guarda fuera de la transacción para poder geocodificar el
+    // punto de entrega DESPUÉS de que el pedido ya se ha confirmado en base
+    // de datos (ver geocodeDeliveryPointIfMissing más abajo -- nunca dentro
+    // de un `tx`, por ser una llamada de red externa).
+    let deliveryPointId: string | undefined;
+
     await prisma.$transaction(async (tx) => {
-      const { customerId, deliveryPointId } = await resolveCustomerAndDeliveryPoint(tx, companyId, parsed, summary);
+      const resolved = await resolveCustomerAndDeliveryPoint(tx, companyId, parsed, summary);
+      const customerId = resolved.customerId;
+      deliveryPointId = resolved.deliveryPointId;
       const warehouseId = await resolveWarehouseId(tx, companyId, parsed.warehouseName);
 
       const products = await Promise.all(
@@ -260,7 +269,11 @@ async function importOneOrder(
           companyId,
           orderNumber: parsed.orderNumber,
           customerId,
-          deliveryPointId,
+          // Non-null: resolveCustomerAndDeliveryPoint siempre devuelve un id
+          // válido o lanza -- la variable solo es "| undefined" en su tipo
+          // por vivir fuera del cierre de la transacción (ver comentario Fase
+          // 8c más arriba).
+          deliveryPointId: deliveryPointId!,
           warehouseId,
           status: "received",
           requestedDeliveryDate: parsed.requestedDeliveryDate!,
@@ -291,6 +304,14 @@ async function importOneOrder(
 
       await classifyOrder(tx, companyId, order.id, segmentationRules);
     });
+
+    // Fase 8c: geocodificación "best effort" del punto de entrega, ya con el
+    // pedido confirmado. No afecta a summary.pedidosCreados -- si falla, el
+    // pedido se cuenta igual como creado (solo se queda sin coordenadas,
+    // exactamente igual que antes de este cambio).
+    if (deliveryPointId) {
+      await geocodeDeliveryPointIfMissing(deliveryPointId);
+    }
 
     summary.pedidosCreados += 1;
   } catch (err: any) {
