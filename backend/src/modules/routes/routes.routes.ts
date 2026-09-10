@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { env } from "@/config/env";
 import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, STOP_SERVICE_MINUTES } from "@/modules/routing/routing.service";
 import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
 import { broadcastToWarehouse } from "@/realtime/ws.server";
@@ -368,7 +369,21 @@ routesRouter.get(
 // prioridad primero y el resto queda disponible para una siguiente pasada
 // (mismo pedido, se puede volver a lanzar).
 const MAX_AUTO_PLAN_JOBS = 45;
-const MAX_AUTO_PLAN_VEHICLES = 18;
+// Fase 8f: el límite de vehículos por llamada lo impone la cuenta de ORS
+// contratada (ver env.orsMaxOptimizationVehicles) -- se probó con 18 y ORS
+// respondió "Too many vehicles (18) in query, maximum is set to 3" (HTTP
+// 413). Si en el futuro se amplía el plan de ORS, basta con subir
+// ORS_MAX_OPTIMIZATION_VEHICLES en el entorno, sin tocar código.
+const MAX_AUTO_PLAN_VEHICLES = env.orsMaxOptimizationVehicles;
+// Fase 8g: con solo MAX_AUTO_PLAN_VEHICLES (3) vehículos por llamada, hace
+// falta más de una llamada para dar cabida a todos los pedidos del grupo --
+// ver el bucle de "pasadas" en el propio handler. Tope de seguridad para no
+// encadenar llamadas indefinidamente si un pedido concreto no cabe en
+// ningún vehículo (demasiado pesado/voluminoso, o sin ruta posible): a la
+// pasada que no consiga asignar NADA se corta de todas formas antes de
+// llegar aquí, así que este número solo protege ante el caso, más raro, de
+// ir progresando muy poco a poco pedido a pedido.
+const MAX_AUTO_PLAN_PASSES = 8;
 const UNITS_PER_KG = 1; // capacidad en kg enteros
 const UNITS_PER_PALLET = 10; // un decimal de precisión en palés (VROOM exige enteros)
 
@@ -458,16 +473,19 @@ routesRouter.post(
     // almacén (criterio ya usado en suggestVehicleType); si no hay ninguna
     // configurada, se cae a los tipos de vehículo activos de la empresa.
     // No depende del servicio, así que se calcula una sola vez para todos
-    // los grupos.
+    // los grupos. Ordenados de mayor a menor capacidad de peso: al haber
+    // como mucho MAX_AUTO_PLAN_VEHICLES huecos por llamada a ORS, interesa
+    // que los primeros vehículos "nuevos" que se creen sean los de más
+    // capacidad -- así caben antes los pedidos grandes, que son los que
+    // menos margen tienen para esperar a una pasada posterior.
     const zoneTypes = await prisma.influenceZone.findMany({
       where: { warehouseId: data.warehouseId },
       include: { vehicleType: true },
       distinct: ["vehicleTypeId"],
     });
-    const vehicleTypes =
-      zoneTypes.length > 0
-        ? zoneTypes.map((zone) => zone.vehicleType)
-        : await prisma.vehicleType.findMany({ take: 3 });
+    const vehicleTypes = (
+      zoneTypes.length > 0 ? zoneTypes.map((zone) => zone.vehicleType) : await prisma.vehicleType.findMany()
+    ).sort((a, b) => Number(b.maxWeightKg) - Number(a.maxWeightKg));
 
     if (vehicleTypes.length === 0) {
       throw HttpError.badRequest("No hay tipos de vehículo configurados con los que planificar rutas");
@@ -475,36 +493,13 @@ routesRouter.post(
 
     const warehouseCoord: [number, number] = [warehouse.lng, warehouse.lat];
 
-    function buildVehicles(): VroomVehicle[] {
-      const vehicles: VroomVehicle[] = [];
-      let vehicleIdx = 0;
-      // Como mucho tantas unidades por tipo como hagan falta para poder cubrir
-      // todos los pedidos seleccionados en el peor caso (uno por vehículo),
-      // repartidas entre los tipos disponibles, sin pasar del límite global.
-      const unitsPerType = Math.max(1, Math.ceil(MAX_AUTO_PLAN_VEHICLES / vehicleTypes.length));
-      for (const vt of vehicleTypes) {
-        for (let i = 0; i < unitsPerType && vehicles.length < MAX_AUTO_PLAN_VEHICLES; i++) {
-          vehicles.push({
-            id: vehicleIdx++,
-            start: warehouseCoord,
-            end: warehouseCoord,
-            capacity: [
-              Math.round(Number(vt.maxWeightKg) * UNITS_PER_KG),
-              Math.round(vt.maxPallets * UNITS_PER_PALLET),
-            ],
-          });
-        }
-      }
-      return vehicles;
-    }
-
     // Fase 8: una ruta solo puede tener un `serviceType` (columna de Route),
     // así que si la selección mezcla servicios distintos (posible ahora que
     // la pestaña "Planificación" ya no obliga a elegir uno antes de
     // seleccionar pedidos), se agrupan y se planifica cada grupo por
-    // separado -- una llamada a VROOM y, como mucho, una o varias rutas por
-    // grupo. Con `serviceType` explícito en el body (compatibilidad con
-    // cualquier otro llamador) todo cae en un único grupo, igual que antes.
+    // separado -- una o varias pasadas de VROOM y, como mucho, una o varias
+    // rutas por grupo. Con `serviceType` explícito en el body (compatibilidad
+    // con cualquier otro llamador) todo cae en un único grupo, igual que antes.
     const groups = new Map<string, typeof selected>();
     for (const order of selected) {
       // order.serviceType es opcional en el esquema (pedidos muy antiguos,
@@ -521,74 +516,178 @@ routesRouter.post(
     let ordersUnassigned = 0;
     const unassignedReasons: { orderNumber: string; reason: string }[] = [];
 
+    // Fase 8g: "vehículo virtual" persistente entre pasadas de un mismo
+    // grupo -- modela un vehículo/ruta que, si no se ha llenado del todo en
+    // una pasada, puede seguir recibiendo más paradas en pasadas siguientes
+    // (misma ruta, no una nueva) en vez de darse por agotado tras un único
+    // intento. `capacity` es lo que le queda LIBRE, no su capacidad total.
+    interface VehicleSlot {
+      vroomId: number;
+      capacity: [number, number];
+      start: [number, number];
+      routeId: string | null;
+      stopCount: number;
+    }
+
     for (const [groupServiceType, groupOrders] of groups) {
-      const vehicles = buildVehicles();
-      const jobs: VroomJob[] = groupOrders.map((order, idx) => {
-        const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
-        const pallets = order.lines.reduce((acc, l) => {
-          const upp = l.product.unitsPerPallet ?? 1;
-          return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
-        }, 0);
-        const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
-        const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
+      // Pool de vehículos virtuales de ESTE grupo -- no se comparte entre
+      // grupos (cada uno crea rutas de un servicio distinto, igual que ya
+      // pasaba antes de esta fase). Empieza vacío: se van creando vehículos
+      // nuevos solo a medida que hacen falta (ver dentro del bucle), nunca
+      // más de los necesarios.
+      const vehiclePool: VehicleSlot[] = [];
+      let nextVroomId = 0;
+      let typeCursor = 0;
+      function spawnSlot(): VehicleSlot {
+        const vt = vehicleTypes[typeCursor % vehicleTypes.length];
+        typeCursor += 1;
         return {
-          id: idx,
-          location: [order.deliveryPoint.lng as number, order.deliveryPoint.lat as number],
-          service: STOP_SERVICE_MINUTES * 60,
-          delivery: [Math.round(weightKg * UNITS_PER_KG), Math.round(pallets * UNITS_PER_PALLET)],
-          ...(fromSec != null && toSec != null ? { time_windows: [[fromSec, toSec]] as [number, number][] } : {}),
-          priority: order.priority === "urgent" ? 100 : 0,
+          vroomId: nextVroomId++,
+          capacity: [Math.round(Number(vt.maxWeightKg) * UNITS_PER_KG), Math.round(vt.maxPallets * UNITS_PER_PALLET)],
+          start: warehouseCoord,
+          routeId: null,
+          stopCount: 0,
         };
-      });
+      }
 
-      let result;
-      try {
-        result = await optimizePlan({ jobs, vehicles });
-      } catch (err) {
-        if (err instanceof OrsNotConfiguredError) {
-          throw HttpError.badRequest(
-            "La planificación automática necesita una clave de OpenRouteService configurada (ORS_API_KEY) -- todavía no lo está."
-          );
+      // Pool de pedidos de este grupo aún sin asignar -- se va reduciendo a
+      // medida que las pasadas consiguen encajarlos en algún vehículo.
+      let remainingOrders = groupOrders;
+      const lastReasonByOrderId = new Map<string, string>();
+
+      for (let pass = 0; pass < MAX_AUTO_PLAN_PASSES && remainingOrders.length > 0; pass++) {
+        // Hasta MAX_AUTO_PLAN_VEHICLES "huecos" por pasada (límite real de la
+        // cuenta de ORS): primero se reutilizan vehículos ya usados en una
+        // pasada anterior que todavía tengan capacidad libre -- así se les
+        // van añadiendo más paradas a SU MISMA ruta en vez de abrir una
+        // nueva -- y solo si faltan huecos se crean vehículos nuevos.
+        const withRoom = vehiclePool.filter((v) => v.capacity[0] > 0 && v.capacity[1] > 0);
+        const activeSlots: VehicleSlot[] = withRoom.slice(0, MAX_AUTO_PLAN_VEHICLES);
+        while (activeSlots.length < MAX_AUTO_PLAN_VEHICLES) {
+          const slot = spawnSlot();
+          vehiclePool.push(slot);
+          activeSlots.push(slot);
         }
-        throw HttpError.badRequest(`No se pudo completar la optimización: ${(err as Error).message}`);
-      }
 
-      for (const vroomRoute of result.routes) {
-        const jobSteps = vroomRoute.steps.filter((s) => s.type === "job" && s.job != null);
-        if (jobSteps.length === 0) continue;
-
-        const route = await prisma.$transaction(async (tx) => {
-          const created = await tx.route.create({
-            data: {
-              companyId,
-              warehouseId: data.warehouseId,
-              routeDate: data.routeDate,
-              serviceType: groupServiceType as any,
-              status: "draft",
-            },
-          });
-          await tx.routeStop.createMany({
-            data: jobSteps.map((step, seqIdx) => ({
-              routeId: created.id,
-              orderId: groupOrders[step.job as number].id,
-              sequence: seqIdx + 1,
-            })),
-          });
-          await tx.order.updateMany({
-            where: { id: { in: jobSteps.map((step) => groupOrders[step.job as number].id) } },
-            data: { status: "planned" },
-          });
-          return created;
+        const passOrders = remainingOrders.slice(0, MAX_AUTO_PLAN_JOBS);
+        const jobs: VroomJob[] = passOrders.map((order, idx) => {
+          const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
+          const pallets = order.lines.reduce((acc, l) => {
+            const upp = l.product.unitsPerPallet ?? 1;
+            return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
+          }, 0);
+          const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
+          const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
+          return {
+            id: idx,
+            location: [order.deliveryPoint.lng as number, order.deliveryPoint.lat as number],
+            service: STOP_SERVICE_MINUTES * 60,
+            delivery: [Math.round(weightKg * UNITS_PER_KG), Math.round(pallets * UNITS_PER_PALLET)],
+            ...(fromSec != null && toSec != null ? { time_windows: [[fromSec, toSec]] as [number, number][] } : {}),
+            priority: order.priority === "urgent" ? 100 : 0,
+          };
         });
+        const vroomVehicles: VroomVehicle[] = activeSlots.map((slot) => ({
+          id: slot.vroomId,
+          start: slot.start,
+          end: warehouseCoord,
+          capacity: slot.capacity,
+        }));
 
-        await recalculateLoadPlan(route.id);
-        routesCreated.push(route.id);
+        let result;
+        try {
+          result = await optimizePlan({ jobs, vehicles: vroomVehicles });
+        } catch (err) {
+          if (err instanceof OrsNotConfiguredError) {
+            throw HttpError.badRequest(
+              "La planificación automática necesita una clave de OpenRouteService configurada (ORS_API_KEY) -- todavía no lo está."
+            );
+          }
+          throw HttpError.badRequest(`No se pudo completar la optimización: ${(err as Error).message}`);
+        }
+
+        const assignedOrderIds = new Set<string>();
+
+        for (const vroomRoute of result.routes) {
+          const jobSteps = vroomRoute.steps.filter((s) => s.type === "job" && s.job != null);
+          if (jobSteps.length === 0) continue;
+
+          const slot = activeSlots.find((s) => s.vroomId === vroomRoute.vehicle);
+          if (!slot) continue; // no debería pasar -- ORS devuelve el mismo id de vehículo que se le manda
+
+          const stopOrderIds = jobSteps.map((step) => passOrders[step.job as number].id);
+
+          const routeId: string = await prisma.$transaction(async (tx) => {
+            let currentRouteId = slot.routeId;
+            if (currentRouteId == null) {
+              const created = await tx.route.create({
+                data: {
+                  companyId,
+                  warehouseId: data.warehouseId,
+                  routeDate: data.routeDate,
+                  serviceType: groupServiceType as any,
+                  status: "draft",
+                },
+              });
+              currentRouteId = created.id;
+            }
+            await tx.routeStop.createMany({
+              data: jobSteps.map((step, seqIdx) => ({
+                routeId: currentRouteId as string,
+                orderId: passOrders[step.job as number].id,
+                sequence: slot.stopCount + seqIdx + 1,
+              })),
+            });
+            await tx.order.updateMany({
+              where: { id: { in: stopOrderIds } },
+              data: { status: "planned" },
+            });
+            return currentRouteId as string;
+          });
+
+          const isNewRoute = slot.routeId == null;
+          slot.routeId = routeId;
+          slot.stopCount += jobSteps.length;
+
+          // Capacidad restante y punto desde el que sigue para una posible
+          // próxima pasada: continúa desde su última parada de esta pasada
+          // en vez de volver al almacén -- no repite viaje, simplemente le
+          // caben más paradas en la misma ruta si aún tiene sitio.
+          const usedWeight = jobSteps.reduce((acc, step) => acc + (jobs[step.job as number].delivery?.[0] ?? 0), 0);
+          const usedPallets = jobSteps.reduce((acc, step) => acc + (jobs[step.job as number].delivery?.[1] ?? 0), 0);
+          slot.capacity = [slot.capacity[0] - usedWeight, slot.capacity[1] - usedPallets];
+          const lastStep = jobSteps[jobSteps.length - 1];
+          if (lastStep.location) slot.start = lastStep.location;
+
+          await recalculateLoadPlan(routeId);
+          if (isNewRoute) routesCreated.push(routeId);
+
+          for (const id of stopOrderIds) assignedOrderIds.add(id);
+        }
+
+        for (const u of result.unassigned) {
+          const order = passOrders[u.id];
+          if (order) lastReasonByOrderId.set(order.id, u.reason ?? "sin especificar");
+        }
+
+        remainingOrders = remainingOrders.filter((o) => !assignedOrderIds.has(o.id));
+
+        // Si esta pasada no ha conseguido colar NINGÚN pedido -- ni
+        // reutilizando vehículos con hueco ni con vehículos nuevos -- más
+        // pasadas no lo van a arreglar (el motivo es de capacidad/ruta, no
+        // de cuántos vehículos se ofrecen). Se corta aquí para no gastar más
+        // cuota de ORS en balde; lo que quede en remainingOrders pasa a
+        // unassignedReasons más abajo.
+        if (assignedOrderIds.size === 0) break;
       }
 
-      ordersPlanned += jobs.length - result.unassigned.length;
-      ordersUnassigned += result.unassigned.length;
-      for (const u of result.unassigned) {
-        unassignedReasons.push({ orderNumber: groupOrders[u.id]?.orderNumber ?? "?", reason: u.reason ?? "sin especificar" });
+      ordersPlanned += groupOrders.length - remainingOrders.length;
+      ordersUnassigned += remainingOrders.length;
+      for (const order of remainingOrders) {
+        unassignedReasons.push({
+          orderNumber: order.orderNumber,
+          reason: lastReasonByOrderId.get(order.id) ?? "No ha cabido en ningún vehículo tras varias pasadas",
+        });
       }
     }
 
