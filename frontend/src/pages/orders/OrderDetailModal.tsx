@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import Modal from "@/components/Modal";
+import { viewDocumentPdf, downloadDocumentPdf } from "@/lib/document-pdf";
 
 // "Ficha única del pedido" (instrucciones del proyecto ampliadas): integra
 // albaranes digitales, observaciones, documentos, incidencias, estado y
@@ -179,7 +180,26 @@ export default function OrderDetailModal({ orderId, onClose }: Props) {
                 Fecha comprometida: {new Date(data.requestedDeliveryDate).toLocaleDateString("es-ES")}
               </p>
             </div>
-            <StatusBadge status={data.status} />
+            <div className="flex flex-col items-end gap-1.5">
+              <StatusBadge status={data.status} />
+              {/* Fase 8Q2: albarán de entrega en PDF -- "documentación real
+                  asociada a los pedidos" pedida por Raúl. Mismo generador
+                  que descarga Backoffice y ve el conductor desde la App. */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => viewDocumentPdf(`/orders/${orderId}/documents/delivery-note.pdf`)}
+                  className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                >
+                  Ver albarán (PDF)
+                </button>
+                <button
+                  onClick={() => downloadDocumentPdf(`/orders/${orderId}/documents/delivery-note.pdf`, `albaran-${data.orderNumber}.pdf`)}
+                  className="text-xs text-slate-400 hover:text-slate-600"
+                >
+                  Descargar
+                </button>
+              </div>
+            </div>
           </div>
 
           {data.notes && (

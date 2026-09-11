@@ -32,6 +32,7 @@ import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
 import { demandForecastRouter } from "@/modules/intelligence/demand-forecast.routes";
 import { companySettingsRouter } from "@/modules/company/company-settings.routes";
+import { publicDocumentsRouter } from "@/modules/documents/public-documents.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -56,6 +57,13 @@ function isKnownCodespacesOrigin(origin: string): boolean {
 
 export function createApp() {
   const app = express();
+
+  // Fase 8Q2: necesario para que el QR de verificación de los documentos
+  // (albarán/carta de porte, ver document-pdf.service.ts) se genere con
+  // "https://" real -- Cloud Run termina TLS por delante y reenvía al
+  // contenedor por HTTP simple; sin esto, `req.protocol` diría siempre
+  // "http" aunque el usuario esté en una URL https real.
+  app.set("trust proxy", true);
 
   app.use(helmet());
   app.use(
@@ -94,6 +102,12 @@ export function createApp() {
   // sin usuario ni contraseña (ver tracking.routes.ts) -- deliberadamente
   // fuera de requireAuth, con su propio rate-limit por IP.
   app.use("/api/tracking", trackingRouter);
+
+  // Verificación pública de documentos (albarán/carta de porte) vía el QR
+  // impreso en el propio PDF -- sin login, a propósito (lo abre un control
+  // de carretera), protegido por token JWT en vez de por sesión. Ver
+  // public-documents.routes.ts.
+  app.use("/api/documents/public", publicDocumentsRouter);
 
   // Todo lo demás requiere autenticación.
   app.use("/api/customers", requireAuth, customersRouter);

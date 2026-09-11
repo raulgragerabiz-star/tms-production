@@ -8,6 +8,7 @@ import { env } from "@/config/env";
 import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, STOP_SERVICE_MINUTES } from "@/modules/routing/routing.service";
 import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
 import { broadcastToWarehouse } from "@/realtime/ws.server";
+import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 
 export const routesRouter = Router();
 
@@ -766,6 +767,60 @@ routesRouter.get(
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
     res.json(route);
+  })
+);
+
+// Fase 8Q2: carta de porte en PDF -- "control de mercancía por carretera en
+// modo virtual" pedido explícitamente por Raúl, usando el
+// `DocumentType.carriage_note` que ya existía en el schema sin generador
+// ninguno. Un documento por RUTA (viaje), con todos sus destinatarios y
+// mercancía -- ver aviso legal dentro de document-pdf.service.ts. Mismo
+// criterio `?download=1` / inline que el albarán de pedido.
+routesRouter.get(
+  "/:id/documents/carriage-note.pdf",
+  asyncHandler(async (req, res) => {
+    const route = await prisma.route.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+      include: {
+        warehouse: true,
+        carrier: { select: { legalName: true, taxId: true } },
+        vehicle: { select: { plate: true, trailerPlate: true } },
+        costSimulations: { where: { isSelected: true }, select: { estimatedCost: true } },
+        stops: {
+          orderBy: { sequence: "asc" },
+          include: {
+            order: {
+              include: {
+                customer: { select: { legalName: true, taxId: true } },
+                deliveryPoint: true,
+                lines: { include: { product: { select: { description: true, requiresAdr: true, carriageNoteDescription: true } } } },
+              },
+            },
+          },
+        },
+        shipment: { include: { driver: { select: { fullName: true, taxId: true } } } },
+      },
+    });
+    if (!route) throw HttpError.notFound("Ruta no encontrada");
+    if (route.stops.length === 0) throw HttpError.badRequest("Esta ruta todavía no tiene paradas -- no hay mercancía que documentar");
+
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: req.auth!.companyId } });
+
+    const token = signDocumentToken({ typ: "carriage_note", id: route.id });
+    const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/carriage-note/${route.id}?token=${token}`;
+
+    const pdf = await renderCarriageNotePdf(
+      { ...route, driver: route.shipment?.driver ?? null },
+      company,
+      verifyUrl
+    );
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `${req.query.download ? "attachment" : "inline"}; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`
+    );
+    res.send(pdf);
   })
 );
 

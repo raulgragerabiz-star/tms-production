@@ -9,6 +9,7 @@ import { requireDriverApp } from "@/middleware/scoped-auth";
 import { resolveVehicleFromQrToken, bindVehicleToDriverToday } from "@/modules/vehicles/vehicle-qr.service";
 import { broadcastToShipment, broadcastToWarehouse } from "@/realtime/ws.server";
 import { maybeRecalculateEta } from "@/modules/routing/eta-recalc.service";
+import { renderDeliveryNotePdf, renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 
 export const driverAppRouter = Router();
 driverAppRouter.use(requireDriverApp);
@@ -505,6 +506,86 @@ driverAppRouter.get(
     });
     if (!stop) throw HttpError.notFound("Parada no encontrada");
     res.json({ items: stop.order.documents });
+  })
+);
+
+// Fase 8Q2: albarán de la parada (PDF) y carta de porte del viaje (PDF), en
+// pantalla desde el propio móvil -- "control de mercancía por carretera en
+// modo virtual" pedido por Raúl. Mismos generadores que usa Backoffice (ver
+// document-pdf.service.ts), aquí acotados a paradas/envíos del conductor
+// autenticado, nunca de otro.
+driverAppRouter.get(
+  "/stops/:routeStopId/documents/delivery-note.pdf",
+  asyncHandler(async (req, res) => {
+    const stop = await prisma.routeStop.findFirst({
+      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      include: {
+        pod: true,
+        order: {
+          include: {
+            customer: { select: { legalName: true, taxId: true } },
+            deliveryPoint: true,
+            warehouse: true,
+            lines: { include: { product: { select: { sku: true, description: true, ean: true } } } },
+            company: true,
+          },
+        },
+      },
+    });
+    if (!stop) throw HttpError.notFound("Parada no encontrada");
+
+    const token = signDocumentToken({ typ: "delivery_note", id: stop.order.id });
+    const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/delivery-note/${stop.order.id}?token=${token}`;
+    const pdf = await renderDeliveryNotePdf(
+      {
+        ...stop.order,
+        pod: stop.pod ? { signatureUrl: stop.pod.signatureUrl, receivedByName: stop.pod.receivedByName, deliveredAt: stop.pod.deliveredAt } : null,
+      },
+      stop.order.company,
+      verifyUrl
+    );
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="albaran-${stop.order.orderNumber}.pdf"`);
+    res.send(pdf);
+  })
+);
+
+driverAppRouter.get(
+  "/shipments/:id/documents/carriage-note.pdf",
+  asyncHandler(async (req, res) => {
+    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    if (!shipment) throw HttpError.notFound("Envío no encontrado");
+
+    const route = await prisma.route.findUniqueOrThrow({
+      where: { id: shipment.routeId },
+      include: {
+        warehouse: true,
+        carrier: { select: { legalName: true, taxId: true } },
+        vehicle: { select: { plate: true, trailerPlate: true } },
+        costSimulations: { where: { isSelected: true }, select: { estimatedCost: true } },
+        stops: {
+          orderBy: { sequence: "asc" },
+          include: {
+            order: {
+              include: {
+                customer: { select: { legalName: true, taxId: true } },
+                deliveryPoint: true,
+                lines: { include: { product: { select: { description: true, requiresAdr: true, carriageNoteDescription: true } } } },
+              },
+            },
+          },
+        },
+        company: true,
+        shipment: { include: { driver: { select: { fullName: true, taxId: true } } } },
+      },
+    });
+
+    const token = signDocumentToken({ typ: "carriage_note", id: route.id });
+    const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/carriage-note/${route.id}?token=${token}`;
+    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, route.company, verifyUrl);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`);
+    res.send(pdf);
   })
 );
 

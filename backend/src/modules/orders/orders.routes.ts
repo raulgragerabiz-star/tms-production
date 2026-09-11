@@ -7,6 +7,7 @@ import { computeLineWeightKg } from "./lib/line-weight";
 import { classifyOrder } from "@/modules/segmentation/segmentation.service";
 import { buildOrdersImportTemplate, startOrdersExcelImportJob } from "./orders-excel-import.service";
 import { getImportJob } from "./lib/import-jobs.store";
+import { renderDeliveryNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 
 export const ordersRouter = Router();
 
@@ -204,6 +205,50 @@ ordersRouter.get(
         : [];
 
     res.json({ ...order, timeline });
+  })
+);
+
+// Fase 8Q2: albarán de entrega en PDF -- petición explícita de Raúl
+// ("documentación real asociada a los pedidos"), tercer punto que había
+// quedado aplazado del backlog de "Ficha única del pedido". Usa el mismo
+// `DocumentType.delivery_note` que ya existía en el schema sin generador
+// ninguno. `?download=1` fuerza la descarga; sin él, el PDF se sirve
+// "inline" para que el navegador (Backoffice o el móvil del conductor) lo
+// muestre directamente en pantalla -- cubre a la vez las dos formas de
+// acceso que pidió Raúl (PDF descargable + pantalla) con un único endpoint.
+ordersRouter.get(
+  "/:id/documents/delivery-note.pdf",
+  asyncHandler(async (req, res) => {
+    const order = await prisma.order.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+      include: {
+        customer: { select: { legalName: true, taxId: true } },
+        deliveryPoint: true,
+        warehouse: true,
+        lines: { include: { product: { select: { sku: true, description: true, ean: true } } } },
+        routeStops: { include: { pod: true }, orderBy: { id: "desc" } },
+      },
+    });
+    if (!order) throw HttpError.notFound("Pedido no encontrado");
+
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: req.auth!.companyId } });
+    const pod = order.routeStops.find((s) => s.pod)?.pod ?? null;
+
+    const token = signDocumentToken({ typ: "delivery_note", id: order.id });
+    const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/delivery-note/${order.id}?token=${token}`;
+
+    const pdf = await renderDeliveryNotePdf(
+      { ...order, pod: pod ? { signatureUrl: pod.signatureUrl, receivedByName: pod.receivedByName, deliveredAt: pod.deliveredAt } : null },
+      company,
+      verifyUrl
+    );
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `${req.query.download ? "attachment" : "inline"}; filename="albaran-${order.orderNumber}.pdf"`
+    );
+    res.send(pdf);
   })
 );
 

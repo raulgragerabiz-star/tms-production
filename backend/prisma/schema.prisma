@@ -20,6 +20,23 @@ model Company {
   id                      String                    @id @default(uuid())
   name                    String
   taxId                   String                    @unique @map("tax_id")
+  // Datos fiscales/de contacto del emisor, para poder imprimirlos en la
+  // cabecera de los documentos legales generados por el TMS (albarán de
+  // entrega y carta de porte -- petición de Raúl, "documentación real
+  // asociada a los pedidos"). Se tomaron como referencia sus propios
+  // documentos reales (pedido de venta / factura de BigMat Logística).
+  // Todo opcional: sin rellenar, la cabecera simplemente omite esa línea en
+  // vez de romper la generación del documento.
+  address                 String?
+  postalCode              String?                   @map("postal_code")
+  city                    String?
+  province                String?
+  phone                   String?
+  email                   String?
+  // Texto libre para la línea de registro mercantil del pie de página (p.ej.
+  // "Inscrita en el Registro Mercantil de Madrid al Tomo: 25614, Folio: 165,
+  // Hoja: M-461575"), tal cual aparece en los documentos reales aportados.
+  mercantileRegistryText  String?                   @map("mercantile_registry_text")
   active                  Boolean                   @default(true)
   createdAt               DateTime                  @default(now()) @map("created_at")
   updatedAt               DateTime                  @updatedAt @map("updated_at")

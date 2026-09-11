@@ -17,6 +17,12 @@ interface ProductRow {
   // en Product.requiresAdr en schema.prisma. Se usa ya como restricción real
   // en el motor de compatibilidad (backend/optimization.routes.ts).
   requiresAdr: boolean;
+  // Fase 8Q2: descripción GENÉRICA de la mercancía para la carta de porte
+  // (p.ej. "material de construcción" en vez de la descripción comercial
+  // completa del SKU) -- ya se aceptaba desde la API pero sin ninguna
+  // pantalla desde la que rellenarla. Si se deja en blanco, la carta de
+  // porte usa la descripción comercial normal como reserva.
+  carriageNoteDescription: string | null;
   // Objetivo 2: dimensiones del palé completo, para calcular volumen real
   // ocupado por ruta frente a la capacidad del vehículo.
   lengthM: string | null;
@@ -67,6 +73,7 @@ export default function ProductsPage() {
       widthM?: number;
       heightM?: number;
       requiresAdr?: boolean;
+      carriageNoteDescription?: string;
     }) => {
       const { id, ...rest } = payload;
       return (await api.put(`/products/${id}`, rest)).data;
@@ -112,6 +119,7 @@ export default function ProductsPage() {
               <th className="text-left px-4 py-3">Retornable</th>
               <th className="text-left px-4 py-3">Frío</th>
               <th className="text-left px-4 py-3">ADR</th>
+              <th className="text-left px-4 py-3">Descripción carta de porte</th>
               <th className="text-left px-4 py-3">Largo palé (m)</th>
               <th className="text-left px-4 py-3">Ancho palé (m)</th>
               <th className="text-left px-4 py-3">Alto palé (m)</th>
@@ -120,7 +128,7 @@ export default function ProductsPage() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={13} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={14} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {data?.items.map((p) => (
@@ -156,15 +164,23 @@ function ProductTableRow({
   onSave,
 }: {
   product: ProductRow;
-  onSave: (patch: { lengthM?: number; widthM?: number; heightM?: number; requiresAdr?: boolean }) => void;
+  onSave: (patch: {
+    lengthM?: number;
+    widthM?: number;
+    heightM?: number;
+    requiresAdr?: boolean;
+    carriageNoteDescription?: string;
+  }) => void;
 }) {
   const [lengthM, setLengthM] = useState(product.lengthM ?? "");
   const [widthM, setWidthM] = useState(product.widthM ?? "");
   const [heightM, setHeightM] = useState(product.heightM ?? "");
+  const [carriageNoteDescription, setCarriageNoteDescription] = useState(product.carriageNoteDescription ?? "");
 
   useEffect(() => setLengthM(product.lengthM ?? ""), [product.lengthM]);
   useEffect(() => setWidthM(product.widthM ?? ""), [product.widthM]);
   useEffect(() => setHeightM(product.heightM ?? ""), [product.heightM]);
+  useEffect(() => setCarriageNoteDescription(product.carriageNoteDescription ?? ""), [product.carriageNoteDescription]);
 
   return (
     <tr className="hover:bg-brand-50/60">
@@ -191,6 +207,19 @@ function ProductTableRow({
           checked={product.requiresAdr}
           onChange={(e) => onSave({ requiresAdr: e.target.checked })}
           className="rounded border-slate-300"
+        />
+      </td>
+      <td className="px-4 py-2">
+        <input
+          type="text"
+          value={carriageNoteDescription}
+          onChange={(e) => setCarriageNoteDescription(e.target.value)}
+          onBlur={() =>
+            carriageNoteDescription !== (product.carriageNoteDescription ?? "") &&
+            onSave({ carriageNoteDescription })
+          }
+          placeholder="Ej. material de construcción"
+          className="w-44 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
         />
       </td>
       <td className="px-4 py-2">

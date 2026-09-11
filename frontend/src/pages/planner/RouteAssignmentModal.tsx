@@ -5,6 +5,7 @@ import Modal from "@/components/Modal";
 import Field from "@/components/Field";
 import StatusBadge from "@/components/StatusBadge";
 import Chip from "@/components/Chip";
+import { viewDocumentPdf, downloadDocumentPdf } from "@/lib/document-pdf";
 
 // Hueco crítico encontrado por Raúl probando el Planificador: "Comparar
 // transportistas" (POST /optimization/:id/simulate) generaba candidatos con
@@ -237,7 +238,30 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   ` · ${Math.round(route.loadPlan.weightOccupancyPct * 100)}% peso / ${Math.round(route.loadPlan.palletOccupancyPct * 100)}% palés`}
               </p>
             </div>
-            <StatusBadge status={route.status} />
+            <div className="flex flex-col items-end gap-1.5">
+              <StatusBadge status={route.status} />
+              {/* Fase 8Q2: carta de porte en PDF -- "control de mercancía por
+                  carretera en modo virtual" pedido por Raúl. Disponible en
+                  cuanto la ruta tiene paradas, aunque todavía no tenga
+                  transportista/vehículo/conductor asignado (el documento
+                  simplemente muestra "—" en lo que falte). */}
+              {route.stops.length > 0 && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => viewDocumentPdf(`/routes/${routeId}/documents/carriage-note.pdf`)}
+                    className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                  >
+                    Ver carta de porte (PDF)
+                  </button>
+                  <button
+                    onClick={() => downloadDocumentPdf(`/routes/${routeId}/documents/carriage-note.pdf`, `carta-porte-${routeId?.slice(0, 8)}.pdf`)}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    Descargar
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {LOCKED_STATUSES.includes(route.status) && (

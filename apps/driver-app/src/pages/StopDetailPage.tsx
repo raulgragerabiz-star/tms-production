@@ -8,6 +8,7 @@ import PhotoCapture from "@/components/PhotoCapture";
 import StopMap from "@/components/StopMap";
 import Chip, { ChipColor } from "@/components/Chip";
 import bigmatLogo from "@/assets/bigmat-logo.png";
+import { viewDocumentPdf } from "@/lib/document-pdf";
 
 // Fase 8L: rediseño completo de la ficha de parada según la especificación
 // de Raúl (cabecera fija corporativa con nº de pedido, mapa "sticky" del
@@ -234,6 +235,27 @@ export default function StopDetailPage() {
       </header>
 
       <main className={`max-w-lg mx-auto px-4 pt-4 space-y-4 ${editableStage ? "pb-56" : "pb-6"}`}>
+        {/* Fase 8Q2: albarán de esta parada y carta de porte del viaje, en
+            PDF -- "control de mercancía por carretera en modo virtual"
+            pedido por Raúl. Se abren en el visor de PDF del propio móvil,
+            listos para enseñar en un control de carretera. */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => viewDocumentPdf(`/driver-app/stops/${id}/documents/delivery-note.pdf`)}
+            className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-brand-700 text-center"
+          >
+            📄 Albarán
+          </button>
+          {data?.shipment && (
+            <button
+              onClick={() => viewDocumentPdf(`/driver-app/shipments/${data.shipment!.id}/documents/carriage-note.pdf`)}
+              className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-brand-700 text-center"
+            >
+              🚚 Carta de porte
+            </button>
+          )}
+        </div>
+
         {/* Fase 8M -- fix: aviso visible si una acción (llegada, entrega,
             incidencia, nota) falla contra el backend -- antes no había
             ninguna señal y el botón correspondiente parecía "no responder". */}
