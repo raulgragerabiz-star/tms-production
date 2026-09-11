@@ -237,8 +237,8 @@ export async function processErpclaudImport(companyId: string, payload: Erpclaud
           const lineWeightKg =
             linea.pesoKg ??
             computeLineWeightKg(linea.unidad, linea.cantidad, {
-              grossWeightKg: Number(product.grossWeightKg),
-              fullPalletWeightKg: Number(product.fullPalletWeightKg),
+              grossWeightKg: product.grossWeightKg == null ? null : Number(product.grossWeightKg),
+              fullPalletWeightKg: product.fullPalletWeightKg == null ? null : Number(product.fullPalletWeightKg),
             });
 
           return {

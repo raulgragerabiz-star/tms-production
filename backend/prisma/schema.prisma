@@ -301,13 +301,38 @@ model DeliveryPoint {
 model Product {
   id                      String      @id @default(uuid())
   companyId               String      @map("company_id")
+  // Identificador universal de producto usado en todo el sistema (línea de
+  // pedido, ERP Claud, etc.). Fase 8R: a partir del rediseño del catálogo,
+  // este campo se rellena con la columna "Código EAN" de la plantilla real
+  // de Bigmat (ver product-master-parser.ts) -- el código EAN ES el sku,
+  // no dos campos distintos.
   sku                     String      @unique
   description             String
-  salesUnit               String      @map("sales_unit")
-  unitsPerPallet          Int         @map("units_per_pallet")
-  grossWeightKg           Decimal     @map("gross_weight_kg") @db.Decimal(12, 4)
+  // Fase 8R: código INTERNO de la empresa (columna "CODIGO" de la plantilla)
+  // -- deliberadamente distinto del EAN/sku: es la referencia propia de
+  // Bigmat, no el código de barras del fabricante. Es la clave que se usa
+  // para actualizar/crear al volver a subir el Excel del catálogo (ver
+  // product-master-import.service.ts).
+  internalCode            String?     @map("internal_code")
+  supplier                String?     @map("supplier")
+  // Fase 8R: ya no es obligatorio -- la plantilla real del catálogo no
+  // siempre trae la unidad de venta base ni el peso; un producto puede
+  // quedar con estos campos pendientes de completar a mano y seguir
+  // funcionando (los cálculos de peso/volumen ya tratan null como
+  // "desconocido", ver line-weight.ts).
+  salesUnit               String?     @map("sales_unit")
+  // Fase 8R: "Unidad de medida" de la plantilla -- distinta de salesUnit
+  // ("Unidad Medida Base"); en la plantilla real de Bigmat son dos columnas
+  // separadas aunque en la práctica suelan coincidir.
+  measurementUnit         String?     @map("measurement_unit")
+  unitsPerBox             Int?        @map("units_per_box")
+  unitsPerPallet          Int?        @map("units_per_pallet")
+  grossWeightKg           Decimal?    @map("gross_weight_kg") @db.Decimal(12, 4)
   netWeightKg             Decimal?    @map("net_weight_kg") @db.Decimal(12, 4)
-  fullPalletWeightKg      Decimal     @map("full_pallet_weight_kg") @db.Decimal(12, 4)
+  fullPalletWeightKg      Decimal?    @map("full_pallet_weight_kg") @db.Decimal(12, 4)
+  // Fase 8R: unidad en la que se expresan los pesos de este producto (p.ej.
+  // "kg") -- columna "Medida a Peso" de la plantilla. Informativo.
+  weightUnit              String?     @map("weight_unit")
   requiresCold            Boolean     @default(false) @map("requires_cold")
   // Fase 8Q: mercancía peligrosa que exige transporte ADR -- hasta ahora el
   // motor de auto-asignación ya tenía un multiplicador de penalización por
@@ -319,17 +344,38 @@ model Product {
   requiresAdr             Boolean     @default(false) @map("requires_adr")
   isReturnable            Boolean     @default(true) @map("is_returnable")
   carriageNoteDescription String?     @map("carriage_note_description")
-  // Objetivo 2: dimensiones del palé completo de este producto (misma
-  // granularidad que fullPalletWeightKg), para poder calcular volumen real
-  // ocupado por ruta y compararlo contra la capacidad del vehículo. Opcionales
-  // para no romper los productos ya sembrados sin estos datos rellenos.
+  // Fase 8R: medidas por nivel de empaquetado (cm, tal cual la plantilla real
+  // de Bigmat: "Fondo x Ancho x Alto"), independientes de lengthM/widthM/
+  // heightM (que siguen en metros y son las que realmente consume el motor
+  // de rutas/volumen -- ver recalculateLoadPlan en routes.routes.ts). Al
+  // guardar las medidas de Palet, product-master-import.service.ts y
+  // products.routes.ts derivan automáticamente lengthM/widthM/heightM
+  // (cm ÷ 100) para no tener que tocar el motor de optimización.
+  unitDepthCm             Decimal?    @map("unit_depth_cm") @db.Decimal(8, 2)
+  unitWidthCm             Decimal?    @map("unit_width_cm") @db.Decimal(8, 2)
+  unitHeightCm            Decimal?    @map("unit_height_cm") @db.Decimal(8, 2)
+  boxDepthCm              Decimal?    @map("box_depth_cm") @db.Decimal(8, 2)
+  boxWidthCm              Decimal?    @map("box_width_cm") @db.Decimal(8, 2)
+  boxHeightCm             Decimal?    @map("box_height_cm") @db.Decimal(8, 2)
+  palletDepthCm           Decimal?    @map("pallet_depth_cm") @db.Decimal(8, 2)
+  palletWidthCm           Decimal?    @map("pallet_width_cm") @db.Decimal(8, 2)
+  palletHeightCm          Decimal?    @map("pallet_height_cm") @db.Decimal(8, 2)
+  // Objetivo 2: dimensiones del palé completo en METROS -- ver nota arriba,
+  // se derivan automáticamente de palletDepthCm/palletWidthCm/palletHeightCm
+  // y son las que consume el cálculo real de volumen ocupado por ruta.
   lengthM                 Decimal?    @map("length_m") @db.Decimal(6, 2)
   widthM                  Decimal?    @map("width_m") @db.Decimal(6, 2)
   heightM                 Decimal?    @map("height_m") @db.Decimal(6, 2)
-  // Referencias del catálogo real (importación SURTIDO GETAFE): categoría
-  // (nomenclatura/familia), clasificación ABC de rotación y código de barras.
-  // Todo opcional -- productos sin estos datos (o creados a mano) siguen
-  // funcionando igual.
+  // Fase 8R: apilabilidad -- columna "Apilabilidad (sí/no, nº capas)" de la
+  // plantilla, partida en dos campos reales.
+  stackable               Boolean?    @map("stackable")
+  stackableLayers         Int?        @map("stackable_layers")
+  storageConditions       String?     @map("storage_conditions")
+  packagingType           String?     @map("packaging_type")
+  minOrderQtyB2c          Int?        @map("min_order_qty_b2c")
+  // Referencias del catálogo real: "Familia" del producto (nomenclatura),
+  // clasificación ABC de rotación y código de barras EAN. Todo opcional --
+  // productos sin estos datos (o creados a mano) siguen funcionando igual.
   category                String?     @map("category")
   abcClass                String?     @map("abc_class")
   ean                     String?     @map("ean")
@@ -340,6 +386,7 @@ model Product {
   orderLines              OrderLine[]
   company                 Company     @relation(fields: [companyId], references: [id])
 
+  @@index([companyId, internalCode])
   @@map("product")
 }
 

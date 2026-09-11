@@ -295,8 +295,8 @@ async function importOneOrder(
             quantity: line.quantity,
             unit: line.unit,
             lineWeightKg: computeLineWeightKg(line.unit, line.quantity, {
-              grossWeightKg: Number(product.grossWeightKg),
-              fullPalletWeightKg: Number(product.fullPalletWeightKg),
+              grossWeightKg: product.grossWeightKg == null ? null : Number(product.grossWeightKg),
+              fullPalletWeightKg: product.fullPalletWeightKg == null ? null : Number(product.fullPalletWeightKg),
             }),
           };
         }),

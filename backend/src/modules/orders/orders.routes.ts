@@ -300,8 +300,8 @@ ordersRouter.post(
               quantity: l.quantity,
               unit: l.unit,
               lineWeightKg: computeLineWeightKg(l.unit, l.quantity, {
-                grossWeightKg: Number(product.grossWeightKg),
-                fullPalletWeightKg: Number(product.fullPalletWeightKg),
+                grossWeightKg: product.grossWeightKg == null ? null : Number(product.grossWeightKg),
+                fullPalletWeightKg: product.fullPalletWeightKg == null ? null : Number(product.fullPalletWeightKg),
               }),
             };
           }),
