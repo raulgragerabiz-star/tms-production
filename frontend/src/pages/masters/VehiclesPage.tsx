@@ -505,6 +505,14 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                           createVehicleAndAssignMutation.mutate({ carrierId: d.carrierId, vehicleTypeId, plate, driverId: d.id })
                         }
                         onShowQr={() => setQrVehicleId(d.vehicle!.id)}
+                        // Fase 8Q (fix): la pestaña "Vehículos" de esta misma
+                        // página no se monta desde ningún sitio -- Raúl pidió
+                        // quitarla en Fase 8 (ver comentario en
+                        // CarrierFleetPage.tsx) -- así que la "Ficha" del
+                        // vehículo (MMA, ADR, grúa, plataforma, etc.) tiene
+                        // que abrirse desde aquí, igual que ya se hace con el
+                        // QR, en vez de desde una pestaña que nunca se ve.
+                        onEditVehicle={() => setEditingVehicleId(d.vehicle!.id)}
                         busy={assignVehicleToDriverMutation.isPending || createVehicleAndAssignMutation.isPending}
                       />
                     </td>
@@ -642,6 +650,7 @@ function DriverVehicleCell({
   onAssignExisting,
   onCreateAndAssign,
   onShowQr,
+  onEditVehicle,
   busy,
 }: {
   driver: DriverRow;
@@ -653,6 +662,7 @@ function DriverVehicleCell({
   onAssignExisting: (vehicleId: string) => void;
   onCreateAndAssign: (plate: string, vehicleTypeId: string) => void;
   onShowQr: () => void;
+  onEditVehicle: () => void;
   busy: boolean;
 }) {
   const [creatingNew, setCreatingNew] = useState(false);
@@ -666,6 +676,9 @@ function DriverVehicleCell({
       return (
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs font-semibold text-slate-700">{driver.vehicle.plate}</span>
+          <button onClick={onEditVehicle} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+            Ficha
+          </button>
           <button onClick={onShowQr} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
             QR
           </button>
