@@ -67,15 +67,18 @@ function formatHour(ms: number): string {
 export default function DispatchGantt({ routes, routeDateIso, selectedStopId, onSelectStop }: Props) {
   const [hoverStopId, setHoverStopId] = useState<string | null>(null);
 
+  // Fase 8P -- fix: en la Fase 8O el eje horario también se estiraba para
+  // encajar la hora REAL de entrega (`deliveredAt`). Con datos limpios esto
+  // apenas se nota, pero si una entrega se completa mucho más tarde de lo
+  // previsto (o, como en pruebas, un día distinto al de la ruta), el eje
+  // podía estirarse a más de 24h y la línea de tiempo se volvía ilegible
+  // (una franja larguísima con un único punto útil). El eje vuelve a
+  // calcularse solo a partir de las ETA, igual que antes de la Fase 8O; el
+  // marcador de hora real (más abajo) sigue dibujándose siempre en su
+  // posición real, pero `pct()` ya lo recorta (clamp) al borde del eje si
+  // cae fuera de rango, en vez de deformar la vista de todos los demás.
   const allEtaMs = useMemo(
-    () =>
-      routes.flatMap((r) => [
-        ...r.stops.filter((s) => s.eta).map((s) => new Date(s.eta as string).getTime()),
-        // Fase 8O: si una entrega real quedó fuera del rango que marcaban
-        // las ETA (p.ej. se retrasó más de lo previsto), el eje horario
-        // también tiene que estirarse para poder verla.
-        ...r.stops.filter((s) => s.deliveredAt).map((s) => new Date(s.deliveredAt as string).getTime()),
-      ]),
+    () => routes.flatMap((r) => r.stops.filter((s) => s.eta).map((s) => new Date(s.eta as string).getTime())),
     [routes]
   );
 
