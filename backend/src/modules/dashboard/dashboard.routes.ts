@@ -334,3 +334,286 @@ dashboardRouter.get(
     res.json({ items: ranking });
   })
 );
+
+// Fase 8S: rediseño de "Inicio" como panel general de operaciones (petición
+// de Raúl: "según accedes a la aplicación, un resumen global del estado
+// actualizado del sistema... datos, visibilidad, gráficos"). Un único
+// endpoint en vez de reutilizar /summary + /history + /incidents +
+// /carrier-ranking sueltos, porque el panel nuevo necesita combinaciones que
+// ninguno de esos calcula ya (envíos retrasados, desglose de estado de
+// entrega de hoy, ocupación real de flota/conductores, alertas de ITV/seguro)
+// -- y así la pantalla de Inicio hace una sola llamada, no cuatro.
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function endOfToday(): Date {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+dashboardRouter.get(
+  "/home",
+  asyncHandler(async (req, res) => {
+    const companyId = req.auth!.companyId;
+    const now = new Date();
+    const startToday = startOfToday();
+    const endToday = endOfToday();
+    const sevenDaysAgo = new Date(startToday);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+    const expiryThreshold = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const [
+      pendingOrders,
+      activeShipmentsRaw,
+      stopsToday,
+      todaysSettlementLines,
+      vehiclesTotal,
+      vehiclesInUse,
+      driversTotal,
+      driversOnShiftRaw,
+      shipments7d,
+      settlementLines7d,
+      openIncidents,
+      expiringVehicles,
+      recentShipmentsRaw,
+    ] = await Promise.all([
+      prisma.order.count({ where: { companyId, status: { in: ["received", "validated"] } } }),
+      // Envíos activos (cargados o circulando) + sus paradas pendientes/
+      // llegadas todavía sin completar, para poder saber cuántos de esos
+      // envíos llevan ya alguna parada con la ETA superada ("retrasados").
+      prisma.shipment.findMany({
+        where: { route: { companyId }, status: { in: ["loaded", "in_transit"] } },
+        select: {
+          id: true,
+          route: { select: { stops: { where: { status: { in: ["pending", "arrived"] } }, select: { eta: true } } } },
+        },
+      }),
+      // Paradas de las rutas de HOY, con su incidencia abierta si la tiene --
+      // base del desglose "Estados de Entrega" (en tránsito/entregado/
+      // retrasado/con incidencia).
+      prisma.routeStop.findMany({
+        where: { route: { companyId, routeDate: { gte: startToday, lte: endToday } } },
+        select: { status: true, eta: true, incidents: { where: { status: "open" }, select: { id: true } } },
+      }),
+      prisma.settlementLine.findMany({
+        where: { shipment: { route: { companyId }, finishedAt: { gte: startToday, lte: endToday } } },
+        select: { amount: true },
+      }),
+      prisma.vehicle.count({ where: { deletedAt: null, active: true, carrier: { companyId } } }),
+      // "En uso" = vinculado ahora mismo a un envío cargado o circulando.
+      prisma.vehicle.count({
+        where: { deletedAt: null, active: true, carrier: { companyId }, shipments: { some: { status: { in: ["loaded", "in_transit"] } } } },
+      }),
+      prisma.driver.count({ where: { active: true, carrier: { companyId } } }),
+      // Jornada abierta (endedAt nulo) = conductor de servicio ahora mismo.
+      prisma.driverShift.findMany({
+        where: { endedAt: null, driver: { carrier: { companyId } } },
+        select: { driverId: true },
+      }),
+      prisma.shipment.findMany({
+        where: { route: { companyId, routeDate: { gte: sevenDaysAgo } } },
+        select: { route: { select: { routeDate: true } } },
+      }),
+      prisma.settlementLine.findMany({
+        where: { shipment: { route: { companyId, routeDate: { gte: sevenDaysAgo } } } },
+        select: { amount: true, shipment: { select: { carrierId: true, carrier: { select: { legalName: true } } } } },
+      }),
+      prisma.incident.findMany({
+        where: { shipment: { route: { companyId } }, status: "open" },
+        include: {
+          shipment: { select: { carrier: { select: { legalName: true } }, vehicle: { select: { plate: true } } } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+      // Fase 8Q: ITV/seguro a punto de caducar (<=30 días) o ya caducado --
+      // mismo criterio de "alerta crítica de mantenimiento" del panel de
+      // referencia de Raúl ("Mantenimiento Urgente Camión").
+      prisma.vehicle.findMany({
+        where: {
+          deletedAt: null,
+          active: true,
+          carrier: { companyId },
+          OR: [
+            { itvExpiry: { lte: expiryThreshold } },
+            { insuranceExpiry: { lte: expiryThreshold } },
+          ],
+        },
+        select: { id: true, plate: true, itvExpiry: true, insuranceExpiry: true },
+        take: 5,
+      }),
+      prisma.shipment.findMany({
+        where: { route: { companyId } },
+        include: {
+          route: {
+            select: {
+              routeDate: true,
+              warehouse: { select: { name: true } },
+              stops: {
+                orderBy: { sequence: "asc" },
+                select: {
+                  status: true,
+                  eta: true,
+                  order: { select: { deliveryPoint: { select: { city: true } } } },
+                },
+              },
+            },
+          },
+          carrier: { select: { legalName: true } },
+          vehicle: { select: { plate: true } },
+        },
+        orderBy: { route: { routeDate: "desc" } },
+        take: 8,
+      }),
+    ]);
+
+    // ---- KPIs ----
+    const activeShipments = activeShipmentsRaw.length;
+    const delayedShipments = activeShipmentsRaw.filter((s) => s.route.stops.some((st) => st.eta && st.eta < now)).length;
+    const costToday = todaysSettlementLines.reduce((acc, l) => acc + Number(l.amount), 0);
+
+    let entregado = 0;
+    let enTransito = 0;
+    let retrasado = 0;
+    let problemas = 0;
+    for (const stop of stopsToday) {
+      if (stop.incidents.length > 0) {
+        problemas += 1;
+      } else if (stop.status === "completed") {
+        entregado += 1;
+      } else if (stop.status === "failed") {
+        problemas += 1;
+      } else if (stop.eta && stop.eta < now) {
+        retrasado += 1;
+      } else {
+        enTransito += 1;
+      }
+    }
+    const fleetEfficiencyPct = stopsToday.length > 0 ? Math.round((entregado / stopsToday.length) * 1000) / 10 : 100;
+
+    // ---- Volumen semanal (últimos 7 días, incluido hoy) ----
+    const dayBuckets = new Map<string, number>();
+    for (let i = 0; i < 7; i += 1) {
+      const d = new Date(sevenDaysAgo);
+      d.setDate(d.getDate() + i);
+      dayBuckets.set(isoDay(d), 0);
+    }
+    for (const s of shipments7d) {
+      const key = isoDay(s.route.routeDate);
+      if (dayBuckets.has(key)) dayBuckets.set(key, (dayBuckets.get(key) ?? 0) + 1);
+    }
+    const weeklyVolume = [...dayBuckets.entries()].map(([date, shipments]) => ({ date, shipments }));
+
+    // ---- Coste por transportista (últimos 7 días) ----
+    const costByCarrierMap = new Map<string, { carrierId: string; legalName: string; costReal: number }>();
+    for (const line of settlementLines7d) {
+      const carrierId = line.shipment.carrierId;
+      const entry = costByCarrierMap.get(carrierId) ?? { carrierId, legalName: line.shipment.carrier.legalName, costReal: 0 };
+      entry.costReal += Number(line.amount);
+      costByCarrierMap.set(carrierId, entry);
+    }
+    const costByCarrier = [...costByCarrierMap.values()]
+      .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100 }))
+      .sort((a, b) => b.costReal - a.costReal)
+      .slice(0, 6);
+
+    // ---- Alertas críticas: incidencias abiertas + vehículos con ITV/seguro
+    // a punto de caducar, mezcladas y recortadas a las 6 más relevantes. ----
+    const incidentTypeLabel: Record<string, string> = {
+      delay: "Retraso en envío",
+      damage: "Mercancía dañada",
+      refused: "Entrega rechazada",
+      access_issue: "Problema de acceso",
+      other: "Incidencia",
+    };
+    const incidentAlerts = openIncidents.map((inc) => ({
+      id: `incident-${inc.id}`,
+      severity: "urgent" as const,
+      title: incidentTypeLabel[inc.incidentType] ?? "Incidencia",
+      subtitle: `${inc.shipment.carrier?.legalName ?? "Transportista"} · ${inc.shipment.vehicle?.plate ?? "sin vehículo"}`,
+      at: inc.createdAt,
+    }));
+    // Un vehículo puede aparecer en `expiringVehicles` porque su ITV está
+    // próxima, porque lo está su seguro, o ambas a la vez -- se genera una
+    // alerta por cada documento que de verdad esté dentro del umbral (antes
+    // se etiquetaba siempre como "ITV" con solo mirar si itvExpiry no era
+    // nulo, aunque lo que estuviera realmente a punto de caducar fuera el
+    // seguro).
+    const vehicleAlerts = expiringVehicles.flatMap((v) => {
+      const alerts: { id: string; severity: "warning"; title: string; subtitle: string; at: Date }[] = [];
+      if (v.itvExpiry != null && v.itvExpiry <= expiryThreshold) {
+        alerts.push({
+          id: `vehicle-itv-${v.id}`,
+          severity: "warning",
+          title: `ITV ${v.itvExpiry < now ? "caducada" : "a punto de caducar"} · ${v.plate}`,
+          subtitle: new Date(v.itvExpiry).toLocaleDateString("es-ES"),
+          at: v.itvExpiry,
+        });
+      }
+      if (v.insuranceExpiry != null && v.insuranceExpiry <= expiryThreshold) {
+        alerts.push({
+          id: `vehicle-insurance-${v.id}`,
+          severity: "warning",
+          title: `Seguro ${v.insuranceExpiry < now ? "caducado" : "a punto de caducar"} · ${v.plate}`,
+          subtitle: new Date(v.insuranceExpiry).toLocaleDateString("es-ES"),
+          at: v.insuranceExpiry,
+        });
+      }
+      return alerts;
+    });
+    const criticalAlerts = [...incidentAlerts, ...vehicleAlerts]
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+      .slice(0, 6)
+      .map(({ id, severity, title, subtitle }) => ({ id, severity, title, subtitle }));
+
+    // ---- Envíos recientes ----
+    const recentShipments = recentShipmentsRaw.map((s) => {
+      const stops = s.route.stops;
+      const lastCity = [...stops].reverse().find((st) => st.order.deliveryPoint.city)?.order.deliveryPoint.city;
+      const pendingStop = stops.find((st) => st.status === "pending" || st.status === "arrived");
+      return {
+        id: s.id,
+        status: s.status,
+        route: `${s.route.warehouse.name} → ${lastCity ?? (stops.length > 1 ? `${stops.length} paradas` : "destino único")}`,
+        carrierName: s.carrier.legalName,
+        vehiclePlate: s.vehicle.plate,
+        routeDate: s.route.routeDate,
+        eta: pendingStop?.eta ?? stops[stops.length - 1]?.eta ?? null,
+      };
+    });
+
+    res.json({
+      kpis: {
+        activeShipments,
+        delayedShipments,
+        pendingOrders,
+        costToday: Math.round(costToday * 100) / 100,
+        fleetEfficiencyPct,
+      },
+      weeklyVolume,
+      deliveryStatus: [
+        { key: "en_transito", label: "En tránsito", count: enTransito },
+        { key: "entregado", label: "Entregado", count: entregado },
+        { key: "retrasado", label: "Retrasado", count: retrasado },
+        { key: "problemas", label: "Con incidencia", count: problemas },
+      ],
+      recentShipments,
+      fleetUtilization: {
+        vehiclesTotal,
+        vehiclesInUse,
+        vehiclesAvailable: Math.max(0, vehiclesTotal - vehiclesInUse),
+        driversTotal,
+        driversOnShift: new Set(driversOnShiftRaw.map((d) => d.driverId)).size,
+        driversAvailable: Math.max(0, driversTotal - new Set(driversOnShiftRaw.map((d) => d.driverId)).size),
+      },
+      costByCarrier,
+      criticalAlerts,
+    });
+  })
+);

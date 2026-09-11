@@ -6,6 +6,11 @@ const colorMap: Record<string, string> = {
   dispatched: "bg-amber-100 text-amber-700",
   in_transit: "bg-blue-100 text-blue-700",
   delivered: "bg-emerald-100 text-emerald-700",
+  // Estados de envío (Shipment.status) que todavía no tenían color propio --
+  // Fase 8S (rediseño de Inicio), tabla de "Envíos recientes".
+  programmed: "bg-slate-100 text-slate-700",
+  loaded: "bg-amber-100 text-amber-700",
+  finished: "bg-emerald-100 text-emerald-700",
   incident: "bg-red-100 text-red-700",
   cancelled: "bg-slate-200 text-slate-500",
   draft: "bg-slate-100 text-slate-700",
