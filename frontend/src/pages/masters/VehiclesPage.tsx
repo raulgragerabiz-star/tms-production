@@ -6,14 +6,38 @@ import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewDriverModal from "@/pages/masters/DriversModal";
 
+// Fase 8Q: características que faltaban de la ficha del vehículo (MMA, peso
+// útil, etiqueta ambiental, radio de acción, equipamiento especial) --
+// petición de Raúl para "completar la BD de vehículos" y que dejen de ser
+// datos sueltos, conectándolas al motor de compatibilidad (ver
+// optimization.routes.ts en el backend). Todos opcionales/con valor por
+// defecto para no romper los vehículos ya dados de alta.
+type EmissionsLabel = "sin_etiqueta" | "b" | "c" | "eco" | "cero_emisiones";
+
 interface VehicleRow {
   id: string;
   plate: string;
   trailerPlate: string | null;
+  workingTemperature: "ambient" | "refrigerated" | "frozen" | "mixed";
+  mmaKg: string | null;
+  usefulWeightKg: string | null;
+  emissionsLabel: EmissionsLabel | null;
+  actionRadiusKm: string | null;
+  hasAdr: boolean;
+  hasCrane: boolean;
+  hasLiftgate: boolean;
   vehicleType: { name: string; maxWeightKg: string; maxPallets: number; allowsExceedingPallets: boolean };
   carrier: { legalName: string };
   active: boolean;
 }
+
+const emissionsLabelOptions: { value: EmissionsLabel; label: string }[] = [
+  { value: "sin_etiqueta", label: "Sin distintivo" },
+  { value: "b", label: "B" },
+  { value: "c", label: "C" },
+  { value: "eco", label: "ECO" },
+  { value: "cero_emisiones", label: "0 emisiones" },
+];
 
 interface DriverRow {
   id: string;
@@ -28,6 +52,12 @@ interface DriverRow {
   // pasar por una pestaña "Vehículos" aparte (ver comentario en
   // vehicles.routes.ts GET /drivers).
   vehicle: { id: string; plate: string } | null;
+  // Fase 8Q: horario laboral PROGRAMADO/habitual del conductor ("HH:mm"),
+  // distinto de `maxRouteDurationHours` (tope de duración total de una
+  // ruta, ya existente en Warehouse/Carrier) -- ver comentario en
+  // Driver.usualShiftStartTime/EndTime en schema.prisma.
+  usualShiftStartTime: string | null;
+  usualShiftEndTime: string | null;
 }
 
 // QR de conductor + jornada: turnos abiertos ahora mismo, para que despacho
@@ -63,6 +93,35 @@ interface Props {
   activeTab?: "vehicles" | "drivers" | "types";
 }
 
+// Fase 8Q: aviso de "jornada más larga de lo habitual" -- ayuda visual para
+// detectar posibles excesos de tacógrafo, NUNCA un cálculo legal exacto de
+// la normativa de tiempos de conducción/descanso (eso exigiría datos que
+// este TMS no registra, como pausas o kilometraje real). Compara la
+// duración transcurrida de la jornada REAL abierta (DriverShift.startedAt)
+// contra la duración del horario habitual configurado para el conductor. Si
+// el conductor no tiene horario habitual configurado, no se muestra ningún
+// aviso -- mismo criterio permisivo que el resto de campos opcionales.
+function shiftExceedsUsualHours(
+  startedAt: string,
+  usualShiftStartTime: string | null,
+  usualShiftEndTime: string | null
+): boolean {
+  if (!usualShiftStartTime || !usualShiftEndTime) return false;
+
+  const toMinutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const startMin = toMinutes(usualShiftStartTime);
+  const endMin = toMinutes(usualShiftEndTime);
+  // Turno habitual que cruza medianoche (p.ej. 22:00-06:00): duración en
+  // minutos "envuelta" sobre 24h.
+  const usualDurationMin = endMin > startMin ? endMin - startMin : 24 * 60 - startMin + endMin;
+
+  const elapsedMin = (Date.now() - new Date(startedAt).getTime()) / 60000;
+  return elapsedMin > usualDurationMin;
+}
+
 export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   const [internalTab, setInternalTab] = useState<"vehicles" | "drivers" | "types">("vehicles");
   const tab = embedded && activeTab ? activeTab : internalTab;
@@ -72,6 +131,13 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   // Fase 8j: reasignar/asignar el vehículo de un conductor directamente
   // desde su fila en "Conductores" -- ver comentario en DriverVehicleCell.
   const [assigningDriverId, setAssigningDriverId] = useState<string | null>(null);
+  // Fase 8Q: edición de la ficha completa del vehículo (MMA, peso útil,
+  // etiqueta ambiental, radio de acción, equipamiento) y del conductor
+  // (datos personales + horario laboral habitual) -- hasta ahora ninguno de
+  // los dos se podía editar una vez creado, salvo matrícula/tipo (vehículo)
+  // o activo/inactivo (conductor).
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
 
@@ -188,6 +254,55 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
     onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo dar de alta el vehículo"),
   });
 
+  // Fase 8Q: edición de la ficha completa del vehículo -- hasta ahora solo se
+  // podía fijar matrícula/tipo al crearlo, sin forma de completar el resto
+  // de características (MMA, peso útil, etiqueta ambiental, radio de acción,
+  // temperatura de trabajo, equipamiento) desde ningún sitio.
+  const updateVehicleMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      workingTemperature?: string;
+      mmaKg?: number | null;
+      usefulWeightKg?: number | null;
+      emissionsLabel?: string | null;
+      actionRadiusKm?: number | null;
+      hasAdr?: boolean;
+      hasCrane?: boolean;
+      hasLiftgate?: boolean;
+    }) => {
+      const { id, ...rest } = payload;
+      return (await api.put(`/vehicles/${id}`, rest)).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+      showSuccess("Vehículo actualizado correctamente");
+      setEditingVehicleId(null);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo guardar el vehículo"),
+  });
+
+  // Fase 8Q: edición general del conductor (antes solo existía dar de alta o
+  // activar/desactivar) -- datos personales + horario laboral habitual.
+  const updateDriverMutation = useMutation({
+    mutationFn: async (payload: {
+      id: string;
+      fullName?: string;
+      taxId?: string;
+      phone?: string;
+      usualShiftStartTime?: string | null;
+      usualShiftEndTime?: string | null;
+    }) => {
+      const { id, ...rest } = payload;
+      return (await api.patch(`/vehicles/drivers/${id}`, rest)).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["drivers"] });
+      showSuccess("Conductor actualizado correctamente");
+      setEditingDriverId(null);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo guardar el conductor"),
+  });
+
   // Fase 8j: "Desactivar/Reactivar" y "Eliminar" de verdad para conductores --
   // hasta ahora un conductor creado por error no se podía ni desactivar ni
   // quitar de la lista. Mismo patrón ya usado en Usuarios (UsersPage.tsx).
@@ -278,12 +393,13 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                 <th className="text-left px-4 py-3">Estado</th>
                 <th className="text-left px-4 py-3">Conductor</th>
                 <th className="text-left px-4 py-3">QR vehículo</th>
+                <th className="text-left px-4 py-3">Ficha</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {vehiclesQuery.isLoading && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={10} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {vehiclesQuery.data?.items.map((v) => (
@@ -327,6 +443,11 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                       Ver / generar QR
                     </button>
                   </td>
+                  <td className="px-4 py-3">
+                    <button onClick={() => setEditingVehicleId(v.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
+                      Editar ficha
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -345,6 +466,9 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                 <th className="text-left px-4 py-3">Transportista</th>
                 <th className="text-left px-4 py-3">Vehículo</th>
                 <th className="text-left px-4 py-3">Estado</th>
+                {/* Fase 8Q: horario laboral habitual del conductor -- ver
+                    comentario en Driver.usualShiftStartTime/EndTime. */}
+                <th className="text-left px-4 py-3">Horario habitual</th>
                 <th className="text-left px-4 py-3">Jornada</th>
                 <th className="text-left px-4 py-3">Acción</th>
               </tr>
@@ -352,12 +476,12 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
             <tbody className="divide-y divide-slate-100">
               {driversQuery.isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {!driversQuery.isLoading && driversQuery.data?.items.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-400">Sin conductores registrados.</td>
                 </tr>
               )}
               {driversQuery.data?.items.map((d) => {
@@ -387,19 +511,35 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                     <td className="px-4 py-3">
                       <Chip color={d.active ? "teal" : "slate"}>{d.active ? "Activo" : "Baja"}</Chip>
                     </td>
+                    <td className="px-4 py-3 text-xs text-slate-500 font-mono">
+                      {d.usualShiftStartTime && d.usualShiftEndTime
+                        ? `${d.usualShiftStartTime} – ${d.usualShiftEndTime}`
+                        : "—"}
+                    </td>
                     <td className="px-4 py-3">
                       {shift ? (
-                        <Chip color="teal">
-                          {`En turno desde ${new Date(shift.startedAt).toLocaleTimeString("es-ES", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}${shift.vehicle?.plate ? ` · ${shift.vehicle.plate}` : ""}`}
-                        </Chip>
+                        <div className="flex flex-col gap-1">
+                          <Chip color="teal">
+                            {`En turno desde ${new Date(shift.startedAt).toLocaleTimeString("es-ES", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}${shift.vehicle?.plate ? ` · ${shift.vehicle.plate}` : ""}`}
+                          </Chip>
+                          {shiftExceedsUsualHours(shift.startedAt, d.usualShiftStartTime, d.usualShiftEndTime) && (
+                            <Chip color="amber">Jornada más larga de lo habitual</Chip>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-xs text-slate-400">Sin jornada abierta</span>
                       )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
+                      <button
+                        onClick={() => setEditingDriverId(d.id)}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3"
+                      >
+                        Editar
+                      </button>
                       <button
                         onClick={() => toggleDriverActiveMutation.mutate({ id: d.id, active: !d.active })}
                         className="text-xs text-red-500 hover:text-red-600 font-medium mr-3"
@@ -451,6 +591,24 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
       )}
 
       <NewDriverModal open={driverModalOpen} onClose={() => setDriverModalOpen(false)} onSuccess={showSuccess} onError={showError} />
+
+      {editingVehicleId && (
+        <VehicleEditModal
+          vehicle={vehiclesQuery.data?.items.find((v) => v.id === editingVehicleId) ?? null}
+          saving={updateVehicleMutation.isPending}
+          onClose={() => setEditingVehicleId(null)}
+          onSave={(patch) => updateVehicleMutation.mutate({ id: editingVehicleId, ...patch })}
+        />
+      )}
+
+      {editingDriverId && (
+        <DriverEditModal
+          driver={driversQuery.data?.items.find((d) => d.id === editingDriverId) ?? null}
+          saving={updateDriverMutation.isPending}
+          onClose={() => setEditingDriverId(null)}
+          onSave={(patch) => updateDriverMutation.mutate({ id: editingDriverId, ...patch })}
+        />
+      )}
 
       {qrVehicleId && (
         <VehicleQrModal
@@ -661,6 +819,277 @@ function VehicleQrModal({
           </button>
           <button onClick={onClose} className="text-sm text-slate-500 px-4 py-2">
             Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const editInputCls =
+  "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
+
+// Fase 8Q: "completar la BD de vehículos" (petición de Raúl) -- hasta ahora
+// solo se podían fijar matrícula y tipo al dar de alta un vehículo, sin
+// forma de editar el resto de su ficha. Formulario único con las
+// características nuevas; matrícula/transportista/tipo se muestran como
+// referencia (de solo lectura aquí) porque cambiarlos tiene implicaciones
+// que no forman parte de este formulario (reasignación de transportista,
+// etc.) y ya se gestionan desde otros flujos existentes.
+function VehicleEditModal({
+  vehicle,
+  saving,
+  onClose,
+  onSave,
+}: {
+  vehicle: VehicleRow | null;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (patch: {
+    workingTemperature?: string;
+    mmaKg?: number | null;
+    usefulWeightKg?: number | null;
+    emissionsLabel?: string | null;
+    actionRadiusKm?: number | null;
+    hasAdr?: boolean;
+    hasCrane?: boolean;
+    hasLiftgate?: boolean;
+  }) => void;
+}) {
+  const [workingTemperature, setWorkingTemperature] = useState<string>(vehicle?.workingTemperature ?? "ambient");
+  const [mmaKg, setMmaKg] = useState(vehicle?.mmaKg ?? "");
+  const [usefulWeightKg, setUsefulWeightKg] = useState(vehicle?.usefulWeightKg ?? "");
+  const [emissionsLabel, setEmissionsLabel] = useState<EmissionsLabel | "">(vehicle?.emissionsLabel ?? "");
+  const [actionRadiusKm, setActionRadiusKm] = useState(vehicle?.actionRadiusKm ?? "");
+  const [hasAdr, setHasAdr] = useState(vehicle?.hasAdr ?? false);
+  const [hasCrane, setHasCrane] = useState(vehicle?.hasCrane ?? false);
+  const [hasLiftgate, setHasLiftgate] = useState(vehicle?.hasLiftgate ?? false);
+
+  if (!vehicle) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">Ficha del vehículo {vehicle.plate}</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          {vehicle.carrier.legalName} · {vehicle.vehicleType.name}
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Temperatura de trabajo</label>
+            <select className={editInputCls} value={workingTemperature} onChange={(e) => setWorkingTemperature(e.target.value)}>
+              <option value="ambient">Ambiente</option>
+              <option value="refrigerated">Refrigerado</option>
+              <option value="frozen">Congelado</option>
+              <option value="mixed">Mixto</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">MMA (kg)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={editInputCls}
+                value={mmaKg}
+                onChange={(e) => setMmaKg(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Peso útil (kg)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={editInputCls}
+                value={usefulWeightKg}
+                onChange={(e) => setUsefulWeightKg(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Etiqueta ambiental</label>
+              <select
+                className={editInputCls}
+                value={emissionsLabel}
+                onChange={(e) => setEmissionsLabel(e.target.value as EmissionsLabel | "")}
+              >
+                <option value="">Sin especificar</option>
+                {emissionsLabelOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Radio de acción (km)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                className={editInputCls}
+                value={actionRadiusKm}
+                onChange={(e) => setActionRadiusKm(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Equipamiento especial</label>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input type="checkbox" checked={hasAdr} onChange={(e) => setHasAdr(e.target.checked)} className="rounded border-slate-300" />
+                ADR
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={hasCrane}
+                  onChange={(e) => setHasCrane(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Grúa
+              </label>
+              <label className="flex items-center gap-1.5 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={hasLiftgate}
+                  onChange={(e) => setHasLiftgate(e.target.checked)}
+                  className="rounded border-slate-300"
+                />
+                Plataforma elevadora
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancelar
+          </button>
+          <button
+            disabled={saving}
+            onClick={() =>
+              onSave({
+                workingTemperature,
+                mmaKg: mmaKg === "" ? null : Number(mmaKg),
+                usefulWeightKg: usefulWeightKg === "" ? null : Number(usefulWeightKg),
+                emissionsLabel: emissionsLabel === "" ? null : emissionsLabel,
+                actionRadiusKm: actionRadiusKm === "" ? null : Number(actionRadiusKm),
+                hasAdr,
+                hasCrane,
+                hasLiftgate,
+              })
+            }
+            className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50"
+          >
+            {saving ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Fase 8Q: edición general del conductor -- hasta ahora solo existía dar de
+// alta o activar/desactivar (ver comentario en el nuevo endpoint PATCH
+// /drivers/:id en vehicles.routes.ts). Incluye el horario laboral habitual,
+// que el frontend usa para avisar de jornadas más largas de lo normal (ver
+// shiftExceedsUsualHours).
+function DriverEditModal({
+  driver,
+  saving,
+  onClose,
+  onSave,
+}: {
+  driver: DriverRow | null;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (patch: {
+    fullName?: string;
+    taxId?: string;
+    phone?: string;
+    usualShiftStartTime?: string | null;
+    usualShiftEndTime?: string | null;
+  }) => void;
+}) {
+  const [fullName, setFullName] = useState(driver?.fullName ?? "");
+  const [taxId, setTaxId] = useState(driver?.taxId ?? "");
+  const [phone, setPhone] = useState(driver?.phone ?? "");
+  const [usualShiftStartTime, setUsualShiftStartTime] = useState(driver?.usualShiftStartTime ?? "");
+  const [usualShiftEndTime, setUsualShiftEndTime] = useState(driver?.usualShiftEndTime ?? "");
+
+  if (!driver) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">Editar conductor</h3>
+        <p className="text-xs text-slate-500 mb-4">{driver.carrier.legalName}</p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">Nombre completo</label>
+            <input className={editInputCls} value={fullName} onChange={(e) => setFullName(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">NIF</label>
+              <input className={editInputCls} value={taxId} onChange={(e) => setTaxId(e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Teléfono</label>
+              <input className={editInputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1.5">Horario laboral habitual</label>
+            <p className="text-[11px] text-slate-400 mb-1.5">
+              Turno habitual de este conductor -- se usa solo para avisar si una jornada real se alarga más de lo
+              normal (posible exceso de tacógrafo). No limita ni bloquea ninguna ruta.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <input
+                type="time"
+                className={editInputCls}
+                value={usualShiftStartTime}
+                onChange={(e) => setUsualShiftStartTime(e.target.value)}
+              />
+              <input
+                type="time"
+                className={editInputCls}
+                value={usualShiftEndTime}
+                onChange={(e) => setUsualShiftEndTime(e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">
+            Cancelar
+          </button>
+          <button
+            disabled={saving || !fullName.trim() || !taxId.trim()}
+            onClick={() =>
+              onSave({
+                fullName: fullName.trim(),
+                taxId: taxId.trim(),
+                phone: phone.trim() || undefined,
+                usualShiftStartTime: usualShiftStartTime || null,
+                usualShiftEndTime: usualShiftEndTime || null,
+              })
+            }
+            className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-700 text-white font-medium disabled:opacity-50"
+          >
+            {saving ? "Guardando…" : "Guardar"}
           </button>
         </div>
       </div>

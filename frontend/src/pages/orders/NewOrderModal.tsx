@@ -44,6 +44,9 @@ interface LineDraft {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
+// Los 4 segmentos reales (antes solo "Paletería"/"Camión completo", 2 valores
+// que ya no existen en el enum de la base de datos). "" = dejar que el
+// backend clasifique automáticamente por peso/palés al crear el pedido.
 const serviceTypeOptions = [
   { value: "", label: "Automático (por peso/palés)" },
   { value: "paqueteria", label: "Paquetería" },
@@ -63,6 +66,12 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
   const [serviceType, setServiceType] = useState<"" | "paqueteria" | "paleteria" | "paleteria_pesada" | "gran_volumen">("");
   const [requestedDeliveryDate, setRequestedDeliveryDate] = useState("");
   const [notes, setNotes] = useState("");
+  // Fase 8Q: necesidad de equipamiento especial en el vehículo para esta
+  // entrega -- ver comentario en Order.requiresCrane/requiresLiftgate en
+  // schema.prisma. El motor de compatibilidad exige entonces un vehículo
+  // con ese equipamiento (ver optimization.routes.ts).
+  const [requiresCrane, setRequiresCrane] = useState(false);
+  const [requiresLiftgate, setRequiresLiftgate] = useState(false);
   const [lines, setLines] = useState<LineDraft[]>([{ productId: "", quantity: "1", unit: "UD" }]);
 
   const customersQuery = useQuery({
@@ -100,6 +109,8 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
         serviceType: serviceType || undefined,
         requestedDeliveryDate,
         notes: notes || undefined,
+        requiresCrane,
+        requiresLiftgate,
         lines: lines
           .filter((l) => l.productId && Number(l.quantity) > 0)
           .map((l) => ({ productId: l.productId, quantity: Number(l.quantity), unit: l.unit })),
@@ -125,6 +136,8 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
     setServiceType("");
     setRequestedDeliveryDate("");
     setNotes("");
+    setRequiresCrane(false);
+    setRequiresLiftgate(false);
     setLines([{ productId: "", quantity: "1", unit: "UD" }]);
     onClose();
   }
@@ -243,6 +256,29 @@ export default function NewOrderModal({ open, onClose, onSuccess, onError }: Pro
 
         <Field label="Observaciones" hint="Instrucciones de entrega en texto libre, ej. horario límite">
           <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </Field>
+
+        <Field label="Equipamiento necesario en el vehículo">
+          <div className="flex gap-4">
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={requiresCrane}
+                onChange={(e) => setRequiresCrane(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              Requiere grúa
+            </label>
+            <label className="flex items-center gap-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={requiresLiftgate}
+                onChange={(e) => setRequiresLiftgate(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              Requiere plataforma elevadora
+            </label>
+          </div>
         </Field>
 
         <div>

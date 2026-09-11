@@ -15,6 +15,11 @@ const productSchema = z.object({
   netWeightKg: z.number().positive().optional(),
   fullPalletWeightKg: z.number().positive(),
   requiresCold: z.boolean().optional(),
+  // Fase 8Q: mercancía ADR -- ver comentario en Product.requiresAdr en
+  // schema.prisma. Se usa ahora como restricción real en el motor de
+  // compatibilidad (optimization.routes.ts) y en la puntuación de
+  // auto-asignación (auto-optimization.orchestrator.ts).
+  requiresAdr: z.boolean().optional(),
   isReturnable: z.boolean().optional(),
   carriageNoteDescription: z.string().optional(),
   // Objetivo 2: dimensiones del palé completo, para calcular volumen real
@@ -73,7 +78,10 @@ productsRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = productSchema.parse(req.body);
-    const product = await prisma.product.create({ data: { ...data, companyId: req.auth!.companyId } });
+    // Fase 8Q: `as any` -- `requiresAdr` todavía no está en el Prisma Client
+    // de este sandbox (sin red para regenerarlo); en el entorno real, tras
+    // `npx prisma generate`, este campo queda tipado sin necesidad del cast.
+    const product = await prisma.product.create({ data: { ...data, companyId: req.auth!.companyId } as any });
     res.status(201).json(product);
   })
 );
@@ -86,7 +94,7 @@ productsRouter.put(
       where: { id: req.params.id, companyId: req.auth!.companyId },
     });
     if (!product) throw HttpError.notFound("Producto no encontrado");
-    const updated = await prisma.product.update({ where: { id: product.id }, data });
+    const updated = await prisma.product.update({ where: { id: product.id }, data: data as any });
     res.json(updated);
   })
 );

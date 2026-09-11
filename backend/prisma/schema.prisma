@@ -292,6 +292,14 @@ model Product {
   netWeightKg             Decimal?    @map("net_weight_kg") @db.Decimal(12, 4)
   fullPalletWeightKg      Decimal     @map("full_pallet_weight_kg") @db.Decimal(12, 4)
   requiresCold            Boolean     @default(false) @map("requires_cold")
+  // Fase 8Q: mercancía peligrosa que exige transporte ADR -- hasta ahora el
+  // motor de auto-asignación ya tenía un multiplicador de penalización por
+  // "requiresAdr" en OrderContext, pero estaba SIEMPRE en false porque no
+  // existía ningún campo real de donde tomarlo (ver comentario retirado en
+  // auto-optimization.orchestrator.ts). Con este campo, un producto puede
+  // marcarse como ADR y el motor de compatibilidad exige entonces un
+  // vehículo con `hasAdr = true` (ver optimization.routes.ts).
+  requiresAdr             Boolean     @default(false) @map("requires_adr")
   isReturnable            Boolean     @default(true) @map("is_returnable")
   carriageNoteDescription String?     @map("carriage_note_description")
   // Objetivo 2: dimensiones del palé completo de este producto (misma
@@ -392,6 +400,24 @@ model Vehicle {
   trailerPlate       String?               @map("trailer_plate")
   workingTemperature TemperatureCapability @default(ambient) @map("working_temperature")
   fuelType           String?               @map("fuel_type")
+  // Fase 8Q: características que faltaban de la ficha del vehículo (pedido
+  // explícito de Raúl -- "completar la BD de vehículos"): MMA y peso útil
+  // (masa máxima autorizada / carga útil real, tal cual figuran en la
+  // tarjeta de inspección técnica), etiqueta ambiental DGT, radio de acción
+  // (autonomía en km sin repostar/recargar) y equipamiento especial (ADR,
+  // grúa, plataforma elevadora). El frigorífico NO se duplica aquí -- ya
+  // estaba cubierto por `workingTemperature` (refrigerated/frozen/mixed).
+  // Todo opcional/con default seguro para no exigir rellenar nada en los
+  // vehículos ya dados de alta. A diferencia de antes, estos campos ya NO
+  // son solo datos sueltos: se usan como restricciones duras reales en el
+  // motor de compatibilidad de auto-asignación (ver optimization.routes.ts).
+  mmaKg              Decimal?              @map("mma_kg") @db.Decimal(10, 2)
+  usefulWeightKg     Decimal?              @map("useful_weight_kg") @db.Decimal(10, 2)
+  emissionsLabel     EmissionsLabel?       @map("emissions_label")
+  actionRadiusKm     Decimal?              @map("action_radius_km") @db.Decimal(8, 2)
+  hasAdr             Boolean               @default(false) @map("has_adr")
+  hasCrane           Boolean               @default(false) @map("has_crane")
+  hasLiftgate        Boolean               @default(false) @map("has_liftgate")
   itvExpiry          DateTime?             @map("itv_expiry")
   insuranceExpiry    DateTime?             @map("insurance_expiry")
   active             Boolean               @default(true)
@@ -417,6 +443,17 @@ model Driver {
   fullName           String          @map("full_name")
   taxId              String          @unique @map("tax_id")
   phone              String?
+  // Fase 8Q: horario laboral PROGRAMADO/habitual del conductor (hora de
+  // inicio y fin de turno, "HH:mm" -- mismo formato que ya usan
+  // Order.deliveryTimeWindowFrom/To). Distinto a propósito de
+  // `maxRouteDurationHours` (Warehouse/Carrier), que topa la duración total
+  // permitida de UNA RUTA -- esto es el horario esperado del CONDUCTOR en
+  // su día a día, pensado como ayuda para detectar jornadas reales
+  // (DriverShift) que se alargan más de lo habitual (posible exceso de
+  // tacógrafo). Opcional: un conductor sin horario configurado simplemente
+  // no genera ningún aviso todavía.
+  usualShiftStartTime String?        @map("usual_shift_start_time")
+  usualShiftEndTime   String?        @map("usual_shift_end_time")
   active             Boolean         @default(true)
   carrier            Carrier         @relation(fields: [carrierId], references: [id])
   shipments          Shipment[]
@@ -645,6 +682,15 @@ model Order {
   deliveryTimeWindowTo   String?           @map("delivery_time_window_to")
   notes                  String?
   serviceType            ServiceType?      @map("service_type")
+  // Fase 8Q: necesidad de equipamiento especial EN EL VEHÍCULO para poder
+  // atender esta entrega (grúa para descarga sin muelle, plataforma
+  // elevadora) -- a nivel de pedido y no de producto, porque depende del
+  // punto de entrega/acceso, no del artículo en sí. El motor de
+  // compatibilidad exige entonces un vehículo con `hasCrane`/`hasLiftgate`
+  // en true (ver optimization.routes.ts). Opcional/default false: ningún
+  // pedido existente cambia de comportamiento.
+  requiresCrane          Boolean           @default(false) @map("requires_crane")
+  requiresLiftgate       Boolean           @default(false) @map("requires_liftgate")
   externalSourceSystem   String?           @map("external_source_system")
   externalOrderId        String?           @map("external_order_id")
   createdAt              DateTime          @default(now()) @map("created_at")
@@ -1019,6 +1065,18 @@ enum TemperatureCapability {
   refrigerated
   frozen
   mixed
+}
+
+// Fase 8Q: etiqueta medioambiental DGT del vehículo -- puramente informativa
+// hoy (no se usa todavía para restringir el acceso a ninguna zona de bajas
+// emisiones), pero forma parte de la ficha de características que pidió
+// Raúl al completar la BD de vehículos.
+enum EmissionsLabel {
+  sin_etiqueta
+  b
+  c
+  eco
+  cero_emisiones
 }
 
 enum SurchargeType {

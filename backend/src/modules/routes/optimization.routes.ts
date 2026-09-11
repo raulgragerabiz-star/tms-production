@@ -32,7 +32,12 @@ optimizationRouter.post(
       where: { id: req.params.routeId, companyId: req.auth!.companyId },
       include: {
         loadPlan: true,
-        stops: { include: { order: { include: { deliveryPoint: true } } } },
+        // Fase 8Q: se añade `lines: { include: { product: true } }` al pedido
+        // de cada parada -- hace falta para saber si algún producto de la
+        // ruta exige frío o ADR, y así poder filtrar candidatos por esas
+        // características reales del vehículo (ver más abajo). Aditivo: el
+        // resto de campos ya incluidos (deliveryPoint) no cambian.
+        stops: { include: { order: { include: { deliveryPoint: true, lines: { include: { product: true } } } } } },
       },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
@@ -45,6 +50,37 @@ optimizationRouter.post(
     const loadPlan = await prisma.loadPlan.findUnique({ where: { routeId: route.id } });
     const totalWeightKg = Number(loadPlan?.totalWeightKg ?? 0);
     const totalPallets = Number(loadPlan?.totalPallets ?? 0);
+
+    // Fase 8Q -- "completar la BD de vehículos... y que estas características
+    // constriñan/filtren candidatos, no solo existan como datos sueltos"
+    // (petición explícita de Raúl). Se agregan aquí, UNA sola vez para toda
+    // la ruta, los requisitos especiales de sus pedidos/líneas: si CUALQUIER
+    // parada exige frío/ADR/grúa/plataforma, la ruta entera hereda esa
+    // exigencia (no tendría sentido asignar un vehículo que no pueda atender
+    // una de las paradas). `routeDistanceKm` viene del load plan recién
+    // recalculado arriba; 0/null significa "todavía sin distancia calculada"
+    // y por tanto no se aplica ninguna restricción de radio de acción.
+    const routeRequiresCold = route.stops.some((s: any) => s.order.lines.some((l: any) => l.product.requiresCold));
+    const routeRequiresAdr = route.stops.some((s: any) => s.order.lines.some((l: any) => l.product.requiresAdr));
+    const routeRequiresCrane = route.stops.some((s: any) => s.order.requiresCrane);
+    const routeRequiresLiftgate = route.stops.some((s: any) => s.order.requiresLiftgate);
+    const routeDistanceKm = Number(loadPlan?.distanceKm ?? 0);
+
+    // Comprueba las características reales del vehículo (matrícula concreta,
+    // NUNCA la oferta declarada sin matricular -- ver comentario más abajo en
+    // `declaredOfferings`) contra los requisitos agregados de la ruta.
+    // Cualquier campo del vehículo que esté sin rellenar (null) se trata como
+    // "sin restricción" para esa característica en concreto, igual que ya
+    // hace el resto del motor con los campos opcionales existentes.
+    function vehicleMeetsSpecialRequirements(vehicle: { workingTemperature: string }): boolean {
+      const v = vehicle as any;
+      if (routeRequiresCold && !["refrigerated", "frozen", "mixed"].includes(vehicle.workingTemperature)) return false;
+      if (routeRequiresAdr && !v.hasAdr) return false;
+      if (routeRequiresCrane && !v.hasCrane) return false;
+      if (routeRequiresLiftgate && !v.hasLiftgate) return false;
+      if (v.actionRadiusKm != null && routeDistanceKm > 0 && Number(v.actionRadiusKm) < routeDistanceKm) return false;
+      return true;
+    }
 
     // Capa 1 (candidatos): vehículos activos de la empresa cuyo tipo cubre el
     // peso y los palés de la ruta. Si el vehículo permite exceder palés
@@ -64,6 +100,9 @@ optimizationRouter.post(
       const fitsPallets =
         vehicle.vehicleType.allowsExceedingPallets || vehicle.vehicleType.maxPallets >= totalPallets;
       if (!fitsPallets) continue;
+      // Fase 8Q: frío/ADR/grúa/plataforma/radio de acción -- restricción dura
+      // real, no solo dato informativo (ver función más arriba).
+      if (!vehicleMeetsSpecialRequirements(vehicle)) continue;
       // Un transportista puede tener varios vehículos que cubran la ruta; nos
       // quedamos con uno por transportista (la tarifa se resuelve por
       // transportista, no por vehículo concreto).
@@ -84,6 +123,16 @@ optimizationRouter.post(
     // los palés de la ruta. Se añaden ahora como candidatos de refuerzo (solo
     // si el transportista no tiene ya un vehículo real que cubra la ruta, que
     // sigue teniendo prioridad).
+    //
+    // Fase 8Q -- decisión deliberada de alcance: las nuevas restricciones de
+    // frío/ADR/grúa/plataforma/radio de acción NO se aplican a este fallback.
+    // Son características de una MATRÍCULA física concreta (Vehicle), y
+    // `CarrierVehicleType` es justo lo contrario -- un transportista que
+    // declara "puedo aportar este tipo de vehículo" sin tener aún ninguna
+    // matrícula real dada de alta. Exigir aquí "¿ese vehículo (que todavía no
+    // existe) lleva ADR?" sería inventar un dato que nadie ha declarado. Este
+    // fallback sigue filtrando solo por peso/palés, exactamente igual que
+    // antes de esta fase.
     const declaredOfferings = await prisma.carrierVehicleType.findMany({
       where: {
         carrier: { companyId: req.auth!.companyId, active: true },

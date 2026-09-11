@@ -38,7 +38,23 @@ export async function attemptAutoAssign(routeId: string): Promise<AutoAssignOutc
       company: { select: { autoAssignEnabled: true, autoAssignMinConfidence: true } },
       stops: {
         include: {
-          order: { select: { serviceType: true, requestedDeliveryDate: true, createdAt: true } },
+          order: {
+            select: {
+              serviceType: true,
+              requestedDeliveryDate: true,
+              createdAt: true,
+              // Fase 8Q: hace falta para poder calcular `requiresAdr` real
+              // más abajo (ver buildOrderContext) -- antes este dato ni
+              // siquiera existía en el modelo de Producto. Se trae el
+              // producto completo (`true`) en vez de seleccionar solo
+              // `requiresAdr` porque este sandbox no puede regenerar el
+              // Prisma Client (sin red a su CDN) y ese campo, recién
+              // añadido al schema, todavía no existe en sus tipos de
+              // `select`; en el entorno real, tras `npx prisma generate`,
+              // ambas formas son equivalentes.
+              lines: { select: { product: true } },
+            },
+          },
         },
       },
     },
@@ -99,7 +115,14 @@ export async function attemptAutoAssign(routeId: string): Promise<AutoAssignOutc
 
 function buildOrderContext(
   routeServiceType: ServiceType,
-  orders: { serviceType: ServiceType | null; requestedDeliveryDate: Date; createdAt: Date }[]
+  orders: {
+    serviceType: ServiceType | null;
+    requestedDeliveryDate: Date;
+    createdAt: Date;
+    // `product: any` -- ver comentario en la consulta que llama a esta
+    // función (Prisma Client sin regenerar en este sandbox).
+    lines: { product: any }[];
+  }[]
 ): OrderContextForScoring {
   // leadTimeDays = el más urgente de todos los pedidos de la ruta manda --
   // una ruta con un pedido urgente entre varios no urgentes se trata como
@@ -109,13 +132,14 @@ function buildOrderContext(
     ? Math.min(...orders.map((o) => businessDaysBetween(o.createdAt, o.requestedDeliveryDate)))
     : 99;
 
-  // ADR/equipamiento especial todavía no se modela a nivel de pedido (el
-  // maestro de vehículos sí tiene equipamiento, pero el pedido no tiene un
-  // campo "requiere ADR" -- deliberadamente pospuesto). Se trata siempre
-  // como "no exige ADR" hasta que exista ese dato; el multiplicador de
-  // penalización por anomalías queda simplemente inactivo mientras tanto,
-  // sin romper la puntuación del resto de candidatos.
-  return { segment: routeServiceType, leadTimeDays, requiresAdr: false };
+  // Fase 8Q: ya existe `Product.requiresAdr` (completar la BD de vehículos +
+  // conectar esta característica al motor, petición de Raúl) -- este
+  // multiplicador de penalización por anomalías, que hasta ahora estaba
+  // inactivo a propósito por falta de dato real, se activa aquí sin tocar
+  // nada más de la puntuación.
+  const requiresAdr = orders.some((o) => o.lines.some((l) => !!l.product?.requiresAdr));
+
+  return { segment: routeServiceType, leadTimeDays, requiresAdr };
 }
 
 function businessDaysBetween(from: Date, to: Date): number {

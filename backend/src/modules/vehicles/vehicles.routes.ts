@@ -14,6 +14,18 @@ const vehicleSchema = z.object({
   trailerPlate: z.string().optional(),
   workingTemperature: z.enum(["ambient", "refrigerated", "frozen", "mixed"]).optional(),
   fuelType: z.string().optional(),
+  // Fase 8Q -- completar la BD de vehículos (petición de Raúl): MMA/peso
+  // útil, etiqueta ambiental, radio de acción y equipamiento especial. Todo
+  // opcional para no exigir rellenar nada en los vehículos ya existentes.
+  // Se usan como restricciones reales en el motor de compatibilidad (ver
+  // optimization.routes.ts), no solo como datos informativos.
+  mmaKg: z.number().positive().optional(),
+  usefulWeightKg: z.number().positive().optional(),
+  emissionsLabel: z.enum(["sin_etiqueta", "b", "c", "eco", "cero_emisiones"]).optional(),
+  actionRadiusKm: z.number().positive().optional(),
+  hasAdr: z.boolean().optional(),
+  hasCrane: z.boolean().optional(),
+  hasLiftgate: z.boolean().optional(),
 });
 
 vehiclesRouter.get(
@@ -40,7 +52,14 @@ vehiclesRouter.post(
       where: { id: data.carrierId, companyId: req.auth!.companyId },
     });
     if (!carrier) throw HttpError.notFound("Transportista no encontrado");
-    const vehicle = await prisma.vehicle.create({ data });
+    // Fase 8Q: `data` incluye los campos nuevos de la ficha del vehículo
+    // (mmaKg, usefulWeightKg, emissionsLabel, actionRadiusKm, hasAdr,
+    // hasCrane, hasLiftgate) -- el `as any` es solo para este sandbox, cuyo
+    // Prisma Client no puede regenerarse (sin red a la CDN de Prisma) y por
+    // tanto no conoce todavía las columnas recién añadidas al schema. En el
+    // entorno real, tras `npx prisma generate`, estos mismos campos quedan
+    // completamente tipados sin este cast.
+    const vehicle = await prisma.vehicle.create({ data: data as any });
     res.status(201).json(vehicle);
   })
 );
@@ -85,7 +104,9 @@ vehiclesRouter.put(
       where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } },
     });
     if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
-    const updated = await prisma.vehicle.update({ where: { id: vehicle.id }, data });
+    // Fase 8Q: mismo cast `as any` que en el POST de arriba, por el mismo
+    // motivo (Prisma Client sin regenerar en este sandbox).
+    const updated = await prisma.vehicle.update({ where: { id: vehicle.id }, data: data as any });
     res.json(updated);
   })
 );
@@ -210,6 +231,51 @@ vehiclesRouter.get(
       orderBy: { startedAt: "desc" },
     });
     res.json({ items });
+  })
+);
+
+// Fase 8Q: hasta ahora NO existía ningún endpoint para editar un conductor ya
+// creado -- solo se podía dar de alta (POST /drivers) o cambiar su estado
+// activo/inactivo (PATCH /drivers/:id/active, justo debajo). Petición de
+// Raúl: horario laboral programado del conductor (turno habitual), pensado
+// como ayuda para detectar en el frontend jornadas reales que se alargan más
+// de lo habitual (posible exceso de tacógrafo) -- ver comentario en
+// Driver.usualShiftStartTime/EndTime en schema.prisma. De paso, ya que no
+// existía edición general, se permite corregir aquí también nombre/NIF/
+// teléfono sin tener que borrar y volver a dar de alta al conductor.
+const driverUpdateSchema = z.object({
+  fullName: z.string().min(1).optional(),
+  taxId: z.string().min(1).optional(),
+  phone: z.string().optional(),
+  usualShiftStartTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido (HH:mm)")
+    .optional()
+    .nullable(),
+  usualShiftEndTime: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato de hora inválido (HH:mm)")
+    .optional()
+    .nullable(),
+});
+
+vehiclesRouter.patch(
+  "/drivers/:id",
+  asyncHandler(async (req, res) => {
+    const data = driverUpdateSchema.parse(req.body);
+    const driver = await prisma.driver.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
+    if (!driver) throw HttpError.notFound("Conductor no encontrado");
+
+    if (data.taxId && data.taxId !== driver.taxId) {
+      const existing = await prisma.driver.findUnique({ where: { taxId: data.taxId } });
+      if (existing) throw HttpError.conflict("Ya existe otro conductor con ese NIF");
+    }
+
+    // `as any`: mismo motivo que en el resto de campos nuevos de esta fase
+    // (usualShiftStartTime/EndTime todavía no están en el Prisma Client de
+    // este sandbox, que no puede regenerarse aquí).
+    const updated = await prisma.driver.update({ where: { id: driver.id }, data: data as any });
+    res.json(updated);
   })
 );
 

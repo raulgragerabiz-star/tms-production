@@ -32,6 +32,12 @@ const orderSchema = z.object({
   // ese campo relleno. Si se omite, el pedido se clasifica automáticamente por
   // peso/palés al crearlo (mismo motor que usa el bridge de importación ERP).
   serviceType: z.enum(["paqueteria", "paleteria", "paleteria_pesada", "gran_volumen"]).optional(),
+  // Fase 8Q: necesidad de equipamiento especial en el vehículo para esta
+  // entrega (grúa/plataforma elevadora) -- ver comentario en
+  // Order.requiresCrane/requiresLiftgate en schema.prisma. Se usan como
+  // restricción real en el motor de compatibilidad (optimization.routes.ts).
+  requiresCrane: z.boolean().optional(),
+  requiresLiftgate: z.boolean().optional(),
   lines: z.array(orderLineSchema).min(1),
 });
 
@@ -235,6 +241,11 @@ ordersRouter.post(
         deliveryTimeWindowTo: data.deliveryTimeWindowTo,
         notes: data.notes,
         serviceType: data.serviceType,
+        // Fase 8Q: `as any` a nivel del objeto `data` completo (más abajo) --
+        // requiresCrane/requiresLiftgate todavía no están en el Prisma
+        // Client de este sandbox (sin red para regenerarlo).
+        requiresCrane: data.requiresCrane ?? false,
+        requiresLiftgate: data.requiresLiftgate ?? false,
         status: "validated",
         lines: {
           create: data.lines.map((l) => {
@@ -250,7 +261,7 @@ ordersRouter.post(
             };
           }),
         },
-      },
+      } as any,
       include: { lines: true },
     });
 
