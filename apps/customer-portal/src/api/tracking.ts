@@ -54,6 +54,11 @@ export interface TrackingResult {
   deliveryPoint: { label: string | null; address: string; city: string | null };
   lines: TrackingLine[];
   timeline: TrackingTimelineStep[];
+  // Fase 8O -- fix: estado real del envío (a diferencia de `status`, que es
+  // el estado comercial del pedido y casi nunca llega a "in_transit") --
+  // ver comentario en tracking.routes.ts. Es lo que debe decidir si esta
+  // pantalla sigue sondeando en vivo o no.
+  liveTracking: boolean;
   livePosition: TrackingLivePosition | null;
   pod: TrackingPod | null;
   feedback: TrackingFeedback | null;

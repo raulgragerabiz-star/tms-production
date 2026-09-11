@@ -39,6 +39,9 @@ interface StopRow {
     customer: { legalName: string };
     deliveryPoint: { address: string; city: string | null; lat: number | null; lng: number | null; contactPhone: string | null };
   };
+  // Fase 8O: hora real de entrega (si ya se completó), para distinguir en
+  // la línea de tiempo lo planificado (ETA) de lo que realmente pasó.
+  pod: { deliveredAt: string } | null;
 }
 
 interface RouteRow {
@@ -307,6 +310,7 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute, o
           sequence: s.sequence,
           status: s.status,
           eta: s.eta,
+          deliveredAt: s.pod?.deliveredAt ?? null,
           orderNumber: s.order.orderNumber,
           customerName: s.order.customer.legalName,
           address: s.order.deliveryPoint.city ?? s.order.deliveryPoint.address,

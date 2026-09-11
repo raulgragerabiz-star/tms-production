@@ -135,10 +135,18 @@ trackingRouter.get(
         unit: l.unit,
       })),
       timeline: buildPublicTimeline(order),
-      // Seguimiento en vivo: solo tiene sentido mientras el envío está
-      // circulando -- una vez entregado o antes de cargar, la última
-      // posición conocida no aporta nada útil y podría confundir (ej.
-      // pensar que el camión sigue en un punto donde ya no está).
+      // Fase 8O -- fix: el portal público solo se refrescaba solo si el
+      // cliente volvía atrás y repetía la búsqueda, porque el sondeo en vivo
+      // del frontend (TrackOrderPage.tsx) comprobaba `status === "in_transit"`
+      // contra ESTE campo (`order.status`), que es el estado comercial del
+      // pedido y que, en la práctica, casi nunca pasa por "in_transit" (solo
+      // se mueve automáticamente a "delivered" al completar la parada) --
+      // así que el pedido podía estar circulando de verdad (envío ya
+      // "in_transit" según el conductor) sin que este campo lo reflejara
+      // nunca. `liveTracking` expone el estado REAL del envío para que el
+      // frontend sondee en base a eso, sin tocar el significado de
+      // `order.status` en ningún otro sitio del sistema.
+      liveTracking: !!shipment && ["loaded", "in_transit"].includes(shipment.status),
       livePosition:
         shipment && shipment.status === "in_transit" && lastPosition
           ? { lat: lastPosition.lat, lng: lastPosition.lng, occurredAt: lastPosition.occurredAt }

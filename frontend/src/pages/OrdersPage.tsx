@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
@@ -21,8 +21,18 @@ interface OrderRow {
   warehouse: { name: string };
 }
 
+// Fase 8O: sondeo del campo de búsqueda antes de disparar la consulta --
+// mismo criterio de siempre (no lanzar una petición por cada pulsación de
+// tecla).
+const SEARCH_DEBOUNCE_MS = 350;
+
 export default function OrdersPage() {
   const [status, setStatus] = useState<string>("");
+  // Fase 8O: buscador por nº de pedido, aparte del desplegable de estados
+  // ya existente -- petición de Raúl, antes solo se podía filtrar por
+  // estado o recorrer páginas a mano para encontrar un pedido concreto.
+  const [orderNumberInput, setOrderNumberInput] = useState("");
+  const [orderNumberSearch, setOrderNumberSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   // Carga de pedidos por Excel (instrucciones ampliadas del proyecto):
   // alternativa manual a la integración con el ERP, sobre todo para poder
@@ -40,10 +50,24 @@ export default function OrdersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
 
+  // Fase 8O: debounce del buscador -- ver comentario junto a
+  // SEARCH_DEBOUNCE_MS más arriba.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setOrderNumberSearch(orderNumberInput.trim());
+      setPage(1);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [orderNumberInput]);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["orders", status, page, pageSize],
+    queryKey: ["orders", status, orderNumberSearch, page, pageSize],
     queryFn: async () =>
-      (await api.get("/orders", { params: { ...(status ? { status } : {}), page, pageSize } })).data as {
+      (
+        await api.get("/orders", {
+          params: { ...(status ? { status } : {}), ...(orderNumberSearch ? { orderNumber: orderNumberSearch } : {}), page, pageSize },
+        })
+      ).data as {
         items: OrderRow[];
         total: number;
       },
@@ -57,6 +81,13 @@ export default function OrdersPage() {
           <p className="text-sm text-slate-500">{data?.total ?? 0} pedidos</p>
         </div>
         <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={orderNumberInput}
+            onChange={(e) => setOrderNumberInput(e.target.value)}
+            placeholder="Buscar por nº de pedido…"
+            className="rounded-lg border border-slate-300 text-sm px-3 py-2 w-48"
+          />
           <select
             value={status}
             onChange={(e) => {

@@ -53,6 +53,15 @@ interface TimelineEvent {
   payload: { routeStopId?: string } | null;
 }
 
+// Fase 8O: valoración de satisfacción que el cliente deja desde el portal
+// (Portal Cliente / seguimiento público) -- ya se guardaba, pero no se veía
+// en ningún sitio del Backoffice.
+interface DeliveryFeedbackRow {
+  rating: number;
+  comment: string | null;
+  createdAt: string;
+}
+
 interface OrderDetail {
   id: string;
   orderNumber: string;
@@ -67,6 +76,7 @@ interface OrderDetail {
   documents: DocumentRow[];
   routeStops: RouteStopRow[];
   timeline: TimelineEvent[];
+  deliveryFeedback: DeliveryFeedbackRow | null;
 }
 
 interface Props {
@@ -299,6 +309,34 @@ export default function OrderDetailModal({ orderId, onClose }: Props) {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Fase 8O: valoración de satisfacción que el cliente deja desde
+              el portal -- ya se guardaba (DeliveryFeedback) pero no
+              aparecía en ningún sitio de esta ficha. Mismo criterio que el
+              justificante de entrega: solo tiene sentido una vez entregado. */}
+          {data.status === "delivered" && (
+            <div>
+              <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">Valoración del cliente</h3>
+              {!data.deliveryFeedback && (
+                <p className="text-sm text-slate-500">El cliente todavía no ha valorado esta entrega.</p>
+              )}
+              {data.deliveryFeedback && (
+                <div>
+                  <div className="flex gap-0.5 text-lg text-amber-400">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <span key={n}>{n <= data.deliveryFeedback!.rating ? "★" : "☆"}</span>
+                    ))}
+                  </div>
+                  {data.deliveryFeedback.comment && (
+                    <p className="text-sm text-slate-600 mt-1">{data.deliveryFeedback.comment}</p>
+                  )}
+                  <p className="text-xs text-slate-400 mt-1">
+                    {new Date(data.deliveryFeedback.createdAt).toLocaleString("es-ES")}
+                  </p>
                 </div>
               )}
             </div>

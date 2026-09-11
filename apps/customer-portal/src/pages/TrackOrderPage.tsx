@@ -84,17 +84,27 @@ export default function TrackOrderPage() {
   const trimmedOrderNumber = orderNumber.trim();
   const trimmedPostalCode = postalCode.trim();
 
-  // Fase 8L: mientras el pedido está "en reparto" se vuelve a consultar
-  // solo cada 20s (mismo intervalo que usa el resto de la suite para
-  // seguimiento en vivo, ver DispatchBoard.tsx/RutasTab.tsx) -- para
+  // Fase 8L: mientras el envío está circulando de verdad se vuelve a
+  // consultar solo cada 20s (mismo intervalo que usa el resto de la suite
+  // para seguimiento en vivo, ver DispatchBoard.tsx/RutasTab.tsx) -- para
   // cualquier otro estado no tiene sentido sondear una y otra vez algo que
   // ya no va a cambiar solo.
+  //
+  // Fase 8O -- fix: esto comprobaba `status === "in_transit"`, pero ese
+  // campo es el estado COMERCIAL del pedido (planned/dispatched/...), que en
+  // la práctica casi nunca llega a valer "in_transit" -- solo se mueve
+  // automáticamente a "delivered" al completar la entrega. Así que aunque el
+  // conductor ya estuviera circulando de verdad, esta pantalla nunca
+  // sondeaba sola, y solo se veía el estado real si el cliente volvía atrás
+  // y repetía la búsqueda (lo que sí lanza una consulta nueva). Ahora se usa
+  // `liveTracking`, que refleja el estado real del envío (ver
+  // tracking.routes.ts / api/tracking.ts).
   const trackingQuery = useQuery<TrackingResult>({
     queryKey: ["tracking", trimmedOrderNumber, trimmedPostalCode],
     queryFn: () => lookupOrderTracking(trimmedOrderNumber, trimmedPostalCode),
     enabled: submitted && trimmedOrderNumber.length > 0 && trimmedPostalCode.length > 0,
     retry: false,
-    refetchInterval: (query) => (query.state.data?.status === "in_transit" ? 20000 : false),
+    refetchInterval: (query) => (query.state.data?.liveTracking ? 20000 : false),
   });
 
   const result = submitted ? trackingQuery.data : undefined;
@@ -175,7 +185,7 @@ export default function TrackOrderPage() {
             {result && (
               <p className="text-xs text-brand-100">
                 {statusLabel[result.status] ?? result.status}
-                {trackingQuery.data?.status === "in_transit" && " · actualizando cada 20s"}
+                {trackingQuery.data?.liveTracking && " · actualizando cada 20s"}
               </p>
             )}
           </div>

@@ -287,6 +287,13 @@ routesRouter.get(
                 deliveryPoint: { select: { address: true, city: true, lat: true, lng: true, contactPhone: true } },
               },
             },
+            // Fase 8O: hora REAL de entrega, para que la línea de tiempo del
+            // Despacho pueda distinguir lo planificado (ETA) de lo que
+            // realmente pasó -- antes solo movía un único punto, ya pintado
+            // en la hora de la ETA, al color del estado actual, así que
+            // nunca se veía si la entrega real fue antes/después de lo
+            // previsto.
+            pod: { select: { deliveredAt: true } },
           },
         },
         shipment: {

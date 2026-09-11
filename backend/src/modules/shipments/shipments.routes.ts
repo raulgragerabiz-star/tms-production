@@ -38,7 +38,14 @@ shipmentsRouter.get(
       include: {
         route: {
           include: {
-            warehouse: { select: { name: true } },
+            // Fase 8O -- fix: Seguimiento no pintaba nada en el mapa salvo
+            // que ya hubiera llegado al menos un ping GPS del conductor --
+            // en ese hueco (sobre todo nada más salir a reparto) el mapa se
+            // veía completamente vacío. Se añaden las coordenadas del
+            // almacén y de cada punto de entrega (ya existían en el modelo,
+            // solo faltaba pedirlas aquí) para poder dibujar de respaldo el
+            // recorrido planificado mientras no hay posición en vivo.
+            warehouse: { select: { name: true, lat: true, lng: true } },
             stops: {
               orderBy: { sequence: "asc" },
               include: {
@@ -46,7 +53,7 @@ shipmentsRouter.get(
                   select: {
                     orderNumber: true,
                     customer: { select: { legalName: true } },
-                    deliveryPoint: { select: { address: true, city: true } },
+                    deliveryPoint: { select: { address: true, city: true, lat: true, lng: true } },
                   },
                 },
               },

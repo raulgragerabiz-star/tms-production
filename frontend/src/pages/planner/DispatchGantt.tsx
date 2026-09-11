@@ -17,6 +17,13 @@ export interface GanttStop {
   sequence: number;
   status: string;
   eta: string | null;
+  // Fase 8O: hora REAL de entrega (si ya se completó) -- antes esta línea de
+  // tiempo solo movía un único punto, fijo en la hora de la ETA, al color
+  // del estado actual: nunca mostraba si la entrega real fue antes/después
+  // de lo previsto, ni en qué momento pasó de verdad. Ahora, cuando hay
+  // hora real, se dibuja un segundo marcador en su posición real, unido al
+  // planificado con una línea de puntos.
+  deliveredAt: string | null;
   orderNumber: string;
   customerName: string;
   address: string;
@@ -62,7 +69,13 @@ export default function DispatchGantt({ routes, routeDateIso, selectedStopId, on
 
   const allEtaMs = useMemo(
     () =>
-      routes.flatMap((r) => r.stops.filter((s) => s.eta).map((s) => new Date(s.eta as string).getTime())),
+      routes.flatMap((r) => [
+        ...r.stops.filter((s) => s.eta).map((s) => new Date(s.eta as string).getTime()),
+        // Fase 8O: si una entrega real quedó fuera del rango que marcaban
+        // las ETA (p.ej. se retrasó más de lo previsto), el eje horario
+        // también tiene que estirarse para poder verla.
+        ...r.stops.filter((s) => s.deliveredAt).map((s) => new Date(s.deliveredAt as string).getTime()),
+      ]),
     [routes]
   );
 
@@ -156,6 +169,26 @@ export default function DispatchGantt({ routes, routeDateIso, selectedStopId, on
                         }}
                       />
                     )}
+                    {/* Fase 8O: si hay hora real de entrega y difiere de la
+                        ETA, se une planificado -> real con una línea de
+                        puntos, para que el hueco (adelanto o retraso) se
+                        vea de un vistazo. */}
+                    {route.stops.map((stop) => {
+                      if (!stop.eta || !stop.deliveredAt) return null;
+                      const left1 = pct(new Date(stop.eta).getTime());
+                      const left2 = pct(new Date(stop.deliveredAt).getTime());
+                      if (Math.abs(left2 - left1) < 0.5) return null;
+                      const from = Math.min(left1, left2);
+                      const to = Math.max(left1, left2);
+                      return (
+                        <div
+                          key={`link-${stop.id}`}
+                          className="absolute top-1/2 h-0 -translate-y-1/2 border-t border-dotted border-slate-400"
+                          style={{ left: `${from}%`, width: `${to - from}%` }}
+                        />
+                      );
+                    })}
+
                     {route.stops.map((stop) => {
                       const left = stop.eta ? pct(new Date(stop.eta).getTime()) : null;
                       if (left === null) return null;
@@ -175,7 +208,35 @@ export default function DispatchGantt({ routes, routeDateIso, selectedStopId, on
                             backgroundColor: STOP_STATUS_COLORS[stop.status] ?? "#94a3b8",
                             outline: isSelected ? `2px solid ${route.color}` : "none",
                           }}
-                          aria-label={`Parada ${stop.sequence}, ${stop.customerName}, ${STOP_STATUS_LABELS[stop.status] ?? stop.status}`}
+                          aria-label={`Parada ${stop.sequence}, ${stop.customerName}, planificada ${STOP_STATUS_LABELS[stop.status] ?? stop.status}`}
+                        />
+                      );
+                    })}
+
+                    {/* Marcador de la hora REAL de entrega -- distinto del
+                        de arriba (planificado en la ETA): relleno blanco y
+                        aro verde, para no confundirlo con el punto de
+                        estado. Solo se dibuja si de verdad se conoce (hay
+                        justificante de entrega). */}
+                    {route.stops.map((stop) => {
+                      if (!stop.deliveredAt) return null;
+                      const left = pct(new Date(stop.deliveredAt).getTime());
+                      const isSelected = selectedStopId === stop.id;
+                      return (
+                        <button
+                          key={`actual-${stop.id}`}
+                          type="button"
+                          onClick={() => onSelectStop?.(stop.id)}
+                          onMouseEnter={() => setHoverStopId(stop.id)}
+                          onMouseLeave={() => setHoverStopId((id) => (id === stop.id ? null : id))}
+                          className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow"
+                          style={{
+                            left: `${left}%`,
+                            width: isSelected ? 12 : 9,
+                            height: isSelected ? 12 : 9,
+                            border: `2px solid ${STOP_STATUS_COLORS.completed}`,
+                          }}
+                          aria-label={`Parada ${stop.sequence}, ${stop.customerName}, entregada de verdad a las ${formatHour(new Date(stop.deliveredAt).getTime())}`}
                         />
                       );
                     })}
@@ -190,8 +251,14 @@ export default function DispatchGantt({ routes, routeDateIso, selectedStopId, on
                           style={{ left: `${left}%` }}
                         >
                           <p className="font-mono font-semibold">
+                            {stop.deliveredAt ? "ETA " : ""}
                             {formatHour(new Date(stop.eta).getTime())} · {stop.orderNumber}
                           </p>
+                          {stop.deliveredAt && (
+                            <p className="font-mono text-emerald-300">
+                              Real {formatHour(new Date(stop.deliveredAt).getTime())}
+                            </p>
+                          )}
                           <p>{stop.customerName}</p>
                           <p className="text-slate-300">{stop.address}</p>
                           <p className="text-slate-300">{STOP_STATUS_LABELS[stop.status] ?? stop.status}</p>
@@ -214,6 +281,10 @@ export default function DispatchGantt({ routes, routeDateIso, selectedStopId, on
             {label}
           </span>
         ))}
+        <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+          <span className="w-2.5 h-2.5 rounded-full inline-block bg-white" style={{ border: `2px solid ${STOP_STATUS_COLORS.completed}` }} />
+          Hora real de entrega
+        </span>
         {showNowLine && (
           <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
             <span className="w-2.5 h-px bg-red-400 inline-block" />

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
-import PlannerMap, { MapPoint, ROUTE_COLORS } from "@/pages/planner/PlannerMap";
+import PlannerMap, { MapLine, MapPoint, ROUTE_COLORS, WAREHOUSE_COLOR } from "@/pages/planner/PlannerMap";
 import { useRealtimeChannel } from "@/lib/realtime";
 
 // Sincronización en tiempo real despacho<->conductor: la Driver App ya manda
@@ -22,7 +22,7 @@ interface StopLite {
   order: {
     orderNumber: string;
     customer: { legalName: string };
-    deliveryPoint: { address: string; city: string | null };
+    deliveryPoint: { address: string; city: string | null; lat: number | null; lng: number | null };
   };
 }
 
@@ -32,7 +32,7 @@ interface ShipmentRow {
   departedAt: string | null;
   route: {
     id: string;
-    warehouse: { name: string };
+    warehouse: { name: string; lat: number | null; lng: number | null };
     stops: StopLite[];
   };
   carrier: { legalName: string } | null;
@@ -87,24 +87,64 @@ export default function SeguimientoPage() {
 
   const selected = activeShipments.find((s) => s.id === selectedId) ?? null;
 
-  const mapPoints: MapPoint[] = useMemo(
-    () =>
-      activeShipments
-        .filter((s) => s.lastPosition?.lat != null && s.lastPosition?.lng != null)
-        .map((s, idx) => ({
-          id: s.id,
-          lat: s.lastPosition!.lat!,
-          lng: s.lastPosition!.lng!,
-          label: `${s.vehicle?.plate ?? "Vehículo"} — ${s.driver?.fullName ?? "sin conductor"} (${timeAgo(s.lastPosition!.occurredAt)})`,
-          color: s.id === selectedId ? "#dc2626" : ROUTE_COLORS[idx % ROUTE_COLORS.length],
-        })),
-    [activeShipments, selectedId]
-  );
+  // Fase 8O -- fix: antes el mapa solo pintaba la posición GPS en vivo, así
+  // que mientras no llegara ni un ping (típicamente justo al salir a
+  // reparto, o si el móvil del conductor no tiene buena cobertura) se veía
+  // completamente vacío -- solo aparecía la tarjeta con "Sin posición GPS
+  // todavía". Ahora, de respaldo, se pintan también el almacén de origen y
+  // los puntos de entrega planificados del envío seleccionado (ya se piden
+  // al backend, ver shipments.routes.ts), con una línea uniendo el
+  // recorrido -- así siempre hay algo que mirar, en vivo o no.
+  const mapPoints: MapPoint[] = useMemo(() => {
+    const livePoints: MapPoint[] = activeShipments
+      .filter((s) => s.lastPosition?.lat != null && s.lastPosition?.lng != null)
+      .map((s, idx) => ({
+        id: s.id,
+        lat: s.lastPosition!.lat!,
+        lng: s.lastPosition!.lng!,
+        label: `${s.vehicle?.plate ?? "Vehículo"} — ${s.driver?.fullName ?? "sin conductor"} (${timeAgo(s.lastPosition!.occurredAt)})`,
+        color: s.id === selectedId ? "#dc2626" : ROUTE_COLORS[idx % ROUTE_COLORS.length],
+      }));
+
+    if (!selected) return livePoints;
+
+    const stopPoints: MapPoint[] = selected.route.stops
+      .filter((stop) => stop.order.deliveryPoint.lat != null && stop.order.deliveryPoint.lng != null)
+      .map((stop) => ({
+        id: `stop-${stop.id}`,
+        lat: stop.order.deliveryPoint.lat!,
+        lng: stop.order.deliveryPoint.lng!,
+        label: `${stop.sequence}. ${stop.order.customer.legalName}`,
+        color: ROUTE_COLORS[0],
+      }));
+
+    const warehousePoint: MapPoint[] =
+      selected.route.warehouse.lat != null && selected.route.warehouse.lng != null
+        ? [{ id: `warehouse-${selected.id}`, lat: selected.route.warehouse.lat, lng: selected.route.warehouse.lng, label: selected.route.warehouse.name, color: WAREHOUSE_COLOR }]
+        : [];
+
+    return [...livePoints, ...warehousePoint, ...stopPoints];
+  }, [activeShipments, selected, selectedId]);
+
+  const mapLines: MapLine[] = useMemo(() => {
+    if (!selected) return [];
+    const points = [
+      ...(selected.route.warehouse.lat != null && selected.route.warehouse.lng != null
+        ? [{ lat: selected.route.warehouse.lat, lng: selected.route.warehouse.lng }]
+        : []),
+      ...selected.route.stops
+        .filter((stop) => stop.order.deliveryPoint.lat != null && stop.order.deliveryPoint.lng != null)
+        .map((stop) => ({ lat: stop.order.deliveryPoint.lat!, lng: stop.order.deliveryPoint.lng! })),
+    ];
+    return points.length >= 2 ? [{ id: `route-${selected.id}`, color: ROUTE_COLORS[0], points }] : [];
+  }, [selected]);
 
   const mapCenter = useMemo(() => {
     const withPos = activeShipments.find((s) => s.lastPosition?.lat != null);
-    return withPos ? { lat: withPos.lastPosition!.lat!, lng: withPos.lastPosition!.lng! } : GETAFE_CENTER;
-  }, [activeShipments]);
+    if (withPos) return { lat: withPos.lastPosition!.lat!, lng: withPos.lastPosition!.lng! };
+    const fallback = mapPoints[0];
+    return fallback ? { lat: fallback.lat, lng: fallback.lng } : GETAFE_CENTER;
+  }, [activeShipments, mapPoints]);
 
   return (
     <div>
@@ -149,7 +189,7 @@ export default function SeguimientoPage() {
         </div>
 
         <div className="col-span-8">
-          <PlannerMap center={mapCenter} points={mapPoints} height={360} />
+          <PlannerMap center={mapCenter} points={mapPoints} lines={mapLines} height={360} />
 
           {selected && (
             <div className="mt-4 bg-white rounded-xl border border-slate-200 p-4">

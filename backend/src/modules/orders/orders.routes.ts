@@ -39,12 +39,17 @@ ordersRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const status = req.query.status as string | undefined;
+    // Fase 8O: buscador por nº de pedido, aparte del desplegable de estados
+    // ya existente -- antes solo se podía filtrar por estado o recorrer
+    // páginas a mano para encontrar un pedido concreto.
+    const orderNumber = (req.query.orderNumber as string | undefined)?.trim();
     const page = parseInt((req.query.page as string) ?? "1", 10);
     const pageSize = Math.min(parseInt((req.query.pageSize as string) ?? "25", 10), 100);
 
     const where = {
       companyId: req.auth!.companyId,
       ...(status ? { status: status as any } : {}),
+      ...(orderNumber ? { orderNumber: { contains: orderNumber, mode: "insensitive" as const } } : {}),
     };
 
     const [items, total] = await Promise.all([
@@ -168,6 +173,14 @@ ordersRouter.get(
             incidents: true,
           },
         },
+        // Fase 8O: la valoración de satisfacción que el cliente deja desde
+        // el portal (Portal Cliente / seguimiento público) ya se guarda
+        // desde hace tiempo (DeliveryFeedback), pero esta ficha nunca la
+        // pedía -- así que en el Backoffice se veía todo el resto de la
+        // ficha (documentos, incidencias, trazabilidad, justificante) menos
+        // la valoración del cliente. Aditivo: no cambia nada de lo ya
+        // devuelto.
+        deliveryFeedback: true,
       },
     });
     if (!order) throw HttpError.notFound("Pedido no encontrado");
