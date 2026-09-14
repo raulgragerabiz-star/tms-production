@@ -35,7 +35,13 @@ function formatKg(kg: number) {
   return `${kg.toLocaleString("es-ES", { maximumFractionDigits: 0 })} kg`;
 }
 
-export default function DemandForecastPage() {
+interface Props {
+  // Mejora (2026-09-14): consolidación en AnalyticsHubPage -- mismo patrón
+  // "embedded" que AnalyticsPage/AnomaliesPage.
+  embedded?: boolean;
+}
+
+export default function DemandForecastPage({ embedded }: Props = {}) {
   const [warehouseId, setWarehouseId] = useState<string>("");
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
@@ -70,14 +76,16 @@ export default function DemandForecastPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Previsión de demanda</h1>
-          <p className="text-sm text-slate-500">
-            Pedidos y peso esperados por almacén y provincia, próximos 14 días -- percentiles P50/P80 sobre el
-            histórico del mismo día de la semana (últimas 12 semanas).
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+        {!embedded && (
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">Previsión de demanda</h1>
+            <p className="text-sm text-slate-500">
+              Pedidos y peso esperados por almacén y provincia, próximos 14 días -- percentiles P50/P80 sobre el
+              histórico del mismo día de la semana (últimas 12 semanas).
+            </p>
+          </div>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
           <select
             value={warehouseId}
             onChange={(e) => setWarehouseId(e.target.value)}

@@ -47,7 +47,13 @@ const severityLabel: Record<string, string> = {
   high: "Alta",
 };
 
-export default function AnomaliesPage() {
+interface Props {
+  // Mejora (2026-09-14): consolidación en AnalyticsHubPage -- mismo patrón
+  // "embedded" que AnalyticsPage/VehiclesPage.
+  embedded?: boolean;
+}
+
+export default function AnomaliesPage({ embedded }: Props = {}) {
   const [status, setStatus] = useState<string>("pending");
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
@@ -84,13 +90,15 @@ export default function AnomaliesPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-900">Alertas de anomalías</h1>
-          <p className="text-sm text-slate-500">
-            Patrones fuera de lo habitual detectados automáticamente -- revisión humana, no corrección automática.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+        {!embedded && (
+          <div>
+            <h1 className="text-xl font-semibold text-slate-900">Alertas de anomalías</h1>
+            <p className="text-sm text-slate-500">
+              Patrones fuera de lo habitual detectados automáticamente -- revisión humana, no corrección automática.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}

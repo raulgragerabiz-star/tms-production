@@ -65,17 +65,25 @@ dashboardRouter.get(
         // destino/cliente de cada parada, no solo su estado. Aditivo -- el
         // resto de bloques que ya usaban `stops` (OTIF, nº de paradas) siguen
         // leyendo `status` exactamente igual.
+        //
+        // Fase 8V (2026-09-14): `order.createdAt` y `pod.deliveredAt` se
+        // añaden para los dos KPI de tiempos que pidió Raúl ("fecha entrada
+        // pedido vs fecha salida", "fecha salida pedido vs fecha entrega a
+        // cliente") -- ver el cálculo de `warehouseDwellAvgHours`/
+        // `transitAvgHours` más abajo.
         stops: {
           select: {
             status: true,
             order: {
               select: {
                 customerId: true,
+                createdAt: true,
                 customer: { select: { legalName: true } },
                 deliveryPoint: { select: { province: true, city: true } },
                 lines: { select: { lineWeightKg: true } },
               },
             },
+            pod: { select: { deliveredAt: true } },
           },
         },
         costSimulations: { where: { isSelected: true }, select: { estimatedCost: true } },
@@ -83,6 +91,8 @@ dashboardRouter.get(
         shipment: {
           select: {
             id: true,
+            departedAt: true,
+            finishedAt: true,
             settlementLines: { select: { amount: true } },
             incidents: { select: { id: true } },
           },
@@ -128,6 +138,23 @@ dashboardRouter.get(
     // que ya usa Product.abcClass para rotación de producto, aplicado aquí a
     // clientes por el peso movido en el periodo seleccionado.
     const customerWeight = new Map<string, { legalName: string; weightKg: number }>();
+    // Fase 8V: "cumplimiento de entrega por cliente" -- mismo cálculo de OTIF
+    // (paradas completadas / paradas totales) que ya se hace en agregado y por
+    // transportista, ahora por cliente.
+    const customerOtif = new Map<string, { legalName: string; stopsTotal: number; stopsCompleted: number }>();
+    // Fase 8V: "fecha entrada pedido vs fecha salida" -- no existe en el
+    // schema un evento real de "mercancía recibida en almacén" (solo el alta
+    // del pedido en el sistema), así que se usa `Order.createdAt` como
+    // aproximación honesta hasta la salida real del envío
+    // (`Shipment.departedAt`) -- documentado también en el frontend, no es un
+    // tiempo de almacén exacto.
+    const dwellHoursSamples: number[] = [];
+    // "fecha salida pedido vs fecha entrega a cliente" -- este sí es exacto:
+    // salida real del envío hasta la firma del justificante de entrega de esa
+    // parada concreta (`ProofOfDelivery.deliveredAt`). Solo cuenta paradas con
+    // POD ya firmado -- las que no lo tienen (todavía en curso, o entrega
+    // fallida sin firma) no aportan una muestra, en vez de inventar una.
+    const transitHoursSamples: number[] = [];
 
     for (const r of routes) {
       const key = bucketKey(r.routeDate, granularity);
@@ -164,6 +191,21 @@ dashboardRouter.get(
         const cw = customerWeight.get(order.customerId) ?? { legalName: order.customer.legalName, weightKg: 0 };
         cw.weightKg += stopWeight;
         customerWeight.set(order.customerId, cw);
+
+        const co = customerOtif.get(order.customerId) ?? { legalName: order.customer.legalName, stopsTotal: 0, stopsCompleted: 0 };
+        co.stopsTotal += 1;
+        if (stop.status === "completed") co.stopsCompleted += 1;
+        customerOtif.set(order.customerId, co);
+
+        if (r.shipment?.departedAt) {
+          const dwellHours = (r.shipment.departedAt.getTime() - order.createdAt.getTime()) / (1000 * 60 * 60);
+          if (dwellHours >= 0) dwellHoursSamples.push(dwellHours);
+
+          if (stop.pod?.deliveredAt) {
+            const transitHours = (stop.pod.deliveredAt.getTime() - r.shipment.departedAt.getTime()) / (1000 * 60 * 60);
+            if (transitHours >= 0) transitHoursSamples.push(transitHours);
+          }
+        }
       }
     }
 
@@ -198,6 +240,28 @@ dashboardRouter.get(
     }
     const customerAbc = abcClasses.map((c) => ({ ...c, weightKg: Math.round(c.weightKg) }));
 
+    // Fase 8V: media de horas de las dos listas de muestras -- null (no 0) si
+    // no hay ninguna muestra en el periodo/filtro elegido, para no dar a
+    // entender "0 horas" cuando en realidad no hay dato.
+    const avgHours = (samples: number[]) =>
+      samples.length > 0 ? Math.round((samples.reduce((acc, h) => acc + h, 0) / samples.length) * 10) / 10 : null;
+    const warehouseDwellAvgHours = avgHours(dwellHoursSamples);
+    const transitAvgHours = avgHours(transitHoursSamples);
+
+    // "Cumplimiento de entrega por cliente": los de peor cumplimiento
+    // primero (son los que de verdad hace falta revisar), tope de 15 -- mismo
+    // criterio de recorte que "Top zonas por volumen".
+    const customerCompliance = [...customerOtif.entries()]
+      .map(([customerId, c]) => ({
+        customerId,
+        legalName: c.legalName,
+        stopsTotal: c.stopsTotal,
+        stopsCompleted: c.stopsCompleted,
+        otifPct: pct(c.stopsCompleted, c.stopsTotal),
+      }))
+      .sort((a, b) => a.otifPct - b.otifPct)
+      .slice(0, 15);
+
     const sortedBuckets = [...buckets.values()].sort((a, b) => a.period.localeCompare(b.period));
 
     const totals = sortedBuckets.reduce(
@@ -224,6 +288,13 @@ dashboardRouter.get(
         costEstimated: totals.costEstimated,
         costDeviationPct: totals.costEstimated > 0 ? Math.round(((totals.costReal - totals.costEstimated) / totals.costEstimated) * 1000) / 10 : null,
         distanceKm: Math.round(totals.distanceKm),
+        // Fase 8V: "total pedidos por ruta" -- media de pedidos (paradas) por
+        // ruta en el periodo, no el total absoluto (ya lo da `stopsTotal` de
+        // forma indirecta vía `routes`×esta media, pero como cifra suelta el
+        // total absoluto no dice nada sin el nº de rutas).
+        avgStopsPerRoute: totals.routes > 0 ? Math.round((totals.stopsTotal / totals.routes) * 10) / 10 : 0,
+        warehouseDwellAvgHours,
+        transitAvgHours,
       },
       buckets: sortedBuckets.map((b) => ({
         period: b.period,
@@ -241,6 +312,7 @@ dashboardRouter.get(
         .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100 })),
       topZones,
       customerAbc,
+      customerCompliance,
     });
   })
 );

@@ -66,6 +66,14 @@ interface AbcRow {
   weightKg: number;
 }
 
+interface CustomerComplianceRow {
+  customerId: string;
+  legalName: string;
+  stopsTotal: number;
+  stopsCompleted: number;
+  otifPct: number;
+}
+
 interface HistoryResponse {
   range: { from: string; to: string; groupBy: "day" | "week" | "month" };
   totals: {
@@ -77,11 +85,17 @@ interface HistoryResponse {
     costEstimated: number;
     costDeviationPct: number | null;
     distanceKm: number;
+    avgStopsPerRoute: number;
+    // Mejora (2026-09-14): null cuando no hay ninguna muestra en el periodo/
+    // filtro (nunca 0 -- 0 horas daría a entender un dato real que no existe).
+    warehouseDwellAvgHours: number | null;
+    transitAvgHours: number | null;
   };
   buckets: Bucket[];
   byCarrier: CarrierRow[];
   topZones: ZoneRow[];
   customerAbc: AbcRow[];
+  customerCompliance: CustomerComplianceRow[];
 }
 
 // Colores fijos por clase ABC (mismo criterio del panel BI de referencia de
@@ -137,7 +151,24 @@ function formatKg(kg: number) {
   return `${kg.toLocaleString("es-ES")} kg`;
 }
 
-export default function AnalyticsPage() {
+// Mejora (2026-09-14): tiempos medios en horas -- se muestran en días cuando
+// pasan de 48h (más legible que "76,3 h" para tiempos de almacén largos).
+function formatHours(hours: number | null): string {
+  if (hours == null) return "—";
+  if (hours >= 48) return `${(hours / 24).toLocaleString("es-ES", { maximumFractionDigits: 1 })} d`;
+  return `${hours.toLocaleString("es-ES", { maximumFractionDigits: 1 })} h`;
+}
+
+interface Props {
+  // Mejora (2026-09-14): consolidación de Analítica/Alertas/Previsión en un
+  // solo acceso de menú (petición de Raúl: "son muchas pestañas para datos
+  // sin demasiada variabilidad") -- mismo patrón "embedded" ya usado en
+  // VehiclesPage/InfluenceZonesPage: oculta el título y la descripción
+  // propios cuando esta pantalla se monta como pestaña de AnalyticsHubPage.
+  embedded?: boolean;
+}
+
+export default function AnalyticsPage({ embedded }: Props = {}) {
   const [presetDays, setPresetDays] = useState(30);
   const [warehouseId, setWarehouseId] = useState("");
   const [carrierId, setCarrierId] = useState("");
@@ -170,12 +201,16 @@ export default function AnalyticsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-semibold text-slate-900">Analítica</h1>
-      </div>
-      <p className="text-sm text-slate-500 mb-4">
-        Histórico de coste, OTIF, incidencias y ocupación de la flota por periodo.
-      </p>
+      {!embedded && (
+        <>
+          <div className="flex items-center justify-between mb-1">
+            <h1 className="text-xl font-semibold text-slate-900">Analítica</h1>
+          </div>
+          <p className="text-sm text-slate-500 mb-4">
+            Histórico de coste, OTIF, incidencias y ocupación de la flota por periodo.
+          </p>
+        </>
+      )}
 
       {/* Filtros: presets de fecha en una fila, dimensiones en combobox -- igual
           patrón que el resto del Backoffice (Planificador, Seguimiento). */}
@@ -234,6 +269,17 @@ export default function AnalyticsPage() {
               tone={data.totals.costDeviationPct == null ? "default" : data.totals.costDeviationPct > 10 ? "danger" : "success"}
             />
             <KpiCard label="Distancia planificada" value={`${data.totals.distanceKm.toLocaleString("es-ES")} km`} />
+            <KpiCard label="Pedidos por ruta (media)" value={data.totals.avgStopsPerRoute} />
+            <KpiCard
+              label="Pedido → salida (almacén, aprox.)"
+              value={formatHours(data.totals.warehouseDwellAvgHours)}
+              sub="Desde el alta del pedido hasta la salida real del envío -- no hay un evento de recepción de mercancía en almacén todavía, es una aproximación"
+            />
+            <KpiCard
+              label="Salida → entrega al cliente"
+              value={formatHours(data.totals.transitAvgHours)}
+              sub="Solo paradas con justificante de entrega ya firmado"
+            />
           </div>
 
           {data.buckets.length === 0 && (
@@ -279,37 +325,77 @@ export default function AnalyticsPage() {
             </div>
           )}
 
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100">
-              <h2 className="text-sm font-semibold text-slate-700">Por transportista</h2>
-            </div>
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
-                <tr>
-                  <th className="text-left px-4 py-2">Transportista</th>
-                  <th className="text-right px-4 py-2">Rutas</th>
-                  <th className="text-right px-4 py-2">Incidencias</th>
-                  <th className="text-right px-4 py-2">Coste real</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {data.byCarrier.length === 0 && (
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="text-sm font-semibold text-slate-700">Por transportista</h2>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
-                      Sin datos para este periodo.
-                    </td>
+                    <th className="text-left px-4 py-2">Transportista</th>
+                    <th className="text-right px-4 py-2">Rutas</th>
+                    <th className="text-right px-4 py-2">Incidencias</th>
+                    <th className="text-right px-4 py-2">Coste real</th>
                   </tr>
-                )}
-                {data.byCarrier.map((c) => (
-                  <tr key={c.carrierId} className="hover:bg-brand-50/60">
-                    <td className="px-4 py-2 font-medium text-slate-700">{c.legalName}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-600">{c.routes}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-600">{c.incidents}</td>
-                    <td className="px-4 py-2 text-right font-mono text-slate-600">{formatEuros(c.costReal)}</td>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.byCarrier.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                        Sin datos para este periodo.
+                      </td>
+                    </tr>
+                  )}
+                  {data.byCarrier.map((c) => (
+                    <tr key={c.carrierId} className="hover:bg-brand-50/60">
+                      <td className="px-4 py-2 font-medium text-slate-700">{c.legalName}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-600">{c.routes}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-600">{c.incidents}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-600">{formatEuros(c.costReal)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100">
+                <h2 className="text-sm font-semibold text-slate-700">Cumplimiento de entrega por cliente</h2>
+                <p className="text-xs text-slate-400">Peor cumplimiento primero -- hasta 15 clientes con paradas en el periodo</p>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left px-4 py-2">Cliente</th>
+                    <th className="text-right px-4 py-2">Paradas</th>
+                    <th className="text-right px-4 py-2">OTIF</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.customerCompliance.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="px-4 py-6 text-center text-slate-400">
+                        Sin datos para este periodo.
+                      </td>
+                    </tr>
+                  )}
+                  {data.customerCompliance.map((c) => (
+                    <tr key={c.customerId} className="hover:bg-brand-50/60">
+                      <td className="px-4 py-2 font-medium text-slate-700">{c.legalName}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-600">
+                        {c.stopsCompleted}/{c.stopsTotal}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <span className={`font-mono font-semibold ${c.otifPct >= 90 ? "text-teal-600" : c.otifPct >= 70 ? "text-amber-600" : "text-red-600"}`}>
+                          {c.otifPct}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       )}
