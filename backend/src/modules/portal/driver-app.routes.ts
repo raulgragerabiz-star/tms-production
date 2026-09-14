@@ -95,7 +95,14 @@ driverAppRouter.get(
           },
         },
       },
-      orderBy: { createdAt: "asc" },
+      // Nota (fix post-Fase 8Y): `Shipment` no tiene columna `createdAt` en el
+      // schema real -- se probó en el build de producción de Raúl (tsc real
+      // con cliente Prisma generado, cosa que este entorno de trabajo no
+      // puede reproducir) y falló con TS2353. Se ordena por `id` como
+      // desempate estable y determinista; el orden que de verdad importa
+      // (en curso primero) lo aplica el `.sort()` de debajo por prioridad de
+      // estado.
+      orderBy: { id: "asc" },
     });
     shipments.sort((a: { status: string }, b: { status: string }) => (SHIPMENT_STATUS_PRIORITY[a.status] ?? 9) - (SHIPMENT_STATUS_PRIORITY[b.status] ?? 9));
 
