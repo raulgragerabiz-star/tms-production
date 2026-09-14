@@ -402,11 +402,12 @@ model Carrier {
   // del transporte, Orden FOM/2861/2012 · Ley 15/2009 LCTTM), que necesita
   // identificar al "transportista efectivo" con sus datos completos, no solo
   // ciudad/provincia. Opcionales: sin rellenar, el documento simplemente
-  // omite esa línea, igual que ya hace con los datos de Company. Si la
-  // empresa cargadora subcontrata el transporte a otra empresa distinta de
-  // la habitual, se resuelve dando de alta esa empresa como su propio
-  // Carrier y asignándola a la ruta -- no hay un campo aparte "por envío",
-  // decisión explícita de Raúl.
+  // omite esa línea, igual que ya hace con los datos de Company. Son los
+  // datos POR DEFECTO del "transportista efectivo" en el DeCA -- para la
+  // subcontratación puntual de un envío concreto, ver
+  // Route.subcontractedCarrier* (corrección de Raúl en Fase 8Y: eso NO se
+  // resuelve dando de alta un Carrier nuevo, es un campo rellenable por
+  // ruta/envío).
   address               String?
   postalCode            String?               @map("postal_code")
   phone                 String?
@@ -929,6 +930,25 @@ model Route {
   // tipo hasta que haya datos.
   distancePlannedKm Decimal?       @map("distance_planned_km") @db.Decimal(10, 2)
   distanceRealKm    Decimal?       @map("distance_real_km") @db.Decimal(10, 2)
+
+  // Fase 8Y: "transportista subcontratado" para ESTA ruta/envío en concreto
+  // -- corrección explícita de Raúl sobre el diseño de la Fase 8X. NO es la
+  // ficha del Carrier asignado a la ruta (Carrier.address/postalCode/phone,
+  // que se queda como dato POR DEFECTO del transportista efectivo). Esto es
+  // un apartado rellenable, por ruta, para cuando el transportista que
+  // hemos seleccionado (route.carrier) subcontrata a su vez a una empresa
+  // distinta para ejecutar el transporte -- backoffice lo rellena en su
+  // nombre (no hay Portal Transportista real en uso todavía, mismo criterio
+  // que el resto de "confirmar a mano" del Planificador). Si
+  // subcontractedCarrierName está relleno, el DeCA (renderCarriageNotePdf)
+  // muestra estos datos en el bloque "Transportista efectivo" en vez de los
+  // de route.carrier, dejando constancia además de quién subcontrató. Todos
+  // opcionales y aditivos: sin rellenar, el DeCA se comporta exactamente
+  // igual que antes (usa route.carrier).
+  subcontractedCarrierName    String? @map("subcontracted_carrier_name")
+  subcontractedCarrierTaxId   String? @map("subcontracted_carrier_tax_id")
+  subcontractedCarrierAddress String? @map("subcontracted_carrier_address")
+  subcontractedCarrierPhone   String? @map("subcontracted_carrier_phone")
 
   @@map("route")
 }

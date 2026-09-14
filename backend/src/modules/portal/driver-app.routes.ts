@@ -42,6 +42,22 @@ async function notifyShipmentChange(shipmentId: string, type: string, payload: R
 // ningún cliente que no mande el parámetro nota ningún cambio). También se
 // añade "finished" a los estados aceptados: para una fecha pasada tiene
 // sentido poder consultar una ruta ya entregada, no solo las activas.
+//
+// Fase 8Y: bug reportado por Raúl -- "no le salen todas las rutas asignadas"
+// al conductor. Este endpoint usaba `findFirst` y devolvía UN solo envío
+// (`{ shipment }`), aunque nada en el modelo (Shipment.driverId no es único,
+// solo Shipment.routeId lo es) impide que un mismo conductor tenga varios
+// envíos/rutas el mismo día (p.ej. dos rutas cortas seguidas). Con
+// `findFirst`, si había más de uno, la App Conductor solo veía el que
+// devolviera antes la consulta -- de ahí que "solo salga una parada" cuando
+// en realidad tenía más de una ruta asignada. Ahora se listan TODOS
+// (`findMany`) y se devuelven como `shipments: [...]` (array, antes objeto
+// único), ordenados por si el envío ya está en curso primero y luego por
+// hora de creación. Ver TodayRoutePage.tsx / StopDetailPage.tsx en el
+// frontend, actualizados para pintar una tarjeta por envío en vez de asumir
+// que solo puede haber uno.
+const SHIPMENT_STATUS_PRIORITY: Record<string, number> = { in_transit: 0, loaded: 1, programmed: 2, finished: 3 };
+
 driverAppRouter.get(
   "/today-route",
   asyncHandler(async (req, res) => {
@@ -53,7 +69,7 @@ driverAppRouter.get(
     const nextDay = new Date(day);
     nextDay.setDate(nextDay.getDate() + 1);
 
-    const shipment = await prisma.shipment.findFirst({
+    const shipments = await prisma.shipment.findMany({
       where: {
         driverId,
         status: { in: ["programmed", "loaded", "in_transit", "finished"] },
@@ -79,10 +95,11 @@ driverAppRouter.get(
           },
         },
       },
+      orderBy: { createdAt: "asc" },
     });
+    shipments.sort((a: { status: string }, b: { status: string }) => (SHIPMENT_STATUS_PRIORITY[a.status] ?? 9) - (SHIPMENT_STATUS_PRIORITY[b.status] ?? 9));
 
-    if (!shipment) return res.json({ shipment: null });
-    res.json({ shipment });
+    res.json({ shipments });
   })
 );
 

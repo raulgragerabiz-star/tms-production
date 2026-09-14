@@ -34,6 +34,12 @@ interface RouteDetail {
   warehouse: { name: string };
   carrier: { id: string; legalName: string } | null;
   vehicle: { id: string; plate: string } | null;
+  // Fase 8Y: transportista subcontratado por el carrier asignado, rellenable
+  // por ruta -- ver comentario en Route.subcontractedCarrier* (schema.prisma).
+  subcontractedCarrierName: string | null;
+  subcontractedCarrierTaxId: string | null;
+  subcontractedCarrierAddress: string | null;
+  subcontractedCarrierPhone: string | null;
   loadPlan: { weightOccupancyPct: number; palletOccupancyPct: number; totalWeightKg: string; totalPallets: string } | null;
   stops: { id: string; order: { orderNumber: string; customer: { legalName: string } } }[];
   costSimulations: {
@@ -71,6 +77,11 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
   const [selectedDriverId, setSelectedDriverId] = useState("");
   const [manualCarrierId, setManualCarrierId] = useState("");
+  const [showSubcontracted, setShowSubcontracted] = useState(false);
+  const [subName, setSubName] = useState("");
+  const [subTaxId, setSubTaxId] = useState("");
+  const [subAddress, setSubAddress] = useState("");
+  const [subPhone, setSubPhone] = useState("");
 
   const routeQuery = useQuery({
     queryKey: ["route-detail", routeId],
@@ -83,6 +94,14 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
     setSelectedVehicleId(route?.vehicle?.id ?? "");
     setSelectedDriverId(route?.shipment?.driverId ?? "");
   }, [route?.id, route?.vehicle?.id, route?.shipment?.driverId]);
+
+  useEffect(() => {
+    setSubName(route?.subcontractedCarrierName ?? "");
+    setSubTaxId(route?.subcontractedCarrierTaxId ?? "");
+    setSubAddress(route?.subcontractedCarrierAddress ?? "");
+    setSubPhone(route?.subcontractedCarrierPhone ?? "");
+    setShowSubcontracted(!!route?.subcontractedCarrierName);
+  }, [route?.id, route?.subcontractedCarrierName, route?.subcontractedCarrierTaxId, route?.subcontractedCarrierAddress, route?.subcontractedCarrierPhone]);
 
   const vehiclesQuery = useQuery({
     queryKey: ["vehicles", "by-carrier", route?.carrier?.id],
@@ -150,6 +169,31 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
       onSuccess("Transportista asignado directamente (sin comparativa de coste)");
     },
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo asignar el transportista"),
+  });
+
+  // Fase 8Y: apartado rellenable por ruta -- corrección de Raúl, no es la
+  // ficha permanente del transportista (Maestros → Flota y Transportistas).
+  // Enviar los 4 campos vacíos limpia la subcontratación (el DeCA vuelve a
+  // mostrar los datos del carrier asignado).
+  const saveSubcontractedMutation = useMutation({
+    // Acepta un override explícito (usado por "Quitar subcontratación") en vez
+    // de leer siempre el estado del componente -- si se limpiara el estado y
+    // se llamara a mutate() en el mismo tick, el closure de mutationFn seguiría
+    // viendo los valores anteriores (React no re-renderiza de forma síncrona).
+    mutationFn: async (override?: { name: string; taxId: string; address: string; phone: string }) =>
+      (
+        await api.patch(`/routes/${routeId}/subcontracted-carrier`, {
+          subcontractedCarrierName: (override ? override.name : subName) || undefined,
+          subcontractedCarrierTaxId: (override ? override.taxId : subTaxId) || undefined,
+          subcontractedCarrierAddress: (override ? override.address : subAddress) || undefined,
+          subcontractedCarrierPhone: (override ? override.phone : subPhone) || undefined,
+        })
+      ).data,
+    onSuccess: () => {
+      invalidateAll();
+      onSuccess("Transportista subcontratado guardado — ya aparece así en el DeCA de esta ruta");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo guardar el transportista subcontratado"),
   });
 
   const setVehicleMutation = useMutation({
@@ -351,6 +395,95 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   </div>
                 )}
               </div>
+
+              {/* Fase 8Y: transportista subcontratado -- corrección de Raúl:
+                  apartado rellenable POR RUTA (no una ficha permanente del
+                  Carrier) para cuando el transportista asignado subcontrata a
+                  otra empresa distinta para ejecutar el transporte. Solo
+                  tiene sentido una vez elegido un transportista. */}
+              {route.carrier && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  {!showSubcontracted ? (
+                    <button
+                      onClick={() => setShowSubcontracted(true)}
+                      className="text-xs font-medium text-amber-700 hover:text-amber-800"
+                    >
+                      + {route.carrier.legalName} subcontrata el transporte a otra empresa…
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-amber-800">
+                        Transportista subcontratado por {route.carrier.legalName}
+                      </p>
+                      <p className="text-xs text-amber-700">
+                        Rellena esto solo si {route.carrier.legalName} no ejecuta el transporte él mismo, sino que lo
+                        subcontrata a otra empresa. El DeCA de esta ruta mostrará estos datos como "Transportista
+                        efectivo", dejando constancia de quién subcontrató.
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Field label="Nombre / razón social">
+                          <input
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                            value={subName}
+                            onChange={(e) => setSubName(e.target.value)}
+                            placeholder="Empresa subcontratada"
+                          />
+                        </Field>
+                        <Field label="CIF">
+                          <input
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                            value={subTaxId}
+                            onChange={(e) => setSubTaxId(e.target.value)}
+                          />
+                        </Field>
+                        <Field label="Dirección">
+                          <input
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                            value={subAddress}
+                            onChange={(e) => setSubAddress(e.target.value)}
+                          />
+                        </Field>
+                        <Field label="Teléfono">
+                          <input
+                            className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+                            value={subPhone}
+                            onChange={(e) => setSubPhone(e.target.value)}
+                          />
+                        </Field>
+                      </div>
+                      <div className="flex items-center gap-3 pt-1">
+                        <button
+                          onClick={() => saveSubcontractedMutation.mutate()}
+                          disabled={!subName.trim() || saveSubcontractedMutation.isPending}
+                          className="text-xs font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg px-3 py-1.5 disabled:opacity-50"
+                        >
+                          Guardar
+                        </button>
+                        {route.subcontractedCarrierName && (
+                          <button
+                            onClick={() => {
+                              saveSubcontractedMutation.mutate({ name: "", taxId: "", address: "", phone: "" });
+                              setSubName("");
+                              setSubTaxId("");
+                              setSubAddress("");
+                              setSubPhone("");
+                              setShowSubcontracted(false);
+                            }}
+                            className="text-xs font-medium text-red-500 hover:text-red-600"
+                          >
+                            Quitar subcontratación
+                          </button>
+                        )}
+                        {!route.subcontractedCarrierName && (
+                          <button onClick={() => setShowSubcontracted(false)} className="text-xs text-slate-500 hover:text-slate-600">
+                            Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Paso 2: vehículo del transportista ya elegido */}
               {route.carrier && (

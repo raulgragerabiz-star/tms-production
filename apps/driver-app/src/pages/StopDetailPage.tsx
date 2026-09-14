@@ -48,11 +48,14 @@ interface StopRow {
   incidents: { id: string; status: string }[];
 }
 
+// Fase 8Y: antes `shipment` (uno solo) -- un conductor puede tener más de un
+// envío/ruta el mismo día, ver comentario en driver-app.routes.ts GET
+// /today-route. Aquí se busca la parada (y su envío) entre TODOS.
 interface TodayRouteResponse {
-  shipment: {
+  shipments: {
     id: string;
     route: { stops: StopRow[] };
-  } | null;
+  }[];
 }
 
 const statusStyle: Record<string, ChipColor> = {
@@ -141,7 +144,8 @@ export default function StopDetailPage() {
     queryFn: async () => (await api.get("/driver-app/today-route", { params: { date } })).data as TodayRouteResponse,
   });
 
-  const stop = data?.shipment?.route.stops.find((s) => s.id === id);
+  const shipment = data?.shipments.find((s) => s.route.stops.some((st) => st.id === id));
+  const stop = shipment?.route.stops.find((s) => s.id === id);
 
   useEffect(() => {
     if (!stop) return;
@@ -248,9 +252,9 @@ export default function StopDetailPage() {
           >
             📄 Albarán
           </button>
-          {data?.shipment && (
+          {shipment && (
             <button
-              onClick={() => viewDocumentPdf(`/driver-app/shipments/${data.shipment!.id}/documents/carriage-note.pdf`)}
+              onClick={() => viewDocumentPdf(`/driver-app/shipments/${shipment.id}/documents/carriage-note.pdf`)}
               className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-brand-700 text-center"
             >
               🚚 DeCA

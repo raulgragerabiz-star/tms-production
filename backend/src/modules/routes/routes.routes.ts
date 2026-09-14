@@ -1005,6 +1005,43 @@ routesRouter.patch(
   })
 );
 
+// Fase 8Y: "transportista subcontratado" -- corrección de Raúl sobre el
+// diseño original de la Fase 8X (ver comentario en Route.subcontractedCarrier*
+// en schema.prisma). Apartado rellenable POR RUTA, independiente del
+// transportista asignado (route.carrier): backoffice lo rellena en nombre del
+// transportista cuando este subcontrata a otra empresa para ejecutar el
+// transporte. Enviar los 4 campos vacíos/omitidos limpia la subcontratación
+// (el DeCA vuelve a mostrar los datos del Carrier asignado). No exige ningún
+// estado concreto de la ruta -- puede rellenarse en cualquier momento antes
+// de que el conductor recoja el DeCA.
+routesRouter.patch(
+  "/:id/subcontracted-carrier",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({
+      subcontractedCarrierName: z.string().optional(),
+      subcontractedCarrierTaxId: z.string().optional(),
+      subcontractedCarrierAddress: z.string().optional(),
+      subcontractedCarrierPhone: z.string().optional(),
+    });
+    const data = schema.parse(req.body);
+
+    const route = await prisma.route.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!route) throw HttpError.notFound("Ruta no encontrada");
+
+    const clean = (v: string | undefined) => (v && v.trim().length > 0 ? v.trim() : null);
+    const updated = await prisma.route.update({
+      where: { id: route.id },
+      data: {
+        subcontractedCarrierName: clean(data.subcontractedCarrierName),
+        subcontractedCarrierTaxId: clean(data.subcontractedCarrierTaxId),
+        subcontractedCarrierAddress: clean(data.subcontractedCarrierAddress),
+        subcontractedCarrierPhone: clean(data.subcontractedCarrierPhone),
+      },
+    });
+    res.json(updated);
+  })
+);
+
 // Fase 8j: petición explícita de Raúl -- "debe poder eliminarse rutas
 // creadas, por si se ha cometido algún error y que no se queden ahí fijas".
 //

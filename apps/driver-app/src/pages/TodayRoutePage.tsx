@@ -45,13 +45,18 @@ interface StopRow {
   pod: { deliveredAt: string } | null;
 }
 
+interface ShipmentRow {
+  id: string;
+  status: string;
+  vehicle: { plate: string };
+  route: { warehouse: { name: string }; stops: StopRow[] };
+}
+
+// Fase 8Y: antes `shipment` (uno solo) -- ver comentario en
+// driver-app.routes.ts GET /today-route sobre por qué un conductor puede
+// tener más de un envío/ruta el mismo día.
 interface TodayRouteResponse {
-  shipment: {
-    id: string;
-    status: string;
-    vehicle: { plate: string };
-    route: { warehouse: { name: string }; stops: StopRow[] };
-  } | null;
+  shipments: ShipmentRow[];
 }
 
 const statusStyle: Record<string, ChipColor> = {
@@ -122,9 +127,11 @@ export default function TodayRoutePage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["current-shift"] }),
   });
 
+  // Fase 8Y: ahora recibe el id del envío -- puede haber más de una tarjeta
+  // (una por envío/ruta del día), cada una con su propio botón de estado.
   const shipmentStatusMutation = useMutation({
-    mutationFn: async (status: "loaded" | "in_transit") =>
-      (await api.post(`/driver-app/shipments/${data!.shipment!.id}/status`, { status })).data,
+    mutationFn: async ({ shipmentId, status }: { shipmentId: string; status: "loaded" | "in_transit" }) =>
+      (await api.post(`/driver-app/shipments/${shipmentId}/status`, { status })).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["today-route"] }),
   });
 
@@ -212,7 +219,7 @@ export default function TodayRoutePage() {
       <main className="px-4 pt-4 max-w-lg mx-auto">
         {isLoading && <p className="text-sm text-slate-400 text-center mt-10">Cargando ruta…</p>}
 
-        {!isLoading && !data?.shipment && (
+        {!isLoading && (!data?.shipments || data.shipments.length === 0) && (
           <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center mt-6">
             <p className="text-slate-500">
               {isToday
@@ -222,61 +229,72 @@ export default function TodayRoutePage() {
           </div>
         )}
 
-        {data?.shipment && (
-          <>
-            <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
-              <p className="text-sm text-slate-500">{data.shipment.route.warehouse.name}</p>
-              <p className="text-lg font-semibold text-slate-900 font-mono">Vehículo {data.shipment.vehicle.plate}</p>
-              <p className="text-xs text-slate-400 mt-1 font-mono">
-                {data.shipment.route.stops.length} paradas ·{" "}
-                {data.shipment.route.stops.filter((s) => s.status === "completed").length} completadas
-              </p>
-              {/* Fase 8M -- fix: antes este botón exigía "isToday" (fecha
-                  seleccionada === fecha real del dispositivo), pensado para
-                  no tocar el estado de una ruta histórica. Pero eso también
-                  ocultaba el botón con rutas de HOY cuyos datos de prueba
-                  llevan otra fecha (ver comentario de today-route más abajo
-                  en el backend), dejando sin forma de marcar "cargado" /
-                  "salgo de reparto". El único guardarraíl que hace falta de
-                  verdad es no dejar avanzar el estado de una ruta con fecha
-                  futura; una ruta ya finalizada tampoco muestra botón,
-                  porque su estado ya no está en NEXT_SHIPMENT_STATUS. */}
-              {selectedDate <= todayIso && NEXT_SHIPMENT_STATUS[data.shipment.status] && (
-                <button
-                  onClick={() => shipmentStatusMutation.mutate(NEXT_SHIPMENT_STATUS[data.shipment!.status]!.next)}
-                  disabled={shipmentStatusMutation.isPending}
-                  className="w-full mt-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 text-sm font-semibold shadow disabled:opacity-50"
-                >
-                  {NEXT_SHIPMENT_STATUS[data.shipment.status]!.label}
-                </button>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              {data.shipment.route.stops.map((stop) => (
-                <button
-                  key={stop.id}
-                  onClick={() => navigate(`/paradas/${stop.id}?date=${selectedDate}`)}
-                  className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:scale-[0.99] transition shadow-sm"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-mono font-bold text-slate-800">#{stop.sequence} — {stop.order.orderNumber}</span>
-                    <Chip color={statusStyle[stop.status] ?? "slate"}>{statusLabel[stop.status]}</Chip>
-                  </div>
-                  <p className="text-base font-medium text-slate-700">{stop.order.customer.legalName}</p>
-                  <p className="text-sm text-slate-500">
-                    {stop.order.deliveryPoint.address}
-                    {stop.order.deliveryPoint.city ? `, ${stop.order.deliveryPoint.city}` : ""}
+        {/* Fase 8Y: fix -- antes se asumía un único envío/ruta por conductor y
+            día ("shipment" en singular); un conductor puede tener varios
+            (p.ej. dos rutas cortas seguidas), así que ahora se pinta una
+            tarjeta + lista de paradas por cada envío en "shipments". */}
+        {data?.shipments && data.shipments.length > 0 && (
+          <div className="space-y-6">
+            {data.shipments.map((shipment, idx) => (
+              <div key={shipment.id}>
+                {data.shipments.length > 1 && (
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Ruta {idx + 1} de {data.shipments.length}</p>
+                )}
+                <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
+                  <p className="text-sm text-slate-500">{shipment.route.warehouse.name}</p>
+                  <p className="text-lg font-semibold text-slate-900 font-mono">Vehículo {shipment.vehicle.plate}</p>
+                  <p className="text-xs text-slate-400 mt-1 font-mono">
+                    {shipment.route.stops.length} paradas ·{" "}
+                    {shipment.route.stops.filter((s) => s.status === "completed").length} completadas
                   </p>
-                  {(stop.order.deliveryTimeWindowFrom || stop.order.deliveryTimeWindowTo) && (
-                    <p className="text-xs text-amber-600 mt-1">
-                      Ventana: {stop.order.deliveryTimeWindowFrom ?? "—"} - {stop.order.deliveryTimeWindowTo ?? "—"}
-                    </p>
+                  {/* Fase 8M -- fix: antes este botón exigía "isToday" (fecha
+                      seleccionada === fecha real del dispositivo), pensado para
+                      no tocar el estado de una ruta histórica. Pero eso también
+                      ocultaba el botón con rutas de HOY cuyos datos de prueba
+                      llevan otra fecha (ver comentario de today-route más abajo
+                      en el backend), dejando sin forma de marcar "cargado" /
+                      "salgo de reparto". El único guardarraíl que hace falta de
+                      verdad es no dejar avanzar el estado de una ruta con fecha
+                      futura; una ruta ya finalizada tampoco muestra botón,
+                      porque su estado ya no está en NEXT_SHIPMENT_STATUS. */}
+                  {selectedDate <= todayIso && NEXT_SHIPMENT_STATUS[shipment.status] && (
+                    <button
+                      onClick={() => shipmentStatusMutation.mutate({ shipmentId: shipment.id, status: NEXT_SHIPMENT_STATUS[shipment.status]!.next })}
+                      disabled={shipmentStatusMutation.isPending}
+                      className="w-full mt-3 bg-brand-600 hover:bg-brand-700 text-white rounded-xl py-3 text-sm font-semibold shadow disabled:opacity-50"
+                    >
+                      {NEXT_SHIPMENT_STATUS[shipment.status]!.label}
+                    </button>
                   )}
-                </button>
-              ))}
-            </div>
-          </>
+                </div>
+
+                <div className="space-y-3">
+                  {shipment.route.stops.map((stop) => (
+                    <button
+                      key={stop.id}
+                      onClick={() => navigate(`/paradas/${stop.id}?date=${selectedDate}`)}
+                      className="w-full text-left bg-white rounded-2xl border border-slate-200 p-4 active:scale-[0.99] transition shadow-sm"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-mono font-bold text-slate-800">#{stop.sequence} — {stop.order.orderNumber}</span>
+                        <Chip color={statusStyle[stop.status] ?? "slate"}>{statusLabel[stop.status]}</Chip>
+                      </div>
+                      <p className="text-base font-medium text-slate-700">{stop.order.customer.legalName}</p>
+                      <p className="text-sm text-slate-500">
+                        {stop.order.deliveryPoint.address}
+                        {stop.order.deliveryPoint.city ? `, ${stop.order.deliveryPoint.city}` : ""}
+                      </p>
+                      {(stop.order.deliveryTimeWindowFrom || stop.order.deliveryTimeWindowTo) && (
+                        <p className="text-xs text-amber-600 mt-1">
+                          Ventana: {stop.order.deliveryTimeWindowFrom ?? "—"} - {stop.order.deliveryTimeWindowTo ?? "—"}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </main>
     </div>

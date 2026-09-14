@@ -106,7 +106,11 @@ billingRouter.post(
     }
 
     const updated = await prisma.carrierSettlement.update({ where: { id: settlement.id }, data: { totalAmount: total } });
-    res.status(201).json({ settlement: updated, exceptions });
+    // `lineCount`: cuántas SettlementLine se crearon realmente -- el frontend
+    // (BillingPage.tsx, botón "Generar liquidación") lo necesita para poder
+    // avisar con claridad de un resultado vacío ("0 envíos que liquidar en
+    // ese periodo") en vez de un simple 201 sin más información.
+    res.status(201).json({ settlement: updated, exceptions, lineCount: shipments.length - exceptions.length });
   })
 );
 

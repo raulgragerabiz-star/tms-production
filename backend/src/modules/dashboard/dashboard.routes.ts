@@ -35,6 +35,15 @@ function pct(numerator: number, denominator: number): number {
   return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : 0;
 }
 
+// Fase 8Y: a diferencia de `pct` (usada por OTIF, donde "sin paradas" = 0%
+// tiene sentido), OTD/OTS pueden tener denominador 0 en un periodo con
+// actividad real (ninguna parada con ETA, o ningún envío salido todavía) --
+// ahí un 0% sería engañoso ("cumplimiento nulo" en vez de "sin datos para
+// medirlo"). Mismo criterio que warehouseDwellAvgHours/transitAvgHours.
+function pctOrNull(numerator: number, denominator: number): number | null {
+  return denominator > 0 ? Math.round((numerator / denominator) * 1000) / 10 : null;
+}
+
 dashboardRouter.get(
   "/history",
   asyncHandler(async (req, res) => {
@@ -74,6 +83,10 @@ dashboardRouter.get(
         stops: {
           select: {
             status: true,
+            // Fase 8Y: `eta` -- ETA planificada de la parada (calculada por el
+            // motor de rutas al secuenciar) -- hace falta para el nuevo KPI
+            // OTD (ver más abajo).
+            eta: true,
             order: {
               select: {
                 customerId: true,
@@ -112,6 +125,29 @@ dashboardRouter.get(
       weightOccupancySum: number;
       palletOccupancySum: number;
       distanceKm: number;
+      // Fase 8Y: petición de Raúl -- "la analitica debe tener claramente
+      // visible de forma principal otd ots y otif". OTIF ya existía
+      // (stopsCompleted/stopsTotal). Se añaden aquí los otros dos:
+      //
+      // OTD (entrega a tiempo): de las paradas COMPLETADAS que tenían una ETA
+      // planificada (RouteStop.eta, calculada por el motor de rutas al
+      // secuenciar) y ya tienen albarán firmado (pod.deliveredAt), cuántas se
+      // entregaron dentro de la ETA + un margen de 15 min. Mide si la
+      // ejecución se ajustó al plan operativo del día. Las paradas sin ETA
+      // planificada (rutas antiguas sin recalcular, o sin geocodificar) no
+      // cuentan ni a favor ni en contra -- no hay con qué comparar.
+      //
+      // OTS (salida a tiempo): de los ENVÍOS que ya salieron a reparto
+      // (Shipment.departedAt), cuántos lo hicieron el mismo día natural que
+      // su ruta tenía planificado (Route.routeDate). Aproximación honesta:
+      // el schema no guarda una HORA de salida planificada (solo la fecha),
+      // así que no se puede exigir puntualidad a la hora -- se mide "no se
+      // retrasó a otro día", que es el dato real disponible. Documentado
+      // igual que warehouseDwellAvgHours/transitAvgHours más abajo.
+      otdEligible: number;
+      otdOnTime: number;
+      otsEligible: number;
+      otsOnTime: number;
     }
     const emptyBucket = (period: string): Bucket => ({
       period,
@@ -124,7 +160,12 @@ dashboardRouter.get(
       weightOccupancySum: 0,
       palletOccupancySum: 0,
       distanceKm: 0,
+      otdEligible: 0,
+      otdOnTime: 0,
+      otsEligible: 0,
+      otsOnTime: 0,
     });
+    const OTD_TOLERANCE_MS = 15 * 60 * 1000;
 
     const buckets = new Map<string, Bucket>();
     const byCarrier = new Map<string, { carrierId: string; legalName: string; routes: number; incidents: number; costReal: number }>();
@@ -172,6 +213,15 @@ dashboardRouter.get(
       b.weightOccupancySum += r.loadPlan ? Number(r.loadPlan.weightOccupancyPct) : 0;
       b.palletOccupancySum += r.loadPlan ? Number(r.loadPlan.palletOccupancyPct) : 0;
       b.distanceKm += r.loadPlan?.distanceKm ? Number(r.loadPlan.distanceKm) : 0;
+
+      // OTS: una muestra por ENVÍO (no por parada), ver comentario en Bucket.
+      if (r.shipment?.departedAt) {
+        b.otsEligible += 1;
+        const departedDay = r.shipment.departedAt.toISOString().slice(0, 10);
+        const plannedDay = r.routeDate.toISOString().slice(0, 10);
+        if (departedDay <= plannedDay) b.otsOnTime += 1;
+      }
+
       buckets.set(key, b);
 
       if (r.carrier) {
@@ -196,6 +246,13 @@ dashboardRouter.get(
         co.stopsTotal += 1;
         if (stop.status === "completed") co.stopsCompleted += 1;
         customerOtif.set(order.customerId, co);
+
+        // OTD: solo paradas completadas con ETA planificada y albarán
+        // firmado -- ver comentario en Bucket más arriba.
+        if (stop.status === "completed" && stop.eta && stop.pod?.deliveredAt) {
+          b.otdEligible += 1;
+          if (stop.pod.deliveredAt.getTime() <= stop.eta.getTime() + OTD_TOLERANCE_MS) b.otdOnTime += 1;
+        }
 
         if (r.shipment?.departedAt) {
           const dwellHours = (r.shipment.departedAt.getTime() - order.createdAt.getTime()) / (1000 * 60 * 60);
@@ -273,8 +330,12 @@ dashboardRouter.get(
         costReal: acc.costReal + b.costReal,
         costEstimated: acc.costEstimated + b.costEstimated,
         distanceKm: acc.distanceKm + b.distanceKm,
+        otdEligible: acc.otdEligible + b.otdEligible,
+        otdOnTime: acc.otdOnTime + b.otdOnTime,
+        otsEligible: acc.otsEligible + b.otsEligible,
+        otsOnTime: acc.otsOnTime + b.otsOnTime,
       }),
-      { routes: 0, stopsTotal: 0, stopsCompleted: 0, incidents: 0, costReal: 0, costEstimated: 0, distanceKm: 0 }
+      { routes: 0, stopsTotal: 0, stopsCompleted: 0, incidents: 0, costReal: 0, costEstimated: 0, distanceKm: 0, otdEligible: 0, otdOnTime: 0, otsEligible: 0, otsOnTime: 0 }
     );
 
     res.json({
@@ -282,6 +343,12 @@ dashboardRouter.get(
       totals: {
         routes: totals.routes,
         otifPct: pct(totals.stopsCompleted, totals.stopsTotal),
+        // Fase 8Y: OTD/OTS -- ver comentario junto a Bucket. `null` cuando no
+        // hay ninguna muestra elegible en el periodo/filtro (no "0%").
+        otdPct: pctOrNull(totals.otdOnTime, totals.otdEligible),
+        otdEligible: totals.otdEligible,
+        otsPct: pctOrNull(totals.otsOnTime, totals.otsEligible),
+        otsEligible: totals.otsEligible,
         incidents: totals.incidents,
         incidentRatePct: pct(totals.incidents, totals.routes),
         costReal: totals.costReal,
@@ -300,6 +367,8 @@ dashboardRouter.get(
         period: b.period,
         routes: b.routes,
         otifPct: pct(b.stopsCompleted, b.stopsTotal),
+        otdPct: pctOrNull(b.otdOnTime, b.otdEligible),
+        otsPct: pctOrNull(b.otsOnTime, b.otsEligible),
         incidents: b.incidents,
         costReal: Math.round(b.costReal * 100) / 100,
         costEstimated: Math.round(b.costEstimated * 100) / 100,

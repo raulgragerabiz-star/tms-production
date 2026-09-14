@@ -39,6 +39,10 @@ interface Bucket {
   period: string;
   routes: number;
   otifPct: number;
+  // Fase 8Y: null cuando no hay ninguna muestra elegible en ese periodo (ver
+  // comentario en dashboard.routes.ts) -- no "0%".
+  otdPct: number | null;
+  otsPct: number | null;
   incidents: number;
   costReal: number;
   costEstimated: number;
@@ -79,6 +83,14 @@ interface HistoryResponse {
   totals: {
     routes: number;
     otifPct: number;
+    // Fase 8Y: petición de Raúl -- "la analitica debe tener claramente
+    // visible de forma principal otd ots y otif". Ver comentario completo
+    // (definición de cada uno) en dashboard.routes.ts, junto a Bucket.
+    // null = sin ninguna muestra elegible en el periodo/filtro (no "0%").
+    otdPct: number | null;
+    otdEligible: number;
+    otsPct: number | null;
+    otsEligible: number;
     incidents: number;
     incidentRatePct: number;
     costReal: number;
@@ -258,9 +270,44 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
 
       {data && (
         <>
+          {/* Fase 8Y: petición explícita de Raúl -- "la analitica debe tener
+              claramente visible de forma principal otd ots y otif". Fila
+              propia, primero de todo y más grande que el resto de KPIs, en
+              vez de mezclado en la rejilla general de abajo (donde antes
+              solo estaba OTIF). Ver definición de cada métrica en
+              dashboard.routes.ts (comentario junto a Bucket). */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+            <div className="bg-white rounded-xl border-2 border-slate-200 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">OTD — Entrega a tiempo</p>
+              <p className={`font-mono text-4xl font-bold mt-2 ${data.totals.otdPct == null ? "text-slate-300" : data.totals.otdPct >= 90 ? "text-teal-600" : "text-amber-600"}`}>
+                {data.totals.otdPct == null ? "—" : `${data.totals.otdPct}%`}
+              </p>
+              <p className="text-xs text-slate-500 mt-1.5">
+                {data.totals.otdEligible > 0
+                  ? `Sobre ${data.totals.otdEligible} parada(s) con ETA planificada y albarán firmado`
+                  : "Sin paradas con ETA planificada y entrega ya registrada en este periodo"}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border-2 border-slate-200 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">OTS — Salida a tiempo</p>
+              <p className={`font-mono text-4xl font-bold mt-2 ${data.totals.otsPct == null ? "text-slate-300" : data.totals.otsPct >= 90 ? "text-teal-600" : "text-amber-600"}`}>
+                {data.totals.otsPct == null ? "—" : `${data.totals.otsPct}%`}
+              </p>
+              <p className="text-xs text-slate-500 mt-1.5">
+                {data.totals.otsEligible > 0
+                  ? `Sobre ${data.totals.otsEligible} envío(s) ya salidos a reparto. Aproximación: mide si salió el mismo día planificado, no la hora exacta (el sistema no guarda una hora de salida planificada)`
+                  : "Sin envíos que hayan salido a reparto todavía en este periodo"}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border-2 border-slate-200 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">OTIF del periodo</p>
+              <p className={`font-mono text-4xl font-bold mt-2 ${data.totals.otifPct >= 90 ? "text-teal-600" : "text-amber-600"}`}>{data.totals.otifPct}%</p>
+              <p className="text-xs text-slate-500 mt-1.5">Paradas completadas sobre el total de paradas del periodo</p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <KpiCard label="Rutas en el periodo" value={data.totals.routes} />
-            <KpiCard label="OTIF del periodo" value={`${data.totals.otifPct}%`} tone={data.totals.otifPct >= 90 ? "success" : "warning"} />
             <KpiCard label="Incidencias" value={data.totals.incidents} tone={data.totals.incidents > 0 ? "danger" : "success"} />
             <KpiCard label="Coste real" value={formatEuros(data.totals.costReal)} />
             <KpiCard

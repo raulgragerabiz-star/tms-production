@@ -38,18 +38,22 @@ export async function resolveVehicleFromQrToken(token: string) {
 // solo-con-QR (auth.service.ts, loginWithVehicleQrToken) -- mismo efecto
 // exacto, sin duplicar lógica: actualiza el vehículo del envío de hoy (si lo
 // hay) y de la jornada abierta (si la hay).
+//
+// Fase 8Y: `findFirst` + `update` cambiado a `updateMany` -- mismo bug de
+// fondo que el de driver-app.routes.ts GET /today-route (Shipment.driverId
+// no es único, un conductor puede tener más de un envío el mismo día). Con
+// `findFirst` solo se actualizaba UNO de ellos al escanear el QR del
+// vehículo; el resto se quedaba con el vehículo antiguo/vacío.
 export async function bindVehicleToDriverToday(driverId: string, vehicleId: string) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  const todayShipment = await prisma.shipment.findFirst({
+  await prisma.shipment.updateMany({
     where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
+    data: { vehicleId },
   });
-  if (todayShipment) {
-    await prisma.shipment.update({ where: { id: todayShipment.id }, data: { vehicleId } });
-  }
 
   const openShift = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
   if (openShift) {

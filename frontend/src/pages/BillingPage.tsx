@@ -99,11 +99,30 @@ function summarize(stops: SettlementLineDetail["shipment"]["route"]["stops"]) {
 }
 
 export default function BillingPage() {
-  const [view, setView] = useState<"liquidaciones" | "informe">("liquidaciones");
+  // Fase 8Y: petición de Raúl -- "la facturacion debe ser presentada en
+  // varios bloques. Ruta, almacen origen, transportista, cliente", que es
+  // exactamente el informe de gasto de la Fase 8W (byDeliveryZone/
+  // byWarehouse/byCarrier/byCustomer, ver ExpenseReportView más abajo). Ya
+  // existía, pero como pestaña secundaria detrás de "Liquidaciones" -- con
+  // esta casi siempre vacía (ver botón "Generar liquidación" más arriba),
+  // nunca se llegaba a ver. Ahora es la vista por defecto al entrar.
+  const [view, setView] = useState<"liquidaciones" | "informe">("informe");
   const [carrierId, setCarrierId] = useState("");
   const [status, setStatus] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  // Fase 8Y: generación de liquidaciones -- corrección de Raúl ("no devuelve
+  // correctamente datos de facturacion"). POST /billing/settlements existía
+  // en el backend desde la Fase 8V/8W pero no había NINGÚN botón en esta
+  // pantalla que lo llamara -- así que, aunque hubiera envíos finalizados sin
+  // liquidar, la lista de Liquidaciones estaba condenada a salir siempre
+  // vacía ("Sin liquidaciones para estos filtros") por mucho gasto real que
+  // hubiera detrás. Formulario mínimo: transportista + periodo, igual que
+  // pide el endpoint.
+  const [showGenerate, setShowGenerate] = useState(false);
+  const [genCarrierId, setGenCarrierId] = useState("");
+  const [genFrom, setGenFrom] = useState("");
+  const [genTo, setGenTo] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [disputeTarget, setDisputeTarget] = useState<{ lineId: string } | null>(null);
   const [resolveTarget, setResolveTarget] = useState<SettlementLineDetail | null>(null);
@@ -184,6 +203,33 @@ export default function BillingPage() {
     onError: () => showError("No se ha podido resolver la disputa"),
   });
 
+  // Fase 8Y: genera la liquidación (envíos "finished" del transportista y
+  // periodo elegidos, sin liquidar todavía) -- ver comentario junto al
+  // estado `showGenerate` más arriba.
+  const generateMutation = useMutation({
+    mutationFn: async () =>
+      (
+        await api.post("/billing/settlements", { carrierId: genCarrierId, periodFrom: genFrom, periodTo: genTo })
+      ).data as { settlement: SettlementRow; exceptions: string[]; lineCount: number },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["settlements"] });
+      setShowGenerate(false);
+      const lineCount = result.lineCount;
+      if (lineCount === 0 && result.exceptions.length === 0) {
+        showSuccess(
+          "Liquidación generada, pero sin envíos que liquidar: no hay ningún envío finalizado de ese transportista en ese periodo que no estuviera ya liquidado."
+        );
+      } else if (result.exceptions.length > 0) {
+        showSuccess(
+          `Liquidación generada con ${lineCount} línea(s) — ${result.exceptions.length} envío(s) sin tarifa vigente, quedan pendientes de revisar a mano.`
+        );
+      } else {
+        showSuccess(`Liquidación generada con ${lineCount} línea(s)`);
+      }
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo generar la liquidación"),
+  });
+
   return (
     <div>
       <h1 className="text-xl font-semibold text-slate-900 mb-1">Facturación / Liquidaciones</h1>
@@ -194,6 +240,14 @@ export default function BillingPage() {
 
       <div className="flex gap-2 mb-4">
         <button
+          onClick={() => setView("informe")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+            view === "informe" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+          }`}
+        >
+          Informe de gasto (por ruta / almacén / transportista / cliente)
+        </button>
+        <button
           onClick={() => setView("liquidaciones")}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
             view === "liquidaciones" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
@@ -201,15 +255,60 @@ export default function BillingPage() {
         >
           Liquidaciones
         </button>
-        <button
-          onClick={() => setView("informe")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-            view === "informe" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
-          }`}
-        >
-          Informe de gasto
-        </button>
+        {view === "liquidaciones" && (
+          <button
+            onClick={() => setShowGenerate((v) => !v)}
+            className="ml-auto px-3 py-1.5 rounded-lg text-sm font-medium bg-slate-800 hover:bg-slate-900 text-white"
+          >
+            + Generar liquidación
+          </button>
+        )}
       </div>
+
+      {/* Fase 8Y: ver comentario junto al estado `showGenerate` -- sin esto no
+          había forma de crear una liquidación desde la pantalla. */}
+      {view === "liquidaciones" && showGenerate && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+          <p className="text-sm font-semibold text-slate-700 mb-2">Generar liquidación</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Crea una liquidación con todos los envíos finalizados del transportista elegido dentro del periodo, que
+            todavía no tuvieran liquidación. Se puede generar tantas veces como haga falta — nunca duplica un envío ya
+            liquidado.
+          </p>
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Transportista</label>
+              <select
+                value={genCarrierId}
+                onChange={(e) => setGenCarrierId(e.target.value)}
+                className="rounded-lg border border-slate-300 text-sm px-3 py-2"
+              >
+                <option value="">Selecciona…</option>
+                {carriersQuery.data?.items.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.legalName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Desde</label>
+              <input type="date" value={genFrom} onChange={(e) => setGenFrom(e.target.value)} className="rounded-lg border border-slate-300 text-sm px-3 py-2" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Hasta</label>
+              <input type="date" value={genTo} onChange={(e) => setGenTo(e.target.value)} className="rounded-lg border border-slate-300 text-sm px-3 py-2" />
+            </div>
+            <button
+              onClick={() => generateMutation.mutate()}
+              disabled={!genCarrierId || !genFrom || !genTo || generateMutation.isPending}
+              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+            >
+              {generateMutation.isPending ? "Generando…" : "Generar"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select

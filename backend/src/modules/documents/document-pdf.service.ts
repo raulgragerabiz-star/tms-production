@@ -407,6 +407,15 @@ export interface CarriageNoteRoute {
   vehicle: { plate: string; trailerPlate: string | null } | null;
   driver: { fullName: string; taxId: string } | null;
   costSimulations: { estimatedCost: any }[];
+  // Fase 8Y: apartado rellenable por ruta para cuando el transportista
+  // asignado (carrier, arriba) subcontrata a otra empresa distinta para
+  // ejecutar el transporte -- ver comentario en Route.subcontractedCarrier*
+  // (schema.prisma). Si subcontractedCarrierName está relleno, sustituye a
+  // `carrier` en el bloque "Transportista efectivo" del documento.
+  subcontractedCarrierName?: string | null;
+  subcontractedCarrierTaxId?: string | null;
+  subcontractedCarrierAddress?: string | null;
+  subcontractedCarrierPhone?: string | null;
   stops: {
     order: {
       orderNumber: string;
@@ -430,11 +439,17 @@ export interface CarriageNoteRoute {
 // naturaleza de la mercancía (con las líneas de producto, igual que antes),
 // peso, origen y destino de cada parada, cargador contractual (Company) y
 // transportista efectivo (Carrier, con sus datos completos -- Fase 8X añadió
-// dirección/CP/teléfono al modelo). Si el cargador contractual subcontrata a
-// una empresa de transporte distinta de la habitual, se resuelve dando de
-// alta esa empresa como su propio Carrier y asignándola a la ruta (decisión
-// de Raúl) -- no hay un campo de "transportista efectivo" aparte, siempre es
-// el Carrier asignado a la ruta.
+// dirección/CP/teléfono al modelo).
+//
+// Fase 8Y: corrección de Raúl sobre la subcontratación -- el bloque
+// "Transportista efectivo" ya NO asume siempre que es el Carrier asignado a
+// la ruta. Si la ruta tiene rellenado un "transportista subcontratado" (ver
+// Route.subcontractedCarrier*), es a ESE al que se le muestran los datos ahí
+// (es quien de verdad ejecuta el transporte), añadiendo una línea "Subcontratado
+// por: <carrier asignado>" para no perder la trazabilidad de quién lo
+// subcontrató. Es un campo rellenable por ruta/envío, no una ficha
+// permanente -- backoffice lo rellena en nombre del transportista mientras no
+// haya Portal Transportista real en uso.
 export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);
@@ -501,10 +516,20 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   const companyCityLine = formatAddressLine([company.postalCode, company.city, company.province]);
   if (companyCityLine) cargadorLines.push({ text: companyCityLine });
 
-  const transportistaLines: InfoBoxLine[] = route.carrier
-    ? [{ text: route.carrier.legalName, bold: true }, { text: `CIF: ${route.carrier.taxId}` }]
-    : [{ text: "Sin transportista asignado todavía", color: "#94a3b8" }];
-  if (route.carrier) {
+  const hasSubcontractedCarrier = !!(route.subcontractedCarrierName && route.subcontractedCarrierName.trim().length > 0);
+
+  const transportistaLines: InfoBoxLine[] = hasSubcontractedCarrier
+    ? [{ text: route.subcontractedCarrierName!, bold: true }]
+    : route.carrier
+      ? [{ text: route.carrier.legalName, bold: true }, { text: `CIF: ${route.carrier.taxId}` }]
+      : [{ text: "Sin transportista asignado todavía", color: "#94a3b8" }];
+
+  if (hasSubcontractedCarrier) {
+    if (route.subcontractedCarrierTaxId) transportistaLines.push({ text: `CIF: ${route.subcontractedCarrierTaxId}` });
+    if (route.subcontractedCarrierAddress) transportistaLines.push({ text: route.subcontractedCarrierAddress });
+    if (route.subcontractedCarrierPhone) transportistaLines.push({ text: `Tel: ${route.subcontractedCarrierPhone}` });
+    transportistaLines.push({ text: `Subcontratado por: ${route.carrier?.legalName ?? "—"}`, color: "#64748b" });
+  } else if (route.carrier) {
     if (route.carrier.address) transportistaLines.push({ text: route.carrier.address });
     const carrierCityLine = formatAddressLine([route.carrier.postalCode, route.carrier.city, route.carrier.province]);
     if (carrierCityLine) transportistaLines.push({ text: carrierCityLine });
