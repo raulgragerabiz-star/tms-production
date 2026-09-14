@@ -35,7 +35,19 @@
 // -- ya se usa este criterio de "sin dependencia pesada" en el resto del
 // proyecto) + `qrcode` para el código QR de verificación. Ambas puras JS,
 // sin binarios nativos que compilar en el build de Docker.
+//
+// Fase 8Z: `pdf-lib` añadida SOLO para el DeCA (`renderCarriageNotePdf`) --
+// corrección de Raúl sobre el diseño de la Fase 8Y del bloque "Transportista
+// efectivo": ya no es un dato que rellena Backoffice y que el PDF se limita a
+// imprimir, sino un CAMPO DE FORMULARIO real dentro del propio PDF (AcroForm),
+// para que la empresa subcontratada pueda escribir sus datos directamente en
+// el documento con cualquier lector de PDF, sin tocar nuestro sistema.
+// pdfkit no tiene soporte de formularios interactivos, así que el documento
+// se sigue dibujando entero con pdfkit como siempre y, ya con los bytes
+// finales, se le añade el campo de formulario con pdf-lib antes de
+// devolverlo -- pdf-lib es igualmente pura JS, sin binarios nativos.
 import PDFDocument from "pdfkit";
+import { PDFDocument as PdfLibDocument } from "pdf-lib";
 import QRCode from "qrcode";
 import jwt from "jsonwebtoken";
 import { env } from "@/config/env";
@@ -104,9 +116,19 @@ function drainToBuffer(doc: PDFKit.PDFDocument): Promise<Buffer> {
 }
 
 function drawFooter(doc: PDFKit.PDFDocument, company: CompanyProfile, docLabel: string) {
-  const bottom = doc.page.height - 30;
+  // Fase 8Z (bug preexistente, no introducido por este cambio): pdfkit
+  // comprueba, ANTES de dibujar cada línea, si "document.y + lineHeight"
+  // supera `page.maxY()` (= height - PAGE_MARGIN) -- y si lo supera, añade
+  // página(s) nuevas automáticamente, aunque se le pase una coordenada y
+  // explícita y aunque el texto esté vacío ("" no evita la comprobación).
+  // Con "height - 30" ese margen de seguridad no llegaba ni para una línea
+  // (30 < PAGE_MARGIN=40 + lineHeight), así que cada DeCA/albarán generaba 2
+  // páginas de más al final (una en blanco, otra solo con el número de
+  // documento). Se corrige fijando el pie claramente DENTRO del margen
+  // inferior, con hueco de sobra para la altura de línea a fontSize 7.
+  doc.fontSize(7);
+  const bottom = doc.page.maxY() - doc.currentLineHeight(true) - 4;
   doc
-    .fontSize(7)
     .fillColor("#64748b")
     .text(
       company.mercantileRegistryText || "",
@@ -222,6 +244,31 @@ function drawInfoBox(doc: PDFKit.PDFDocument, x: number, y: number, width: numbe
     cy += doc.heightOfString(line.text, { width: innerWidth }) + 2;
   }
   doc.font("Helvetica").fillColor("#000000");
+}
+
+// Fase 8Z: dibuja solo el marco + etiqueta de una caja, SIN contenido -- para
+// la caja de "Transportista efectivo", cuyo contenido ya no lo escribe pdfkit
+// sino un campo de formulario de pdf-lib superpuesto encima (ver más abajo).
+// Devuelve el rectángulo real dibujado (en el sistema de coordenadas de
+// pdfkit, y con origen arriba a la izquierda) para poder calcular después el
+// rectángulo del campo de formulario en coordenadas PDF reales (origen abajo
+// a la izquierda).
+function drawFillableInfoBox(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  label: string
+): { x: number; y: number; width: number; height: number } {
+  doc.roundedRect(x, y, width, height, 6).lineWidth(1).strokeColor("#e2e8f0").stroke();
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(7.5)
+    .fillColor("#64748b")
+    .text(label.toUpperCase(), x + INFO_BOX_PAD, y + INFO_BOX_PAD, { width: width - INFO_BOX_PAD * 2, characterSpacing: 0.3 });
+  doc.font("Helvetica").fillColor("#000000");
+  return { x, y, width, height };
 }
 
 // Dibuja una fila de 2 cajas de igual alto (el mayor de las dos), devolviendo
@@ -417,6 +464,13 @@ export interface CarriageNoteRoute {
   subcontractedCarrierAddress?: string | null;
   subcontractedCarrierPhone?: string | null;
   stops: {
+    // Fase 8Z: hace falta para calcular la "carga efectiva" -- ver más abajo,
+    // sección "carga a bordo a día de hoy". Ya venía en el resultado real de
+    // Prisma en los 3 sitios que llaman a `renderCarriageNotePdf` (usan
+    // `include`, que trae todos los escalares de RouteStop) -- solo faltaba
+    // declararlo aquí en el tipo. Se tipa como `string` (no como el enum de
+    // Prisma) para no acoplar este fichero al cliente generado.
+    status: string;
     order: {
       orderNumber: string;
       notes?: string | null;
@@ -441,15 +495,21 @@ export interface CarriageNoteRoute {
 // transportista efectivo (Carrier, con sus datos completos -- Fase 8X añadió
 // dirección/CP/teléfono al modelo).
 //
-// Fase 8Y: corrección de Raúl sobre la subcontratación -- el bloque
-// "Transportista efectivo" ya NO asume siempre que es el Carrier asignado a
-// la ruta. Si la ruta tiene rellenado un "transportista subcontratado" (ver
-// Route.subcontractedCarrier*), es a ESE al que se le muestran los datos ahí
-// (es quien de verdad ejecuta el transporte), añadiendo una línea "Subcontratado
-// por: <carrier asignado>" para no perder la trazabilidad de quién lo
-// subcontrató. Es un campo rellenable por ruta/envío, no una ficha
-// permanente -- backoffice lo rellena en nombre del transportista mientras no
-// haya Portal Transportista real en uso.
+// Fase 8Z: corrección de Raúl sobre el diseño de la Fase 8Y. Dos cambios:
+//
+// 1) El bloque que antes se llamaba "Transportista efectivo" y mostraba el
+//    Carrier asignado a la ruta pasa a llamarse "Transportista contratado"
+//    (siempre el mismo dato de siempre, `route.carrier`) -- se libera el
+//    nombre "Transportista efectivo" para el punto 2.
+// 2) Nuevo: "Transportista efectivo" es ahora un CAMPO DE FORMULARIO real
+//    dentro del propio PDF (ver `drawFillableInfoBox` + el post-proceso con
+//    pdf-lib al final de esta función) -- la empresa subcontratada por el
+//    transportista contratado escribe sus propios datos directamente en el
+//    documento, sin pasar por Backoffice. Si Backoffice ya había rellenado
+//    algo en `Route.subcontractedCarrier*` (Fase 8Y, apartado que se
+//    mantiene como ayuda opcional en "Gestionar ruta"), esos datos se usan
+//    solo como VALOR INICIAL del campo -- el campo sigue siendo editable
+//    dentro del PDF por quien lo abra, nunca de solo lectura.
 export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);
@@ -516,20 +576,13 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   const companyCityLine = formatAddressLine([company.postalCode, company.city, company.province]);
   if (companyCityLine) cargadorLines.push({ text: companyCityLine });
 
-  const hasSubcontractedCarrier = !!(route.subcontractedCarrierName && route.subcontractedCarrierName.trim().length > 0);
-
-  const transportistaLines: InfoBoxLine[] = hasSubcontractedCarrier
-    ? [{ text: route.subcontractedCarrierName!, bold: true }]
-    : route.carrier
-      ? [{ text: route.carrier.legalName, bold: true }, { text: `CIF: ${route.carrier.taxId}` }]
-      : [{ text: "Sin transportista asignado todavía", color: "#94a3b8" }];
-
-  if (hasSubcontractedCarrier) {
-    if (route.subcontractedCarrierTaxId) transportistaLines.push({ text: `CIF: ${route.subcontractedCarrierTaxId}` });
-    if (route.subcontractedCarrierAddress) transportistaLines.push({ text: route.subcontractedCarrierAddress });
-    if (route.subcontractedCarrierPhone) transportistaLines.push({ text: `Tel: ${route.subcontractedCarrierPhone}` });
-    transportistaLines.push({ text: `Subcontratado por: ${route.carrier?.legalName ?? "—"}`, color: "#64748b" });
-  } else if (route.carrier) {
+  // "Transportista contratado" -- siempre el Carrier asignado a la ruta en el
+  // Planificador (antes se llamaba "Transportista efectivo" y era sustituido
+  // por el subcontratado cuando lo había; ver comentario de la Fase 8Z arriba).
+  const transportistaLines: InfoBoxLine[] = route.carrier
+    ? [{ text: route.carrier.legalName, bold: true }, { text: `CIF: ${route.carrier.taxId}` }]
+    : [{ text: "Sin transportista asignado todavía", color: "#94a3b8" }];
+  if (route.carrier) {
     if (route.carrier.address) transportistaLines.push({ text: route.carrier.address });
     const carrierCityLine = formatAddressLine([route.carrier.postalCode, route.carrier.city, route.carrier.province]);
     if (carrierCityLine) transportistaLines.push({ text: carrierCityLine });
@@ -543,8 +596,37 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     colWidth,
     gap,
     { label: "Cargador contractual (remitente)", lines: cargadorLines },
-    { label: "Transportista efectivo", lines: transportistaLines }
+    { label: "Transportista contratado", lines: transportistaLines }
   );
+
+  // Fase 8Z: "Transportista efectivo" -- caja de ancho completo, dibujada SIN
+  // contenido (el contenido lo pone el campo de formulario de pdf-lib, ver el
+  // post-proceso al final de la función). Altura fija con hueco de sobra para
+  // nombre + CIF + dirección + teléfono a mano o a máquina. Se recuerda el
+  // rectángulo (en coordenadas pdfkit) para poder calcular la posición real
+  // del campo de formulario después.
+  const fullWidth0 = doc.page.width - PAGE_MARGIN * 2;
+  const transportistaEfectivoHeight = 70;
+  const transportistaEfectivoBox = drawFillableInfoBox(
+    doc,
+    PAGE_MARGIN,
+    y,
+    fullWidth0,
+    transportistaEfectivoHeight,
+    "Transportista efectivo (si el transportista contratado subcontrata el transporte a otra empresa)"
+  );
+  y += transportistaEfectivoHeight + 10;
+
+  // Fase 8Z: "carga efectiva a día de hoy" -- petición de Raúl de que el DeCA
+  // se actualice solo según se van completando entregas, en vez de mostrar
+  // siempre la carga original de toda la ruta. Se excluyen del documento las
+  // paradas ya `completed` (entregadas -- ya no están en el camión); el resto
+  // de estados (pending/arrived/failed/returned) se consideran todavía "a
+  // bordo o sin resolver" y se mantienen. Mismo documento siempre (mismo Nº
+  // DECA, determinista por ruta+fecha) -- simplemente se regenera al vuelo
+  // cada vez que se abre/descarga, así que siempre refleja lo que debería
+  // llevar el camión EN ESTE MOMENTO, no lo que llevaba al salir.
+  const pendingStops = route.stops.filter((s) => s.status !== "completed");
 
   const origenLines: InfoBoxLine[] = [{ text: route.warehouse.name, bold: true }];
   if (route.warehouse.address) origenLines.push({ text: route.warehouse.address });
@@ -552,24 +634,28 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   if (warehouseCityLine) origenLines.push({ text: warehouseCityLine });
 
   // "incluir cada parada si contiene más de una" (petición de Raúl): con una
-  // sola parada se muestra su dirección completa aquí mismo, igual que la
-  // plantilla real; con varias, esta tarjeta remite a la tabla de detalle de
-  // más abajo (una fila por parada, con su propia dirección y mercancía) en
-  // vez de intentar meter N direcciones dentro de la misma tarjeta.
+  // sola parada PENDIENTE se muestra su dirección completa aquí mismo, igual
+  // que la plantilla real; con varias, esta tarjeta remite a la tabla de
+  // detalle de más abajo (una fila por parada, con su propia dirección y
+  // mercancía) en vez de intentar meter N direcciones dentro de la misma
+  // tarjeta. Con cero paradas pendientes (ruta ya completada del todo), se
+  // avisa de eso en vez de mostrar una tarjeta vacía.
   const destinoLines: InfoBoxLine[] =
-    route.stops.length === 1
-      ? (() => {
-          const stop = route.stops[0].order;
-          const lines: InfoBoxLine[] = [{ text: stop.deliveryPoint.label || stop.customer.legalName, bold: true }];
-          lines.push({ text: stop.deliveryPoint.address });
-          const dpCityLine = formatAddressLine([stop.deliveryPoint.postalCode, stop.deliveryPoint.city, stop.deliveryPoint.province]);
-          if (dpCityLine) lines.push({ text: dpCityLine });
-          return lines;
-        })()
-      : [
-          { text: `Ruta con ${route.stops.length} paradas`, bold: true },
-          { text: "Detalle de cada parada más abajo", color: "#64748b" },
-        ];
+    pendingStops.length === 0
+      ? [{ text: "Todas las paradas ya entregadas", color: "#64748b" }]
+      : pendingStops.length === 1
+        ? (() => {
+            const stop = pendingStops[0].order;
+            const lines: InfoBoxLine[] = [{ text: stop.deliveryPoint.label || stop.customer.legalName, bold: true }];
+            lines.push({ text: stop.deliveryPoint.address });
+            const dpCityLine = formatAddressLine([stop.deliveryPoint.postalCode, stop.deliveryPoint.city, stop.deliveryPoint.province]);
+            if (dpCityLine) lines.push({ text: dpCityLine });
+            return lines;
+          })()
+        : [
+            { text: `Ruta con ${pendingStops.length} paradas pendientes`, bold: true },
+            { text: "Detalle de cada parada más abajo", color: "#64748b" },
+          ];
 
   y = drawInfoBoxRow(
     doc,
@@ -585,9 +671,9 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   // para un documento de transporte (p.ej. "material de construcción" en vez
   // de la descripción comercial completa del SKU), con la comercial como
   // reserva si no se ha rellenado -- mismo criterio ya usado desde la
-  // Fase 8Q2. Se combinan las líneas de TODAS las paradas, sin repetir texto
-  // idéntico dos veces.
-  const allLines = route.stops.flatMap((s) => s.order.lines);
+  // Fase 8Q2. Se combinan las líneas de las paradas PENDIENTES (ver más
+  // arriba), sin repetir texto idéntico dos veces.
+  const allLines = pendingStops.flatMap((s) => s.order.lines);
   const goodsDescriptions = Array.from(
     new Set(allLines.map((l) => l.product.carriageNoteDescription || l.product.description))
   );
@@ -601,11 +687,19 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     colWidth,
     gap,
     {
-      label: "Naturaleza de la mercancía",
-      lines: [{ text: goodsDescriptions.join(", ") || "—" }, ...(anyAdr ? [{ text: "⚠ Incluye mercancía peligrosa (ADR)", color: "#b91c1c", bold: true }] : [])],
+      // Etiqueta corta a propósito: con el texto largo original
+      // ("...pendiente de entregar") se envolvía a 2 líneas dentro de la
+      // columna estrecha y se solapaba con el contenido (measureInfoBoxHeight
+      // asume 1 sola línea de etiqueta) -- el resto del documento (destino,
+      // tabla de detalle) ya deja claro que solo se cuenta lo pendiente.
+      label: "Mercancía pendiente",
+      lines:
+        pendingStops.length === 0
+          ? [{ text: "—", color: "#94a3b8" }]
+          : [{ text: goodsDescriptions.join(", ") || "—" }, ...(anyAdr ? [{ text: "⚠ Incluye mercancía peligrosa (ADR)", color: "#b91c1c", bold: true }] : [])],
     },
     {
-      label: "Peso total",
+      label: "Peso pendiente",
       lines: [{ text: `${totalWeight.toLocaleString("es-ES", { maximumFractionDigits: 2 })} kg`, bold: true, size: 12 }],
     }
   );
@@ -631,11 +725,12 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   drawInfoBox(doc, PAGE_MARGIN, y, fullWidth, observacionesHeight, "Observaciones", observacionesLines);
   y += observacionesHeight + 16;
 
-  // Detalle por parada -- siempre visible (no solo con varias paradas), para
-  // no perder el desglose de líneas de producto que pedía Raúl explícitamente
-  // ("incluyendo las líneas de producto"); con una sola parada es la misma
-  // dirección que ya se ve arriba, pero aquí con el detalle de mercancía.
-  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("Detalle de paradas y mercancía", PAGE_MARGIN, y);
+  // Detalle por parada -- solo paradas PENDIENTES (ver "carga efectiva a día
+  // de hoy" más arriba), para no perder el desglose de líneas de producto que
+  // pedía Raúl explícitamente ("incluyendo las líneas de producto"); con una
+  // sola parada pendiente es la misma dirección que ya se ve arriba, pero
+  // aquí con el detalle de mercancía.
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("Detalle de paradas y mercancía pendientes", PAGE_MARGIN, y);
   doc.fillColor("#000000");
   y += 16;
 
@@ -647,7 +742,13 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   ];
   y = drawTableHeader(doc, y, columns);
 
-  for (const stop of route.stops) {
+  if (pendingStops.length === 0) {
+    doc.fontSize(8.5).fillColor("#94a3b8").text("No quedan paradas pendientes -- mercancía totalmente entregada.", PAGE_MARGIN, y);
+    doc.fillColor("#000000");
+    y += 20;
+  }
+
+  for (const stop of pendingStops) {
     if (y > doc.page.height - 160) {
       doc.addPage();
       y = PAGE_MARGIN;
@@ -709,5 +810,44 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   drawFooter(doc, company, decaNumber);
 
   doc.end();
-  return bufferPromise;
+  const pdfkitBytes = await bufferPromise;
+
+  // Fase 8Z: post-proceso con pdf-lib -- añade el campo de formulario real de
+  // "Transportista efectivo" sobre la caja que pdfkit dejó en blanco
+  // (`transportistaEfectivoBox`, en coordenadas pdfkit: origen arriba a la
+  // izquierda). Conversión a coordenadas PDF reales (origen abajo a la
+  // izquierda, que es lo que pide pdf-lib): y_pdf = altura_página - y_pdfkit
+  // - alto_caja. La caja se dibuja siempre en la primera página (antes de
+  // cualquier `doc.addPage()` de esta función), así que se ancla a la
+  // página 0 sin más comprobación.
+  const pdfLibDoc = await PdfLibDocument.load(pdfkitBytes);
+  const page0 = pdfLibDoc.getPage(0);
+  const pageHeight = page0.getHeight();
+  const form = pdfLibDoc.getForm();
+  const transportistaEfectivoField = form.createTextField("transportista_efectivo");
+  transportistaEfectivoField.enableMultiline();
+
+  // Valor inicial del campo: si Backoffice ya rellenó algo en "Gestionar
+  // ruta" (Route.subcontractedCarrier*, Fase 8Y), se usa como borrador -- el
+  // campo sigue siendo editable dentro del PDF por quien lo abra, nunca de
+  // solo lectura.
+  const prefillLines: string[] = [];
+  if (route.subcontractedCarrierName && route.subcontractedCarrierName.trim().length > 0) {
+    prefillLines.push(route.subcontractedCarrierName.trim());
+    if (route.subcontractedCarrierTaxId) prefillLines.push(`CIF: ${route.subcontractedCarrierTaxId}`);
+    if (route.subcontractedCarrierAddress) prefillLines.push(route.subcontractedCarrierAddress);
+    if (route.subcontractedCarrierPhone) prefillLines.push(`Tel: ${route.subcontractedCarrierPhone}`);
+  }
+  transportistaEfectivoField.setText(prefillLines.join("\n"));
+
+  const fieldPad = 4;
+  const fieldBottomY = pageHeight - transportistaEfectivoBox.y - transportistaEfectivoBox.height;
+  transportistaEfectivoField.addToPage(page0, {
+    x: transportistaEfectivoBox.x + fieldPad,
+    y: fieldBottomY + fieldPad,
+    width: transportistaEfectivoBox.width - fieldPad * 2,
+    height: transportistaEfectivoBox.height - 22, // deja hueco para la etiqueta dibujada por pdfkit arriba de la caja
+  });
+
+  return Buffer.from(await pdfLibDoc.save());
 }

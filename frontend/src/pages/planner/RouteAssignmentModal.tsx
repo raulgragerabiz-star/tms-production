@@ -191,7 +191,7 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
       ).data,
     onSuccess: () => {
       invalidateAll();
-      onSuccess("Transportista subcontratado guardado — ya aparece así en el DeCA de esta ruta");
+      onSuccess("Guardado como borrador inicial del campo \"Transportista efectivo\" del DeCA — sigue siendo editable dentro del propio PDF");
     },
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo guardar el transportista subcontratado"),
   });
@@ -396,11 +396,16 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                 )}
               </div>
 
-              {/* Fase 8Y: transportista subcontratado -- corrección de Raúl:
-                  apartado rellenable POR RUTA (no una ficha permanente del
-                  Carrier) para cuando el transportista asignado subcontrata a
-                  otra empresa distinta para ejecutar el transporte. Solo
-                  tiene sentido una vez elegido un transportista. */}
+              {/* Fase 8Z: transportista subcontratado -- corrección de Raúl
+                  sobre el diseño de la Fase 8Y: "Transportista efectivo" ya
+                  no lo escribe Backoffice, es un campo de formulario real
+                  dentro del propio PDF del DeCA (rellenable por la empresa
+                  subcontratada, con cualquier lector de PDF). Este apartado
+                  se mantiene solo como ayuda opcional: si se rellena aquí,
+                  el campo del DeCA sale con estos datos como borrador inicial
+                  -- pero sigue siendo editable dentro del propio documento,
+                  esto nunca es la fuente final. Solo tiene sentido una vez
+                  elegido un transportista. */}
               {route.carrier && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                   {!showSubcontracted ? (
@@ -413,12 +418,13 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   ) : (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-amber-800">
-                        Transportista subcontratado por {route.carrier.legalName}
+                        Transportista subcontratado por {route.carrier.legalName} (opcional)
                       </p>
                       <p className="text-xs text-amber-700">
                         Rellena esto solo si {route.carrier.legalName} no ejecuta el transporte él mismo, sino que lo
-                        subcontrata a otra empresa. El DeCA de esta ruta mostrará estos datos como "Transportista
-                        efectivo", dejando constancia de quién subcontrató.
+                        subcontrata a otra empresa. El DeCA de esta ruta traerá estos datos ya escritos en el campo
+                        "Transportista efectivo" -- pero ese campo sigue siendo editable dentro del propio PDF, así
+                        que la empresa subcontratada puede corregirlo o completarlo ella misma al abrir el documento.
                       </p>
                       <div className="grid grid-cols-2 gap-2">
                         <Field label="Nombre / razón social">
