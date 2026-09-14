@@ -56,6 +56,23 @@ interface CarrierOption {
   legalName: string;
 }
 
+// Fase 8W: informe agregado de gasto por transportista/centro/circuito
+// ("ruta")/cliente -- ver GET /billing/expense-report.
+interface ExpenseReportBucket {
+  id: string;
+  legalName?: string;
+  name?: string;
+  amount: number;
+}
+
+interface ExpenseReport {
+  totals: { totalAmount: number; lineCount: number; equalSplitLineCount: number };
+  byCarrier: ExpenseReportBucket[];
+  byWarehouse: ExpenseReportBucket[];
+  byDeliveryZone: ExpenseReportBucket[];
+  byCustomer: ExpenseReportBucket[];
+}
+
 const STATUS_OPTIONS = [
   { value: "draft", label: "Generada" },
   { value: "validated", label: "Validada" },
@@ -82,6 +99,7 @@ function summarize(stops: SettlementLineDetail["shipment"]["route"]["stops"]) {
 }
 
 export default function BillingPage() {
+  const [view, setView] = useState<"liquidaciones" | "informe">("liquidaciones");
   const [carrierId, setCarrierId] = useState("");
   const [status, setStatus] = useState("");
   const [from, setFrom] = useState("");
@@ -106,6 +124,20 @@ export default function BillingPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["settlements", carrierId, status, from, to],
     queryFn: async () => (await api.get("/billing/settlements", { params })).data as { items: SettlementRow[]; total: number },
+    enabled: view === "liquidaciones",
+  });
+
+  // Fase 8W: informe agregado -- mismos filtros de transportista/periodo,
+  // sin el de estado (el gasto ya generado no depende del estado de cobro).
+  const expenseReportParams: Record<string, string> = {};
+  if (carrierId) expenseReportParams.carrierId = carrierId;
+  if (from) expenseReportParams.from = from;
+  if (to) expenseReportParams.to = to;
+
+  const expenseReportQuery = useQuery({
+    queryKey: ["billing-expense-report", carrierId, from, to],
+    queryFn: async () => (await api.get("/billing/expense-report", { params: expenseReportParams })).data as ExpenseReport,
+    enabled: view === "informe",
   });
 
   const detailQuery = useQuery({
@@ -160,6 +192,25 @@ export default function BillingPage() {
         Despliega una liquidación para ver el detalle por envío y disputar una línea si el importe no cuadra.
       </p>
 
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={() => setView("liquidaciones")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+            view === "liquidaciones" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+          }`}
+        >
+          Liquidaciones
+        </button>
+        <button
+          onClick={() => setView("informe")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+            view === "informe" ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+          }`}
+        >
+          Informe de gasto
+        </button>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select
           value={carrierId}
@@ -173,18 +224,20 @@ export default function BillingPage() {
             </option>
           ))}
         </select>
-        <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="rounded-lg border border-slate-300 text-sm px-3 py-2"
-        >
-          <option value="">Todos los estados</option>
-          {STATUS_OPTIONS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
+        {view === "liquidaciones" && (
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-2"
+          >
+            <option value="">Todos los estados</option>
+            {STATUS_OPTIONS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="date"
           value={from}
@@ -213,6 +266,11 @@ export default function BillingPage() {
         )}
       </div>
 
+      {view === "informe" && (
+        <ExpenseReportView data={expenseReportQuery.data} isLoading={expenseReportQuery.isLoading} />
+      )}
+
+      {view === "liquidaciones" && (
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
@@ -362,6 +420,7 @@ export default function BillingPage() {
           </tbody>
         </table>
       </div>
+      )}
 
       {disputeTarget && (
         <DisputeModal
@@ -508,6 +567,92 @@ function ResolveDisputeModal({
             {loading ? "Guardando…" : "Confirmar resolución"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Fase 8W: informe agregado -- una lista de barras horizontales por
+// dimensión (transportista/centro/circuito ("ruta")/cliente), mismo criterio
+// que "Top zonas por volumen" de Analítica (magnitud = un único tono, barra
+// proporcional al máximo de esa misma lista, etiqueta directa con el
+// importe). Top 12 por panel para que quepa sin desbordar -- el resto sigue
+// contando en el total, solo no se lista fila a fila.
+function ExpenseReportView({ data, isLoading }: { data: ExpenseReport | undefined; isLoading: boolean }) {
+  if (isLoading) {
+    return <p className="text-sm text-slate-400 py-6 text-center">Cargando informe…</p>;
+  }
+  if (!data || data.totals.lineCount === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 px-4 py-6 text-center text-slate-400 text-sm">
+        Sin liquidaciones para estos filtros.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Gasto total</p>
+          <p className="font-mono text-xl font-semibold text-slate-800">{data.totals.totalAmount.toFixed(2)} €</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Liquidaciones</p>
+          <p className="font-mono text-xl font-semibold text-slate-800">{data.totals.lineCount}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Repartidas a partes iguales</p>
+          <p className="font-mono text-xl font-semibold text-slate-800">{data.totals.equalSplitLineCount}</p>
+          {data.totals.equalSplitLineCount > 0 && (
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Sin peso conocido en todas las paradas de esa ruta -- repartidas a partes iguales entre clientes.
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <ExpenseReportPanel title="Por transportista" rows={data.byCarrier} />
+        <ExpenseReportPanel title="Por centro (almacén de origen)" rows={data.byWarehouse} />
+        <ExpenseReportPanel title="Por ruta (circuito de reparto)" rows={data.byDeliveryZone} />
+        <ExpenseReportPanel title="Por cliente" rows={data.byCustomer} />
+      </div>
+    </div>
+  );
+}
+
+function ExpenseReportPanel({ title, rows }: { title: string; rows: ExpenseReportBucket[] }) {
+  const top = rows.slice(0, 12);
+  const max = top.reduce((m, r) => Math.max(m, r.amount), 0) || 1;
+  const restAmount = rows.slice(12).reduce((sum, r) => sum + r.amount, 0);
+
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <h3 className="text-sm font-semibold text-slate-800 mb-3">{title}</h3>
+      {top.length === 0 && <p className="text-sm text-slate-400">Sin datos.</p>}
+      <div className="space-y-2">
+        {top.map((row) => (
+          <div key={row.id} className="flex items-center gap-2">
+            <span className="text-xs text-slate-600 w-32 truncate flex-shrink-0" title={row.legalName ?? row.name}>
+              {row.legalName ?? row.name}
+            </span>
+            <div className="flex-1 bg-slate-100 rounded h-4 relative overflow-hidden">
+              <div
+                className="bg-brand-500 h-full rounded"
+                style={{ width: `${Math.max((row.amount / max) * 100, 2)}%` }}
+              />
+            </div>
+            <span className="text-xs font-mono font-semibold text-slate-700 w-20 text-right flex-shrink-0">
+              {row.amount.toFixed(0)} €
+            </span>
+          </div>
+        ))}
+        {rows.length > 12 && (
+          <p className="text-[11px] text-slate-400 pt-1">
+            + {rows.length - 12} más ({restAmount.toFixed(0)} €)
+          </p>
+        )}
       </div>
     </div>
   );

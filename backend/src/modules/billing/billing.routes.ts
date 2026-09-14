@@ -305,3 +305,143 @@ billingRouter.patch(
     res.json(updated);
   })
 );
+
+// Fase 8W: petición explícita de Raúl -- "las facturas tienen que indicar
+// cliente, centro de envío, ruta asociada, transportista, para que se pueda
+// segmentar la facturación... para tener conceptos por transporte, centro,
+// ruta y cliente". Informe agregado (no toca la lista de liquidaciones de
+// arriba), sobre las mismas SettlementLine ya existentes:
+//   - transportista y centro (almacén de origen de la ruta) son 1:1 por
+//     línea -- una liquidación es siempre de un único transportista, y un
+//     envío sale siempre de un único almacén.
+//   - "ruta" aquí es el CIRCUITO de reparto (`Customer.deliveryZoneId`, el
+//     mismo concepto ya usado en Clientes/Pedidos desde la Fase 8U --
+//     "mad01, portu4..."), no la ruta operativa de un día concreto (esa es
+//     efímera, agregarla por id no tendría sentido de un periodo a otro).
+//   - "cliente" (y por tanto su circuito) puede repartirse entre varios
+//     clientes si el envío tuvo paradas de más de uno -- se prorratea por el
+//     peso real de cada parada (decisión de Raúl). Si no se conoce el peso
+//     de TODAS las paradas de esa ruta, se reparte a partes iguales en su
+//     lugar (más honesto que fingir precisión que no hay), y esa línea se
+//     cuenta en `equalSplitLineCount` para que quede visible en el informe.
+const expenseReportQuerySchema = z.object({
+  carrierId: z.string().uuid().optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+});
+
+billingRouter.get(
+  "/expense-report",
+  asyncHandler(async (req, res) => {
+    const query = expenseReportQuerySchema.parse(req.query);
+
+    const lines = await prisma.settlementLine.findMany({
+      where: {
+        carrierSettlement: {
+          carrier: { companyId: req.auth!.companyId },
+          ...(query.carrierId ? { carrierId: query.carrierId } : {}),
+          ...(query.from ? { periodTo: { gte: query.from } } : {}),
+          ...(query.to ? { periodFrom: { lte: query.to } } : {}),
+        },
+      },
+      select: {
+        amount: true,
+        carrierSettlement: {
+          select: { carrierId: true, carrier: { select: { legalName: true } } },
+        },
+        shipment: {
+          select: {
+            route: {
+              select: {
+                warehouseId: true,
+                warehouse: { select: { name: true } },
+                stops: {
+                  select: {
+                    order: {
+                      select: {
+                        customerId: true,
+                        customer: {
+                          select: {
+                            legalName: true,
+                            deliveryZoneId: true,
+                            deliveryZone: { select: { name: true } },
+                          },
+                        },
+                        lines: { select: { lineWeightKg: true } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const byCarrier = new Map<string, { legalName: string; amount: number }>();
+    const byWarehouse = new Map<string, { name: string; amount: number }>();
+    const byDeliveryZone = new Map<string, { name: string; amount: number }>();
+    const byCustomer = new Map<string, { legalName: string; amount: number }>();
+    let totalAmount = 0;
+    let equalSplitLineCount = 0;
+    const NO_ZONE_KEY = "__sin_circuito__";
+
+    for (const line of lines) {
+      const amount = Number(line.amount);
+      totalAmount += amount;
+
+      const carrierId = line.carrierSettlement.carrierId;
+      const carrierBucket = byCarrier.get(carrierId) ?? { legalName: line.carrierSettlement.carrier.legalName, amount: 0 };
+      carrierBucket.amount += amount;
+      byCarrier.set(carrierId, carrierBucket);
+
+      const warehouseId = line.shipment.route.warehouseId;
+      const warehouseBucket = byWarehouse.get(warehouseId) ?? { name: line.shipment.route.warehouse.name, amount: 0 };
+      warehouseBucket.amount += amount;
+      byWarehouse.set(warehouseId, warehouseBucket);
+
+      const stops = line.shipment.route.stops;
+      if (stops.length === 0) continue; // no debería pasar, pero no hay cliente al que atribuir
+
+      // Peso conocido por parada -- suma de las líneas del pedido con peso
+      // real (Fase 8R: un producto sin peso cargado da lineWeightKg null).
+      const stopWeights = stops.map((s) => {
+        const known = s.order.lines.filter((l) => l.lineWeightKg != null);
+        if (known.length === 0) return null;
+        return known.reduce((sum, l) => sum + Number(l.lineWeightKg), 0);
+      });
+      const allWeightsKnown = stopWeights.every((w) => w != null && w > 0);
+      const totalWeight = allWeightsKnown ? stopWeights.reduce((a, b) => a! + b!, 0)! : 0;
+      if (!allWeightsKnown) equalSplitLineCount += 1;
+
+      stops.forEach((stop, i) => {
+        const share = allWeightsKnown ? (stopWeights[i]! / totalWeight) * amount : amount / stops.length;
+
+        const customerId = stop.order.customerId;
+        const customerBucket = byCustomer.get(customerId) ?? { legalName: stop.order.customer.legalName, amount: 0 };
+        customerBucket.amount += share;
+        byCustomer.set(customerId, customerBucket);
+
+        const zoneId = stop.order.customer.deliveryZoneId ?? NO_ZONE_KEY;
+        const zoneName = stop.order.customer.deliveryZone?.name ?? "Sin circuito";
+        const zoneBucket = byDeliveryZone.get(zoneId) ?? { name: zoneName, amount: 0 };
+        zoneBucket.amount += share;
+        byDeliveryZone.set(zoneId, zoneBucket);
+      });
+    }
+
+    const toSortedArray = <T extends { amount: number }>(map: Map<string, T>) =>
+      Array.from(map.entries())
+        .map(([id, v]) => ({ id, ...v }))
+        .sort((a, b) => b.amount - a.amount);
+
+    res.json({
+      totals: { totalAmount, lineCount: lines.length, equalSplitLineCount },
+      byCarrier: toSortedArray(byCarrier),
+      byWarehouse: toSortedArray(byWarehouse),
+      byDeliveryZone: toSortedArray(byDeliveryZone),
+      byCustomer: toSortedArray(byCustomer),
+    });
+  })
+);
