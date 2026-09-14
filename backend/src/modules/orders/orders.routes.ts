@@ -3,12 +3,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { computeLineWeightKg } from "./lib/line-weight";
 import { summarizeOrderPallets } from "./lib/line-pallets";
 import { classifyOrder } from "@/modules/segmentation/segmentation.service";
 import { buildOrdersImportTemplate, startOrdersExcelImportJob } from "./orders-excel-import.service";
 import { getImportJob } from "./lib/import-jobs.store";
 import { renderDeliveryNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
+import { deleteOrderCascade, wipeAllOrders } from "./order-delete.service";
 
 export const ordersRouter = Router();
 
@@ -375,5 +377,30 @@ ordersRouter.patch(
 
     const updated = await prisma.order.update({ where: { id: order.id }, data: { status: status as any } });
     res.json(updated);
+  })
+);
+
+// Petición de Raúl: poder eliminar pedidos desde el listado, "para hacer
+// correcciones o eliminar todo lo que se esta haciendo ahora para las
+// pruebas del sistema" -- igual que ya existe para Productos. A diferencia
+// de Productos, aquí el borrado de un pedido con ruta/envío/documentos ya
+// generados es SIEMPRE en cascada total (decisión explícita de Raúl, ver
+// `deleteOrderCascade`) -- restringido a administradores por ser una acción
+// destructiva y sin vuelta atrás sobre datos reales.
+ordersRouter.delete(
+  "/wipe-all",
+  requireRole("admin_empresa", "admin_plataforma"),
+  asyncHandler(async (req, res) => {
+    const summary = await wipeAllOrders(req.auth!.companyId);
+    res.json(summary);
+  })
+);
+
+ordersRouter.delete(
+  "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
+  asyncHandler(async (req, res) => {
+    const summary = await deleteOrderCascade(req.params.id, req.auth!.companyId);
+    res.json(summary);
   })
 );

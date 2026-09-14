@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Chip, { ChipColor } from "@/components/Chip";
+import Modal from "@/components/Modal";
 import { usePlannerFiltersStore } from "@/store/planner-filters-store";
 
 // Fase 7b: primera pestaña del Planificador reestructurado, estilo Bringg --
@@ -30,6 +31,22 @@ import { usePlannerFiltersStore } from "@/store/planner-filters-store";
 //    en las pruebas -- no había ningún bloqueo real de fechas, sino que
 //    todo pedido importado (Excel/ERP) entra como "Recibido" y no
 //    aparecía aquí hasta validarlo a mano.
+//
+// Fase 9: Raúl pidió que, al pulsar "Planificar automáticamente", salte
+// SIEMPRE un selector con 2 opciones -- hasta ahora la agrupación "por
+// categoría de pedido" (paquetería/paletería/paletería pesada/gran volumen,
+// una ruta por cada una si la selección mezcla tipologías) ya pasaba sola y
+// en silencio por debajo (ver /routes/auto-plan); la única forma de evitarla
+// era mandar un `serviceType` explícito en el body, cosa que esta pantalla
+// nunca hacía. Motivo real del pedido: hoy solo hay tráilers dados de alta
+// (sin variedad real de vehículos) y muchos productos no tienen peso/palés
+// completos en el maestro, así que separar por categoría no aporta nada
+// todavía y solo trocea la ruta sin necesidad -- "Unificado" fuerza TODO lo
+// seleccionado a un único grupo/ruta por pasada, usando como etiqueta de
+// servicio la tipología más repetida entre los pedidos elegidos (o
+// "paleteria" en caso de empate, mismo valor por defecto que ya usa el
+// resto de la app cuando un pedido no tiene tipología). "Por categoría"
+// sigue siendo justo el comportamiento de siempre.
 
 interface PendingOrder {
   id: string;
@@ -91,6 +108,9 @@ const statusOptions: { value: string; label: string }[] = [
 export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Fase 9: modal "por categoría / unificado" -- ver comentario de cabecera.
+  // Se abre siempre al pulsar "Planificar automáticamente", nunca se salta.
+  const [showPlanModeModal, setShowPlanModeModal] = useState(false);
   // Fase 8j: "Estado del pedido" vive ahora en planner-filters-store.ts (no
   // en useState local) para que no se resetee a "Validado" cada vez que se
   // cambia de pestaña dentro del Planificador o se navega fuera y se vuelve
@@ -130,14 +150,20 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
     setSelected((prev) => (prev.size === pendingOrders.length ? new Set() : new Set(pendingOrders.map((o) => o.id))));
   }
 
+  // Fase 9: `forcedServiceType` -- si viene relleno (modo "Unificado"), se
+  // manda como `serviceType` explícito en el body, que es justo lo que ya
+  // hacía el backend caer todo en un único grupo/ruta (ver comentario de
+  // cabecera y /routes/auto-plan). Si viene vacío (modo "Por categoría"), se
+  // omite el campo -- comportamiento de siempre, una ruta por tipología.
   const autoPlanMutation = useMutation({
-    mutationFn: async () =>
+    mutationFn: async (forcedServiceType: string | undefined) =>
       (
         await api.post("/routes/auto-plan", {
           warehouseId,
           routeDate,
           status,
           orderIds: Array.from(selected),
+          ...(forcedServiceType ? { serviceType: forcedServiceType } : {}),
         })
       ).data,
     onSuccess: (result) => {
@@ -156,6 +182,38 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
   });
 
   const canPlan = !!warehouseId && selected.size > 0 && !autoPlanMutation.isPending;
+
+  // Fase 9: tipología más repetida entre los pedidos SELECCIONADOS -- la
+  // etiqueta que se usa para el modo "Unificado" (ver comentario de
+  // cabecera). Empate o ninguno clasificado -> "paleteria", mismo valor por
+  // defecto que ya usa el resto de la app.
+  const dominantServiceType = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const id of selected) {
+      const order = pendingOrders.find((o) => o.id === id);
+      const key = order?.serviceType ?? "paleteria";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    let best = "paleteria";
+    let bestCount = 0;
+    for (const [key, count] of counts) {
+      if (count > bestCount) {
+        best = key;
+        bestCount = count;
+      }
+    }
+    return best;
+  }, [selected, pendingOrders]);
+
+  function handlePlanByCategory() {
+    setShowPlanModeModal(false);
+    autoPlanMutation.mutate(undefined);
+  }
+
+  function handlePlanUnified() {
+    setShowPlanModeModal(false);
+    autoPlanMutation.mutate(dominantServiceType);
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-300px)] min-h-[480px]">
@@ -274,13 +332,42 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
           )}
         </p>
         <button
-          onClick={() => autoPlanMutation.mutate()}
+          onClick={() => setShowPlanModeModal(true)}
           disabled={!canPlan}
           className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
         >
           {autoPlanMutation.isPending ? "Planificando…" : `Planificar automáticamente (${selected.size})`}
         </button>
       </div>
+
+      {/* Fase 9: selector "por categoría / unificado" -- ver comentario de
+          cabecera. Aparece siempre, nunca se salta. */}
+      <Modal open={showPlanModeModal} title="¿Cómo agrupar estos pedidos en rutas?" onClose={() => setShowPlanModeModal(false)}>
+        <div className="space-y-3">
+          <button
+            onClick={handlePlanByCategory}
+            className="w-full text-left rounded-lg border border-slate-200 hover:border-brand-400 hover:bg-brand-50/40 px-4 py-3"
+          >
+            <p className="text-sm font-semibold text-slate-800">Por categoría de pedido</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Una ruta distinta por cada tipología (paquetería/paletería/paletería pesada/gran volumen) que haya entre los{" "}
+              {selected.size} pedidos seleccionados. Recomendado cuando haya vehículos y datos de peso/palés distintos por
+              categoría.
+            </p>
+          </button>
+          <button
+            onClick={handlePlanUnified}
+            className="w-full text-left rounded-lg border border-slate-200 hover:border-brand-400 hover:bg-brand-50/40 px-4 py-3"
+          >
+            <p className="text-sm font-semibold text-slate-800">Unificado</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Todos los {selected.size} pedidos seleccionados entran en la misma pasada de planificación, sin separar por
+              tipología (útil mientras solo haya tráilers dados de alta y el maestro de productos no tenga siempre peso/palés
+              completos).
+            </p>
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

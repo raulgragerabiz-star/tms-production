@@ -422,9 +422,10 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                       </p>
                       <p className="text-xs text-amber-700">
                         Rellena esto solo si {route.carrier.legalName} no ejecuta el transporte él mismo, sino que lo
-                        subcontrata a otra empresa. El DeCA de esta ruta traerá estos datos ya escritos en el campo
-                        "Transportista efectivo" -- pero ese campo sigue siendo editable dentro del propio PDF, así
-                        que la empresa subcontratada puede corregirlo o completarlo ella misma al abrir el documento.
+                        subcontrata a otra empresa. El DeCA de esta ruta traerá el nombre, CIF y dirección ya escritos
+                        en las casillas correspondientes de "Transportista efectivo" -- las matrículas del vehículo
+                        subcontratado y cualquier corrección quedan siempre editables dentro del propio PDF, así que
+                        la empresa subcontratada puede completarlas o corregirlas ella misma al abrir el documento.
                       </p>
                       <div className="grid grid-cols-2 gap-2">
                         <Field label="Nombre / razón social">
@@ -449,7 +450,7 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                             onChange={(e) => setSubAddress(e.target.value)}
                           />
                         </Field>
-                        <Field label="Teléfono">
+                        <Field label="Teléfono" hint="Uso interno -- no sale impreso en el DeCA">
                           <input
                             className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
                             value={subPhone}

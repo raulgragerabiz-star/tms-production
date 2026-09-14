@@ -194,7 +194,7 @@ function drawTableHeader(doc: PDFKit.PDFDocument, y: number, columns: { label: s
     .lineTo(doc.page.width - PAGE_MARGIN, y + 13)
     .strokeColor("#cbd5e1")
     .stroke();
-  return y + 20;
+  return y + 17;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +271,40 @@ function drawFillableInfoBox(
   return { x, y, width, height };
 }
 
+// Fase 8Z-fix: casilla pequeña individual (etiqueta diminuta + recuadro),
+// usada para desglosar "Transportista efectivo" en varios campos sueltos --
+// razón social, CIF, dirección, matrícula tractora, matrícula remolque --
+// en vez de un único cajón de texto libre (petición de Raúl tras ver el
+// primer diseño: "deberia contener casillas con razon social, direccion,
+// cif, tractora, remolque y rellenar cada una de ellas"). Devuelve el
+// rectángulo REAL del campo de formulario (ya con su propio margen interior
+// respecto al borde dibujado, y dejando hueco para la etiqueta), en
+// coordenadas pdfkit -- listo para convertir a coordenadas PDF reales.
+function drawFillableField(
+  doc: PDFKit.PDFDocument,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  label: string
+): { x: number; y: number; width: number; height: number } {
+  doc.roundedRect(x, y, width, height, 4).lineWidth(1).strokeColor("#e2e8f0").stroke();
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(6.5)
+    .fillColor("#94a3b8")
+    .text(label.toUpperCase(), x + 6, y + 4, { width: width - 12, characterSpacing: 0.2 });
+  doc.font("Helvetica").fillColor("#000000");
+  const labelHeight = 9;
+  const fieldPad = 3;
+  return {
+    x: x + fieldPad,
+    y: y + labelHeight + fieldPad,
+    width: width - fieldPad * 2,
+    height: height - labelHeight - fieldPad * 2,
+  };
+}
+
 // Dibuja una fila de 2 cajas de igual alto (el mayor de las dos), devolviendo
 // la coordenada Y justo debajo de la fila (con el hueco ya incluido).
 function drawInfoBoxRow(
@@ -289,7 +323,7 @@ function drawInfoBoxRow(
   if (right) {
     drawInfoBox(doc, x + colWidth + gap, y, colWidth, height, right.label, right.lines);
   }
-  return y + height + 10;
+  return y + height + 8;
 }
 
 // ---------------------------------------------------------------------------
@@ -599,15 +633,24 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     { label: "Transportista contratado", lines: transportistaLines }
   );
 
-  // Fase 8Z: "Transportista efectivo" -- caja de ancho completo, dibujada SIN
-  // contenido (el contenido lo pone el campo de formulario de pdf-lib, ver el
-  // post-proceso al final de la función). Altura fija con hueco de sobra para
-  // nombre + CIF + dirección + teléfono a mano o a máquina. Se recuerda el
-  // rectángulo (en coordenadas pdfkit) para poder calcular la posición real
-  // del campo de formulario después.
+  // Fase 8Z-fix: "Transportista efectivo" -- corrección de Raúl sobre el
+  // primer diseño (un único cajón de texto libre): ahora es un grupo de 5
+  // casillas independientes, cada una su PROPIO campo de formulario de
+  // pdf-lib -- razón social, CIF, dirección, matrícula tractora y matrícula
+  // remolque (ver el post-proceso al final de la función). Las matrículas no
+  // tienen ningún dato previo en el sistema (no se gestiona vehículo para
+  // transportistas subcontratados), así que salen siempre vacías, a rellenar
+  // a mano por quien ejecute el transporte. Se recuerdan los rectángulos de
+  // las 5 casillas (en coordenadas pdfkit) para calcular después la posición
+  // real de cada campo de formulario.
   const fullWidth0 = doc.page.width - PAGE_MARGIN * 2;
-  const transportistaEfectivoHeight = 70;
-  const transportistaEfectivoBox = drawFillableInfoBox(
+  const efectivoInnerWidth = fullWidth0 - INFO_BOX_PAD * 2;
+  const efectivoFieldGap = 10;
+  const efectivoRowHeight = 26;
+  const efectivoRowGap = 6;
+  const efectivoContentTop = INFO_BOX_PAD + 11 + 6; // padding + título + hueco (mismo criterio que drawInfoBox)
+  const transportistaEfectivoHeight = efectivoContentTop + efectivoRowHeight * 3 + efectivoRowGap * 2 + INFO_BOX_PAD;
+  drawFillableInfoBox(
     doc,
     PAGE_MARGIN,
     y,
@@ -615,7 +658,27 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     transportistaEfectivoHeight,
     "Transportista efectivo (si el transportista contratado subcontrata el transporte a otra empresa)"
   );
-  y += transportistaEfectivoHeight + 10;
+  const efectivoX = PAGE_MARGIN + INFO_BOX_PAD;
+  const efectivoRowY1 = y + efectivoContentTop;
+  const efectivoRowY2 = efectivoRowY1 + efectivoRowHeight + efectivoRowGap;
+  const efectivoRowY3 = efectivoRowY2 + efectivoRowHeight + efectivoRowGap;
+  const razonSocialWidth = efectivoInnerWidth * 0.62 - efectivoFieldGap / 2;
+  const cifWidth = efectivoInnerWidth - razonSocialWidth - efectivoFieldGap;
+  const efectivoMitad = (efectivoInnerWidth - efectivoFieldGap) / 2;
+
+  const razonSocialField = drawFillableField(doc, efectivoX, efectivoRowY1, razonSocialWidth, efectivoRowHeight, "Razón social");
+  const cifField = drawFillableField(doc, efectivoX + razonSocialWidth + efectivoFieldGap, efectivoRowY1, cifWidth, efectivoRowHeight, "CIF");
+  const direccionField = drawFillableField(doc, efectivoX, efectivoRowY2, efectivoInnerWidth, efectivoRowHeight, "Dirección");
+  const tractoraField = drawFillableField(doc, efectivoX, efectivoRowY3, efectivoMitad, efectivoRowHeight, "Matrícula tractora");
+  const remolqueField = drawFillableField(
+    doc,
+    efectivoX + efectivoMitad + efectivoFieldGap,
+    efectivoRowY3,
+    efectivoMitad,
+    efectivoRowHeight,
+    "Matrícula remolque"
+  );
+  y += transportistaEfectivoHeight + 8;
 
   // Fase 8Z: "carga efectiva a día de hoy" -- petición de Raúl de que el DeCA
   // se actualice solo según se van completando entregas, en vez de mostrar
@@ -718,12 +781,12 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   const fullWidth = doc.page.width - PAGE_MARGIN * 2;
   const expedicionHeight = measureInfoBoxHeight(doc, fullWidth, [{ text: expeditionNumber, bold: true }]);
   drawInfoBox(doc, PAGE_MARGIN, y, fullWidth, expedicionHeight, "Orden de expedición", [{ text: expeditionNumber, bold: true }]);
-  y += expedicionHeight + 10;
+  y += expedicionHeight + 8;
 
   const observacionesLines: InfoBoxLine[] = observaciones.length > 0 ? observaciones.map((n) => ({ text: n })) : [{ text: "—", color: "#94a3b8" }];
   const observacionesHeight = measureInfoBoxHeight(doc, fullWidth, observacionesLines);
   drawInfoBox(doc, PAGE_MARGIN, y, fullWidth, observacionesHeight, "Observaciones", observacionesLines);
-  y += observacionesHeight + 16;
+  y += observacionesHeight + 10;
 
   // Detalle por parada -- solo paradas PENDIENTES (ver "carga efectiva a día
   // de hoy" más arriba), para no perder el desglose de líneas de producto que
@@ -732,7 +795,7 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   // aquí con el detalle de mercancía.
   doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("Detalle de paradas y mercancía pendientes", PAGE_MARGIN, y);
   doc.fillColor("#000000");
-  y += 16;
+  y += 12;
 
   const columns = [
     { label: "PEDIDO / DESTINATARIO", x: PAGE_MARGIN, width: 190 },
@@ -749,23 +812,43 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   }
 
   for (const stop of pendingStops) {
-    if (y > doc.page.height - 160) {
-      doc.addPage();
-      y = PAGE_MARGIN;
-      y = drawTableHeader(doc, y, columns);
-    }
     const order = stop.order;
     const stopWeight = order.lines.reduce((sum, l) => sum + (l.lineWeightKg != null ? Number(l.lineWeightKg) : 0), 0);
     const goodsDescription = order.lines.map((l) => l.product.carriageNoteDescription || l.product.description).join(", ");
     const stopHasAdr = order.lines.some((l) => l.product.requiresAdr);
-
-    doc.fontSize(8.5);
-    doc.text(`${order.orderNumber}\n${order.customer.legalName}`, columns[0].x, y, { width: columns[0].width });
+    const goodsText = goodsDescription + (stopHasAdr ? "  [ADR]" : "");
+    const pedidoText = `${order.orderNumber}\n${order.customer.legalName}`;
     const dpLine = `${order.deliveryPoint.address}\n${formatAddressLine([order.deliveryPoint.postalCode, order.deliveryPoint.city, order.deliveryPoint.province])}`;
+
+    // Fase 8Z-fix: alto de fila DINÁMICO -- antes era fijo (30pt) sin
+    // importar el contenido, y un pedido con muchas líneas de producto
+    // distintas (la celda "MERCANCÍA", la más ancha en texto) podía envolver
+    // a más de 2-3 líneas y desbordar ese hueco fijo, solapando el "Precio
+    // del transporte" y el bloque de verificación/QR que venían justo
+    // después -- bug real visto por Raúl (texto superpuesto e ilegible). Se
+    // mide el alto real de las 4 celdas a este tamaño de letra y se usa el
+    // mayor, igual que ya hace `measureInfoBoxHeight` con las tarjetas.
+    doc.fontSize(8.5);
+    const rowHeight =
+      Math.max(
+        doc.heightOfString(pedidoText, { width: columns[0].width }),
+        doc.heightOfString(dpLine, { width: columns[1].width }),
+        doc.heightOfString(goodsText, { width: columns[2].width }),
+        11
+      ) + 8;
+
+    if (y + rowHeight > doc.page.height - 160) {
+      doc.addPage();
+      y = PAGE_MARGIN;
+      y = drawTableHeader(doc, y, columns);
+      doc.fontSize(8.5);
+    }
+
+    doc.text(pedidoText, columns[0].x, y, { width: columns[0].width });
     doc.text(dpLine, columns[1].x, y, { width: columns[1].width });
-    doc.text(goodsDescription + (stopHasAdr ? "  [ADR]" : ""), columns[2].x, y, { width: columns[2].width });
+    doc.text(goodsText, columns[2].x, y, { width: columns[2].width });
     doc.text(stopWeight.toLocaleString("es-ES", { maximumFractionDigits: 2 }), columns[3].x, y, { width: columns[3].width, align: "right" });
-    y += 30;
+    y += rowHeight;
   }
   y += 10;
 
@@ -812,42 +895,50 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   doc.end();
   const pdfkitBytes = await bufferPromise;
 
-  // Fase 8Z: post-proceso con pdf-lib -- añade el campo de formulario real de
-  // "Transportista efectivo" sobre la caja que pdfkit dejó en blanco
-  // (`transportistaEfectivoBox`, en coordenadas pdfkit: origen arriba a la
-  // izquierda). Conversión a coordenadas PDF reales (origen abajo a la
-  // izquierda, que es lo que pide pdf-lib): y_pdf = altura_página - y_pdfkit
-  // - alto_caja. La caja se dibuja siempre en la primera página (antes de
-  // cualquier `doc.addPage()` de esta función), así que se ancla a la
-  // página 0 sin más comprobación.
+  // Fase 8Z-fix: post-proceso con pdf-lib -- añade los 5 campos de formulario
+  // reales de "Transportista efectivo" sobre las casillas que pdfkit dejó en
+  // blanco (razón social, CIF, dirección, matrícula tractora, matrícula
+  // remolque -- ver más arriba). Conversión a coordenadas PDF reales (origen
+  // abajo a la izquierda, que es lo que pide pdf-lib): y_pdf = altura_página
+  // - y_pdfkit - alto_casilla. Las casillas se dibujan siempre en la primera
+  // página (antes de cualquier `doc.addPage()` de esta función), así que se
+  // anclan a la página 0 sin más comprobación.
+  //
+  // `setFontSize` explícito en cada campo: bug real visto por Raúl con el
+  // primer diseño (un único campo multilínea) -- sin fijar el tamaño, pdf-lib
+  // deja el campo en tamaño "automático" y algunos lectores (el visor de PDF
+  // de Chrome, en su caso) lo agrandan de forma desproporcionada nada más
+  // escribir una palabra.
   const pdfLibDoc = await PdfLibDocument.load(pdfkitBytes);
   const page0 = pdfLibDoc.getPage(0);
   const pageHeight = page0.getHeight();
   const form = pdfLibDoc.getForm();
-  const transportistaEfectivoField = form.createTextField("transportista_efectivo");
-  transportistaEfectivoField.enableMultiline();
+  const EFECTIVO_FIELD_FONT_SIZE = 9;
 
-  // Valor inicial del campo: si Backoffice ya rellenó algo en "Gestionar
-  // ruta" (Route.subcontractedCarrier*, Fase 8Y), se usa como borrador -- el
-  // campo sigue siendo editable dentro del PDF por quien lo abra, nunca de
-  // solo lectura.
-  const prefillLines: string[] = [];
-  if (route.subcontractedCarrierName && route.subcontractedCarrierName.trim().length > 0) {
-    prefillLines.push(route.subcontractedCarrierName.trim());
-    if (route.subcontractedCarrierTaxId) prefillLines.push(`CIF: ${route.subcontractedCarrierTaxId}`);
-    if (route.subcontractedCarrierAddress) prefillLines.push(route.subcontractedCarrierAddress);
-    if (route.subcontractedCarrierPhone) prefillLines.push(`Tel: ${route.subcontractedCarrierPhone}`);
+  function addEfectivoField(name: string, rect: { x: number; y: number; width: number; height: number }, prefill: string) {
+    const field = form.createTextField(`transportista_efectivo_${name}`);
+    const bottomY = pageHeight - rect.y - rect.height;
+    // Orden importante: `setFontSize` necesita que el campo ya tenga un
+    // "default appearance" (DA), que solo existe DESPUÉS de `addToPage`
+    // (pdf-lib lanza MissingDAEntryError si se llama antes). `pdfLibDoc.save()`
+    // (más abajo) regenera las appearance streams de todos los campos con el
+    // tamaño y texto ya fijados, así que el PDF final ya lleva el tamaño de
+    // letra correcto embebido -- no depende de que el lector lo "autocalcule".
+    field.addToPage(page0, { x: rect.x, y: bottomY, width: rect.width, height: rect.height });
+    field.setFontSize(EFECTIVO_FIELD_FONT_SIZE);
+    field.setText(prefill);
   }
-  transportistaEfectivoField.setText(prefillLines.join("\n"));
 
-  const fieldPad = 4;
-  const fieldBottomY = pageHeight - transportistaEfectivoBox.y - transportistaEfectivoBox.height;
-  transportistaEfectivoField.addToPage(page0, {
-    x: transportistaEfectivoBox.x + fieldPad,
-    y: fieldBottomY + fieldPad,
-    width: transportistaEfectivoBox.width - fieldPad * 2,
-    height: transportistaEfectivoBox.height - 22, // deja hueco para la etiqueta dibujada por pdfkit arriba de la caja
-  });
+  // Valor inicial de razón social/CIF/dirección: si Backoffice ya rellenó
+  // algo en "Gestionar ruta" (Route.subcontractedCarrier*, Fase 8Y), se usa
+  // como borrador -- los campos siguen siendo editables dentro del PDF por
+  // quien lo abra, nunca de solo lectura. Las matrículas no tienen ningún
+  // dato previo en el sistema, así que siempre salen vacías.
+  addEfectivoField("razon_social", razonSocialField, route.subcontractedCarrierName?.trim() || "");
+  addEfectivoField("cif", cifField, route.subcontractedCarrierTaxId?.trim() || "");
+  addEfectivoField("direccion", direccionField, route.subcontractedCarrierAddress?.trim() || "");
+  addEfectivoField("matricula_tractora", tractoraField, "");
+  addEfectivoField("matricula_remolque", remolqueField, "");
 
   return Buffer.from(await pdfLibDoc.save());
 }

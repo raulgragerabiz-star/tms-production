@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import Chip from "@/components/Chip";
 import Toast from "@/components/Toast";
 import Pagination from "@/components/Pagination";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/auth-store";
 import NewOrderModal from "@/pages/orders/NewOrderModal";
 import OrderDetailModal from "@/pages/orders/OrderDetailModal";
 import ImportOrdersModal from "@/pages/orders/ImportOrdersModal";
@@ -60,6 +61,13 @@ export default function OrdersPage() {
   // ni el listado ya existentes.
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
+  const queryClient = useQueryClient();
+  const user = useAuthStore((s) => s.user);
+  // Petición de Raúl: poder eliminar pedidos desde el listado (uno suelto
+  // para corregir, o "limpiar" todos de golpe para quitar pruebas) -- mismo
+  // criterio de permisos que "Vaciar catálogo" en Productos, por ser una
+  // acción destructiva sin vuelta atrás.
+  const canDeleteOrders = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
 
   // Paginación: antes siempre se pedía la página 1 sin ningún control para
   // avanzar, así que con más pedidos de los que caben en una página
@@ -106,6 +114,56 @@ export default function OrdersPage() {
     queryFn: async () => (await api.get("/delivery-zones")).data as { items: DeliveryZoneOption[] },
   });
   const selectedZone = zonesData?.items.find((z) => z.id === deliveryZoneId);
+
+  // Borrado individual -- "para hacer correcciones". Borrado EN CASCADA
+  // TOTAL si el pedido ya tiene ruta/envío/documentos (decisión explícita de
+  // Raúl): la confirmación deja esto muy claro antes de llamar al backend.
+  const deleteMutation = useMutation({
+    mutationFn: async (orderId: string) => (await api.delete(`/orders/${orderId}`)).data,
+    onSuccess: (result: { orderNumber: string; routeStopsEliminadas: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      showSuccess(
+        `Pedido ${result.orderNumber} eliminado` +
+          (result.routeStopsEliminadas > 0
+            ? ` (junto con ${result.routeStopsEliminadas} parada(s) de ruta y su documentación asociada)`
+            : "")
+      );
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se ha podido eliminar el pedido"),
+  });
+
+  function handleDeleteOrder(o: OrderRow) {
+    if (
+      window.confirm(
+        `¿Eliminar el pedido ${o.orderNumber}? Si ya tiene una ruta, envío o documentos generados (DeCA, albarán...), se eliminan también junto con el pedido. Esta acción no se puede deshacer.`
+      )
+    ) {
+      deleteMutation.mutate(o.id);
+    }
+  }
+
+  // "Limpiar pedidos de prueba" -- mismo espíritu que "Vaciar catálogo" de
+  // Productos, pero SIEMPRE en cascada total (petición explícita de Raúl):
+  // borra TODOS los pedidos de la empresa, junto con cualquier ruta/envío/
+  // documento que dependa en exclusiva de ellos.
+  const wipeMutation = useMutation({
+    mutationFn: async () => (await api.delete("/orders/wipe-all")).data as { pedidosEliminados: number },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      showSuccess(`${result.pedidosEliminados} pedido(s) eliminado(s), junto con sus rutas/envíos/documentos asociados`);
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se ha podido limpiar la lista de pedidos"),
+  });
+
+  function handleWipeOrders() {
+    if (
+      window.confirm(
+        `¿Eliminar TODOS los pedidos actuales (${data?.total ?? 0})? Se eliminan también, para cada uno, su ruta/envío/documentos ya generados (DeCA, albarán, facturas...). Esta acción no se puede deshacer -- pensada para limpiar pruebas antes de empezar en real.`
+      )
+    ) {
+      wipeMutation.mutate();
+    }
+  }
 
   return (
     <div>
@@ -169,6 +227,15 @@ export default function OrdersPage() {
           >
             + Nuevo pedido
           </button>
+          {canDeleteOrders && (
+            <button
+              onClick={handleWipeOrders}
+              disabled={wipeMutation.isPending}
+              className="bg-white border border-red-300 hover:bg-red-50 text-red-600 text-sm font-medium px-4 py-2 rounded-lg whitespace-nowrap disabled:opacity-50"
+            >
+              {wipeMutation.isPending ? "Limpiando…" : "Limpiar pedidos de prueba"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -197,19 +264,20 @@ export default function OrdersPage() {
               <th className="text-right px-4 py-3">Peso (kg)</th>
               <th className="text-left px-4 py-3">Bultos/Palés</th>
               <th className="text-left px-4 py-3">Estado</th>
+              {canDeleteOrders && <th className="text-right px-4 py-3">Acciones</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canDeleteOrders ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
                   Cargando…
                 </td>
               </tr>
             )}
             {!isLoading && data?.items.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={canDeleteOrders ? 10 : 9} className="px-4 py-6 text-center text-slate-400">
                   No hay pedidos para este filtro.
                 </td>
               </tr>
@@ -247,6 +315,17 @@ export default function OrdersPage() {
                 <td className="px-4 py-3">
                   <StatusBadge status={o.status} />
                 </td>
+                {canDeleteOrders && (
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDeleteOrder(o)}
+                      disabled={deleteMutation.isPending}
+                      className="text-xs font-medium text-red-500 hover:text-red-600 disabled:opacity-50"
+                    >
+                      Eliminar
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
