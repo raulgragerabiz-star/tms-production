@@ -20,6 +20,27 @@
 //   DELETE /api/delivery-zones/rates/:id        -- eliminar tarifa (igual que
 //     los suplementos: fila puntual, no hay liquidaciones históricas que
 //     dependan todavía de esta tabla nueva)
+//
+// Fase 8T -- "que no sea una línea fija con los tipos de vehículo
+// seleccionables y las tarifas al lado, sino una ficha... para seleccionar
+// qué tipo de vehículos tiene y en cada vehículo incorporar la tarifa
+// correspondiente" (petición explícita de Raúl, con el objetivo de que el
+// motor de enrutado aplique la tarifa según el vehículo seleccionado -- ver
+// rate-resolution.service.ts). Los 4 campos de importe de DeliveryZoneRate
+// (flatFee/pricePerTon/unloadFee/partnerIncomePerTon) quedan como LEGACY (una
+// única tarifa para todos los tipos de vehículo); la tarifa real ahora vive
+// por tipo de vehículo en DeliveryZoneRateVehicleType, gestionada aquí:
+//   PUT    /api/delivery-zones/rates/:rateId/vehicle-types/:vehicleTypeId
+//     -- marca ese tipo de vehículo como ofertado para esta ficha y fija/edita
+//     su tarifa (upsert: uno por cada tipo de vehículo seleccionado)
+//   DELETE /api/delivery-zones/rates/:rateId/vehicle-types/:vehicleTypeId
+//     -- desmarca ese tipo de vehículo (quita su tarifa de esta ficha)
+// La vigencia (validFrom/validTo) sigue siendo la de la ficha entera
+// (DeliveryZoneRate) -- todos los tipos de vehículo de una misma ficha
+// comparten periodo de vigencia; si de verdad hace falta un periodo distinto
+// para un tipo de vehículo concreto, se crea otra ficha (otro DeliveryZoneRate)
+// para ese transportista+circuito, igual que ya funcionaba para la tarifa
+// plana antes de esta fase.
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
@@ -104,6 +125,14 @@ deliveryZonesRouter.get(
             vehicleTypeOfferings: { select: { vehicleType: { select: { id: true, name: true } } } },
           },
         },
+        // Fase 8T: tarifa real por tipo de vehículo de esta ficha -- lo que
+        // alimenta ahora al motor de coste real (ver rate-resolution.service.ts)
+        // y lo que la pantalla de Transportistas debe mostrar/editar dentro de
+        // cada ficha, en vez de los 4 campos planos de arriba.
+        vehicleRates: {
+          include: { vehicleType: { select: { id: true, name: true, maxWeightKg: true, maxPallets: true } } },
+          orderBy: { vehicleType: { maxWeightKg: "asc" } },
+        },
       },
     });
     res.json({ items: rates, total: rates.length });
@@ -142,7 +171,11 @@ deliveryZonesRouter.post(
 
     const rate = await prisma.deliveryZoneRate.create({
       data: { ...data, deliveryZoneId: zone.id },
-      include: { carrier: { select: { legalName: true } }, deliveryZone: { select: { name: true } } },
+      include: {
+        carrier: { select: { legalName: true } },
+        deliveryZone: { select: { name: true } },
+        vehicleRates: { include: { vehicleType: { select: { id: true, name: true } } } },
+      },
     });
     res.status(201).json(rate);
   })
@@ -170,7 +203,11 @@ deliveryZonesRouter.patch(
     const updated = await prisma.deliveryZoneRate.update({
       where: { id: rate.id },
       data,
-      include: { carrier: { select: { legalName: true } }, deliveryZone: { select: { name: true } } },
+      include: {
+        carrier: { select: { legalName: true } },
+        deliveryZone: { select: { name: true } },
+        vehicleRates: { include: { vehicleType: { select: { id: true, name: true } } } },
+      },
     });
     res.json(updated);
   })
@@ -183,7 +220,65 @@ deliveryZonesRouter.delete(
       where: { id: req.params.id, deliveryZone: { companyId: req.auth!.companyId } },
     });
     if (!rate) throw HttpError.notFound("Tarifa no encontrada");
+    // Fase 8T: al eliminar la ficha completa, se eliminan también sus
+    // tarifas por tipo de vehículo (delivery_zone_rate_vehicle_type) -- si no,
+    // quedarían huérfanas violando la FK. No hay liquidaciones históricas que
+    // dependan todavía de esta tabla nueva (mismo criterio que ya se documentaba
+    // para DeliveryZoneRate arriba).
+    await prisma.deliveryZoneRateVehicleType.deleteMany({ where: { deliveryZoneRateId: rate.id } });
     await prisma.deliveryZoneRate.delete({ where: { id: rate.id } });
+    res.status(204).send();
+  })
+);
+
+// Fase 8T: tarifa por tipo de vehículo dentro de una ficha (DeliveryZoneRate).
+const vehicleRateSchema = z.object({
+  flatFee: z.number().nonnegative().optional().nullable(),
+  pricePerTon: z.number().nonnegative().optional().nullable(),
+  unloadFee: z.number().nonnegative().optional().nullable(),
+  partnerIncomePerTon: z.number().nonnegative().optional().nullable(),
+});
+
+// Marca (o edita, si ya existía) un tipo de vehículo como ofertado en esta
+// ficha, con su propia tarifa -- upsert por el índice único
+// (deliveryZoneRateId, vehicleTypeId). Esto es lo que hace que "al hacer el
+// enrutado, aplique la tarifa según el vehículo que se seleccione": cada
+// candidato de resolveShipmentCost busca aquí por su vehicleTypeId concreto.
+deliveryZonesRouter.put(
+  "/rates/:rateId/vehicle-types/:vehicleTypeId",
+  asyncHandler(async (req, res) => {
+    const rate = await prisma.deliveryZoneRate.findFirst({
+      where: { id: req.params.rateId, deliveryZone: { companyId: req.auth!.companyId } },
+    });
+    if (!rate) throw HttpError.notFound("Ficha de tarifa no encontrada");
+
+    const vehicleType = await prisma.vehicleType.findUnique({ where: { id: req.params.vehicleTypeId } });
+    if (!vehicleType) throw HttpError.notFound("Tipo de vehículo no encontrado");
+
+    const data = vehicleRateSchema.parse(req.body);
+    const vehicleRate = await prisma.deliveryZoneRateVehicleType.upsert({
+      where: { deliveryZoneRateId_vehicleTypeId: { deliveryZoneRateId: rate.id, vehicleTypeId: vehicleType.id } },
+      create: { deliveryZoneRateId: rate.id, vehicleTypeId: vehicleType.id, ...data },
+      update: data,
+      include: { vehicleType: { select: { id: true, name: true } } },
+    });
+    res.json(vehicleRate);
+  })
+);
+
+// Desmarca un tipo de vehículo de la ficha (quita su tarifa) -- deja de
+// ofertarse ese vehículo para este circuito+transportista.
+deliveryZonesRouter.delete(
+  "/rates/:rateId/vehicle-types/:vehicleTypeId",
+  asyncHandler(async (req, res) => {
+    const rate = await prisma.deliveryZoneRate.findFirst({
+      where: { id: req.params.rateId, deliveryZone: { companyId: req.auth!.companyId } },
+    });
+    if (!rate) throw HttpError.notFound("Ficha de tarifa no encontrada");
+
+    await prisma.deliveryZoneRateVehicleType.deleteMany({
+      where: { deliveryZoneRateId: rate.id, vehicleTypeId: req.params.vehicleTypeId },
+    });
     res.status(204).send();
   })
 );

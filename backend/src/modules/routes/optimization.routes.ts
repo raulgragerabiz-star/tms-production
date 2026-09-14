@@ -37,7 +37,22 @@ optimizationRouter.post(
         // ruta exige frío o ADR, y así poder filtrar candidatos por esas
         // características reales del vehículo (ver más abajo). Aditivo: el
         // resto de campos ya incluidos (deliveryPoint) no cambian.
-        stops: { include: { order: { include: { deliveryPoint: true, lines: { include: { product: true } } } } } },
+        // Fase 8T: se añade `customer: { select: { deliveryZoneId: true } } }`
+        // -- hace falta para saber si todas las paradas de la ruta pertenecen
+        // al mismo circuito de reparto (ver singleDeliveryZoneId más abajo) y
+        // así poder aplicar la tarifa por circuito+vehículo. Aditivo: el
+        // resto de campos ya incluidos no cambian.
+        stops: {
+          include: {
+            order: {
+              include: {
+                deliveryPoint: true,
+                lines: { include: { product: true } },
+                customer: { select: { deliveryZoneId: true } },
+              },
+            },
+          },
+        },
       },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
@@ -164,6 +179,13 @@ optimizationRouter.post(
     const singleCustomerId = customerIds.size === 1 ? [...customerIds][0] : undefined;
     const provinces = new Set(route.stops.map((s) => s.order.deliveryPoint.province).filter(Boolean));
     const singleProvince = provinces.size === 1 ? ([...provinces][0] as string) : undefined;
+    // Fase 8T: igual criterio que singleCustomerId/singleProvince -- nada en
+    // el modelo obliga a que una ruta tenga paradas de un solo circuito de
+    // reparto, así que solo se propaga cuando de verdad coinciden todas (en
+    // caso contrario, se degrada a undefined y ese nivel de tarifa se salta,
+    // igual que ya hacen los otros dos).
+    const deliveryZoneIds = new Set(route.stops.map((s) => s.order.customer.deliveryZoneId).filter(Boolean));
+    const singleDeliveryZoneId = deliveryZoneIds.size === 1 ? ([...deliveryZoneIds][0] as string) : undefined;
 
     const results = [];
     for (const { carrierId, vehicleTypeId } of qualifyingByCarrier.values()) {
@@ -175,6 +197,13 @@ optimizationRouter.post(
         notesCount: route.stops.length,
         customerId: singleCustomerId,
         province: singleProvince,
+        // Fase 8T: tarifa por circuito+vehículo -- vehicleTypeId es el del
+        // candidato concreto de esta iteración (real de Vehicle, o declarado
+        // vía CarrierVehicleType), exactamente el que se aplicaría "al hacer
+        // el enrutado" si se selecciona este transportista.
+        deliveryZoneId: singleDeliveryZoneId,
+        vehicleTypeId,
+        weightKg: totalWeightKg,
       });
       if (!resolved) continue;
 

@@ -452,6 +452,8 @@ model VehicleType {
   influenceZones         InfluenceZone[]
   // Fase 8: transportistas que declaran poder aportar este tipo de vehículo.
   carrierOfferings       CarrierVehicleType[]
+  // Fase 8T: tarifas de circuito específicas de este tipo de vehículo.
+  deliveryZoneRates      DeliveryZoneRateVehicleType[]
 
   @@map("vehicle_type")
 }
@@ -699,6 +701,15 @@ model DeliveryZoneRate {
   carrierId           String       @map("carrier_id")
   validFrom           DateTime     @map("valid_from")
   validTo             DateTime?    @map("valid_to")
+  // Fase 8T: estos 4 campos "planos" quedan como LEGACY -- eran una única
+  // tarifa compartida por todos los tipos de vehículo del transportista para
+  // este circuito. Se mantienen sin tocar (no se leen ni escriben desde el
+  // nuevo flujo) para no romper histórico ni la app ya desplegada mientras se
+  // completa el despliegue; la tarifa real ahora vive por tipo de vehículo en
+  // vehicleRates (ver DeliveryZoneRateVehicleType). Los datos existentes se
+  // migraron 1:1 a vehicleRates (uno por cada tipo de vehículo que el
+  // transportista tenía marcado en ese momento) -- ver
+  // scripts/migrate-fase8t-vehicle-rates.ts.
   flatFee             Decimal?     @map("flat_fee") @db.Decimal(12, 4)
   pricePerTon         Decimal?     @map("price_per_ton") @db.Decimal(12, 4)
   unloadFee           Decimal?     @map("unload_fee") @db.Decimal(12, 4)
@@ -708,10 +719,41 @@ model DeliveryZoneRate {
   createdAt           DateTime     @default(now()) @map("created_at")
   deliveryZone        DeliveryZone @relation(fields: [deliveryZoneId], references: [id])
   carrier             Carrier      @relation(fields: [carrierId], references: [id])
+  // Fase 8T: tarifa real, independiente por cada tipo de vehículo que el
+  // transportista aporta para este circuito -- sustituye a los 4 campos
+  // planos de arriba como fuente de verdad para el motor de coste real
+  // (resolveShipmentCost) y para la ficha de la pantalla de Transportistas.
+  vehicleRates        DeliveryZoneRateVehicleType[]
 
   @@index([deliveryZoneId])
   @@index([carrierId])
   @@map("delivery_zone_rate")
+}
+
+// Fase 8T: tarifa de un circuito+transportista (DeliveryZoneRate) desglosada
+// por tipo de vehículo -- lo que pidió Raúl ("seleccionar que tipo de
+// vehiculos tiene y en cada vehiculo incorporar la tarifa correspondiente...
+// para que al hacer el enrutado, aplique la tarifa segun el vehiculo que se
+// seleccione"). Un transportista puede tener varios tipos de vehículo
+// habilitados para el mismo circuito, cada uno con su propio importe. Mismos
+// 4 campos de importe que DeliveryZoneRate (misma plantilla real), ahora por
+// vehicleTypeId. resolveShipmentCost la usa cuando conoce el vehicleTypeId
+// concreto del candidato (ver rate-resolution.service.ts).
+model DeliveryZoneRateVehicleType {
+  id                  String           @id @default(uuid())
+  deliveryZoneRateId  String           @map("delivery_zone_rate_id")
+  vehicleTypeId       String           @map("vehicle_type_id")
+  flatFee             Decimal?         @map("flat_fee") @db.Decimal(12, 4)
+  pricePerTon         Decimal?         @map("price_per_ton") @db.Decimal(12, 4)
+  unloadFee           Decimal?         @map("unload_fee") @db.Decimal(12, 4)
+  partnerIncomePerTon Decimal?         @map("partner_income_per_ton") @db.Decimal(12, 4)
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  deliveryZoneRate    DeliveryZoneRate @relation(fields: [deliveryZoneRateId], references: [id])
+  vehicleType         VehicleType      @relation(fields: [vehicleTypeId], references: [id])
+
+  @@unique([deliveryZoneRateId, vehicleTypeId])
+  @@map("delivery_zone_rate_vehicle_type")
 }
 
 // Capacidad declarada de un transportista: qué tipos de vehículo puede

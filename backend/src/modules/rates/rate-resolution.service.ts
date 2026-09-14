@@ -12,9 +12,13 @@
 // computePalletCost, computeFinalRouteCost, el motor de suplementos).
 //
 // Prioridad de tarifa base (documento 10-gestion-tarifas-TMS.md):
-//   1. by_customer  (customer_rate): importe fijo pactado con ese cliente.
-//   2. by_zone      (zone_rate, zoneName = provincia): importe fijo por zona.
-//   3. general      (full_truck_rate / pallet_rate): fórmula estándar.
+//   1. by_customer             (customer_rate): importe fijo pactado con ese cliente.
+//   2. by_delivery_zone_vehicle (Fase 8T, delivery_zone_rate_vehicle_type):
+//      tarifa pactada con el transportista para el circuito de reparto del
+//      cliente, específica del tipo de vehículo candidato -- ver
+//      "Flota y Transportistas" > Transportistas.
+//   3. by_zone                 (zone_rate, zoneName = provincia): importe fijo por zona.
+//   4. general                 (full_truck_rate / pallet_rate): fórmula estándar.
 //
 // `serviceType` acepta tanto los 4 segmentos reales (paqueteria/paleteria/
 // paleteria_pesada/gran_volumen, columna `service_type` del schema) como los
@@ -60,6 +64,21 @@ export interface ResolveShipmentCostParams {
   looseItems?: number;
   customerId?: string;
   province?: string;
+  // Fase 8T: circuito de reparto (DeliveryZone) al que pertenece el cliente
+  // de la ruta, y tipo de vehículo concreto del candidato que se está
+  // evaluando -- juntos habilitan la tarifa por circuito+vehículo pactada en
+  // "Flota y Transportistas" (DeliveryZoneRateVehicleType). Ambos opcionales:
+  // si falta cualquiera de los dos (ruta con paradas de varios circuitos, o
+  // llamador que todavía no conoce el vehículo candidato -- p. ej.
+  // billing.routes.ts/rates.routes.ts, que no lo pasan) este nivel de tarifa
+  // simplemente se salta, igual que ya ocurre con customerId/province.
+  deliveryZoneId?: string;
+  vehicleTypeId?: string;
+  // Fase 8T: peso real de la carga (kg), necesario para aplicar `pricePerTon`
+  // de la tarifa por circuito+vehículo. Opcional -- sin él, esa tarifa solo
+  // puede aplicar su parte fija (flatFee/unloadFee); mismo criterio de
+  // "degradar con elegancia" que el resto de parámetros opcionales de aquí.
+  weightKg?: number;
   conditions?: {
     requiresAdr?: boolean;
     isHoliday?: boolean;
@@ -109,7 +128,47 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
     }
   }
 
-  // 2. by_zone (si no hubo tarifa por cliente)
+  // 2. by_delivery_zone_vehicle (Fase 8T): tarifa pactada con este
+  // transportista para el circuito de reparto del cliente, específica del
+  // tipo de vehículo del candidato que se está evaluando. Se sitúa aquí,
+  // justo debajo de by_customer y por encima de by_zone: es una tarifa
+  // negociada explícitamente (igual de "pactada" que by_customer, ver
+  // DeliveryZoneRate), pero a nivel de circuito -- más específica que la
+  // tarifa genérica por provincia (by_zone), que no distingue transportista
+  // habitual ni tipo de vehículo.
+  if (baseAmount === undefined && params.deliveryZoneId && params.vehicleTypeId) {
+    const zoneRates = await prisma.deliveryZoneRate.findMany({
+      where: { carrierId: params.carrierId, deliveryZoneId: params.deliveryZoneId },
+      include: { vehicleRates: { where: { vehicleTypeId: params.vehicleTypeId } } },
+    });
+    const validZoneRates = isCurrentlyValid(zoneRates, params.date).filter((r) => r.vehicleRates.length > 0);
+    if (validZoneRates.length > 0) {
+      const vehicleRate = validZoneRates[0].vehicleRates[0];
+      const flatFee = Number(vehicleRate.flatFee ?? 0);
+      const unloadFee = Number(vehicleRate.unloadFee ?? 0);
+      const pricePerTon = Number(vehicleRate.pricePerTon ?? 0);
+      const tons = (params.weightKg ?? 0) / 1000;
+      const pricePerTonAmount = pricePerTon * tons;
+      baseRateId = vehicleRate.id;
+      baseAmount = flatFee + unloadFee + pricePerTonAmount;
+      baseBreakdown = {
+        source: "by_delivery_zone_vehicle",
+        deliveryZoneId: params.deliveryZoneId,
+        vehicleTypeId: params.vehicleTypeId,
+        flatFee,
+        unloadFee,
+        pricePerTon,
+        weightKg: params.weightKg ?? 0,
+        pricePerTonAmount,
+        // Informativo únicamente (reparto de ingresos con el socio
+        // colaborador del circuito) -- no se suma al coste que paga BigMat
+        // al transportista, ver comentario del modelo en schema.prisma.
+        partnerIncomePerTon: vehicleRate.partnerIncomePerTon != null ? Number(vehicleRate.partnerIncomePerTon) : null,
+      };
+    }
+  }
+
+  // 3. by_zone (si no hubo tarifa por cliente ni por circuito+vehículo)
   if (baseAmount === undefined && params.province) {
     const rows = await prisma.zoneRate.findMany({
       where: { carrierId: params.carrierId, zoneName: params.province, serviceType: { in: segments } },
@@ -122,7 +181,7 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
     }
   }
 
-  // 3. general (fórmula estándar por camión completo o paletería)
+  // 4. general (fórmula estándar por camión completo o paletería)
   if (baseAmount === undefined) {
     if (isFullTruck) {
       const rows = await prisma.fullTruckRate.findMany({ where: { carrierId: params.carrierId } });

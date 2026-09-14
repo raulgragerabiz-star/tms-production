@@ -13,7 +13,21 @@ export const billingRouter = Router();
 async function computeShipmentAmount(shipmentId: string) {
   const shipment = await prisma.shipment.findUniqueOrThrow({
     where: { id: shipmentId },
-    include: { route: { include: { stops: { include: { order: { include: { deliveryPoint: true } } } } } } },
+    include: {
+      // Fase 8T: `vehicle: { select: { vehicleTypeId: true } }` y
+      // `customer: { select: { deliveryZoneId: true } }` en cada parada --
+      // hace falta para poder aplicar, también al liquidar, la misma tarifa
+      // por circuito+vehículo que ya se usó al simular/asignar la ruta (Fase
+      // 8T en optimization.routes.ts). Aditivo: el resto de campos ya
+      // incluidos no cambian.
+      vehicle: { select: { vehicleTypeId: true } },
+      route: {
+        include: {
+          loadPlan: true,
+          stops: { include: { order: { include: { deliveryPoint: true, customer: { select: { deliveryZoneId: true } } } } } },
+        },
+      },
+    },
   });
   if (!shipment.finishedAt) throw HttpError.badRequest("El envío todavía no está finalizado");
 
@@ -21,6 +35,10 @@ async function computeShipmentAmount(shipmentId: string) {
   const singleCustomerId = customerIds.size === 1 ? [...customerIds][0] : undefined;
   const provinces = new Set(shipment.route.stops.map((s) => s.order.deliveryPoint.province).filter(Boolean));
   const singleProvince = provinces.size === 1 ? ([...provinces][0] as string) : undefined;
+  // Fase 8T: mismo criterio de "solo se propaga si todas las paradas
+  // coinciden" que singleCustomerId/singleProvince arriba.
+  const deliveryZoneIds = new Set(shipment.route.stops.map((s) => s.order.customer.deliveryZoneId).filter(Boolean));
+  const singleDeliveryZoneId = deliveryZoneIds.size === 1 ? ([...deliveryZoneIds][0] as string) : undefined;
 
   const resolved = await resolveShipmentCost({
     carrierId: shipment.carrierId,
@@ -33,6 +51,12 @@ async function computeShipmentAmount(shipmentId: string) {
     notesCount: shipment.route.stops.length,
     customerId: singleCustomerId,
     province: singleProvince,
+    // Fase 8T: el vehículo real que hizo el envío (shipment.vehicleId, ya
+    // asignado) determina qué tarifa por circuito+vehículo aplica -- así la
+    // liquidación coincide con lo que se mostró al comparar transportistas.
+    deliveryZoneId: singleDeliveryZoneId,
+    vehicleTypeId: shipment.vehicle.vehicleTypeId,
+    weightKg: shipment.route.loadPlan?.totalWeightKg != null ? Number(shipment.route.loadPlan.totalWeightKg) : undefined,
   });
 
   if (!resolved) return null; // excepción: queda para revisión manual (sin tarifa vigente)
