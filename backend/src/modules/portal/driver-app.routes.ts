@@ -560,7 +560,7 @@ driverAppRouter.get(
       where: { id: shipment.routeId },
       include: {
         warehouse: true,
-        carrier: { select: { legalName: true, taxId: true } },
+        carrier: { select: { legalName: true, taxId: true, address: true, postalCode: true, city: true, province: true, phone: true } },
         vehicle: { select: { plate: true, trailerPlate: true } },
         costSimulations: { where: { isSelected: true }, select: { estimatedCost: true } },
         stops: {

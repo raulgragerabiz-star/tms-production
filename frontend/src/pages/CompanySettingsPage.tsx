@@ -162,8 +162,8 @@ export default function CompanySettingsPage() {
       <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl mt-6">
         <h2 className="text-sm font-semibold text-slate-800 mb-1">Datos de la empresa (documentos)</h2>
         <p className="text-sm text-slate-500 mb-4">
-          Se imprimen en la cabecera y el pie del albarán de entrega y de la carta de porte que genera el TMS (Ficha
-          del pedido y Planificador → Gestionar ruta). El nombre y el CIF ({profileQuery.data?.name} /{" "}
+          Se imprimen en la cabecera y el pie del albarán de entrega y del DeCA que genera el TMS (Ficha del pedido y
+          Planificador → Gestionar ruta). El nombre y el CIF ({profileQuery.data?.name} /{" "}
           {profileQuery.data?.taxId}) no se editan aquí.
         </p>
 

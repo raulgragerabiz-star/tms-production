@@ -1,5 +1,5 @@
 // Fase 8Q2: helper compartido para abrir/descargar los PDFs de documentación
-// legal (albarán de entrega / carta de porte -- ver document-pdf.service.ts
+// legal (albarán de entrega / DeCA -- ver document-pdf.service.ts
 // en el backend). Los endpoints exigen el mismo token Bearer que el resto de
 // la API (`api` ya lo añade en su interceptor), así que un <a href> normal
 // no serviría -- se pide como blob autenticado y se abre/descarga desde ahí,

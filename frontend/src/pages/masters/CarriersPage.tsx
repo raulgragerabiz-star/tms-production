@@ -11,6 +11,10 @@ interface CarrierRow {
   taxId: string;
   city: string | null;
   province: string | null;
+  // Fase 8X: ver comentario en NewCarrierModal.tsx / schema.prisma.
+  address: string | null;
+  postalCode: string | null;
+  phone: string | null;
   serviceType: string;
   ownsFleet: boolean;
   temperatureCapability: string;

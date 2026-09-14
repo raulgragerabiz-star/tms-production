@@ -15,6 +15,11 @@ export interface CarrierEditable {
   taxId: string;
   city: string | null;
   province: string | null;
+  // Fase 8X: dirección/CP/teléfono completos -- hacen falta para el bloque
+  // "Transportista efectivo" del DeCA (ver document-pdf.service.ts).
+  address: string | null;
+  postalCode: string | null;
+  phone: string | null;
   serviceType: string;
   ownsFleet: boolean;
   temperatureCapability: string;
@@ -55,6 +60,9 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
   const [taxId, setTaxId] = useState("");
   const [city, setCity] = useState("");
   const [province, setProvince] = useState("");
+  const [address, setAddress] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [phone, setPhone] = useState("");
   const [serviceType, setServiceType] = useState("both");
   const [ownsFleet, setOwnsFleet] = useState(false);
   const [temperatureCapability, setTemperatureCapability] = useState("ambient");
@@ -67,6 +75,9 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
     setTaxId(carrier?.taxId ?? "");
     setCity(carrier?.city ?? "");
     setProvince(carrier?.province ?? "");
+    setAddress(carrier?.address ?? "");
+    setPostalCode(carrier?.postalCode ?? "");
+    setPhone(carrier?.phone ?? "");
     setServiceType(carrier?.serviceType ?? "both");
     setOwnsFleet(carrier?.ownsFleet ?? false);
     setTemperatureCapability(carrier?.temperatureCapability ?? "ambient");
@@ -81,6 +92,9 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
         taxId: taxId.trim(),
         city: city.trim() || undefined,
         province: province.trim() || undefined,
+        address: address.trim() || undefined,
+        postalCode: postalCode.trim() || undefined,
+        phone: phone.trim() || undefined,
         serviceType,
         ownsFleet,
         temperatureCapability,
@@ -124,6 +138,20 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
           </Field>
           <Field label="Provincia">
             <input className={inputCls} value={province} onChange={(e) => setProvince(e.target.value)} />
+          </Field>
+        </div>
+        <Field
+          label="Dirección completa"
+          hint="Para el bloque «Transportista efectivo» del DeCA (documento de control administrativo del transporte)."
+        >
+          <input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Calle, número, polígono…" />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Código postal">
+            <input className={inputCls} value={postalCode} onChange={(e) => setPostalCode(e.target.value)} />
+          </Field>
+          <Field label="Teléfono">
+            <input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4">

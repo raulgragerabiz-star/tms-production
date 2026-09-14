@@ -114,7 +114,7 @@ interface Props {
 
 const documentTypeLabel: Record<string, string> = {
   delivery_note: "Albarán de entrega",
-  carriage_note: "Carta de porte",
+  carriage_note: "DeCA (control de transporte)",
   pod: "Justificante de entrega",
   invoice: "Factura",
 };

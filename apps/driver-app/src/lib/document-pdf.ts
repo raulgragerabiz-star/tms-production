@@ -1,5 +1,5 @@
 // Fase 8Q2: mismo helper que Backoffice (frontend/src/lib/document-pdf.ts)
-// para abrir el albarán/carta de porte en PDF -- necesita pedirse como blob
+// para abrir el albarán/DeCA en PDF -- necesita pedirse como blob
 // autenticado (el endpoint exige el mismo token Bearer que el resto de la
 // API) en vez de un <a href> normal, y así se abre en el visor de PDF nativo
 // del móvil, listo para enseñar en un control de carretera.

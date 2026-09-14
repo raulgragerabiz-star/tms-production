@@ -235,10 +235,12 @@ export default function StopDetailPage() {
       </header>
 
       <main className={`max-w-lg mx-auto px-4 pt-4 space-y-4 ${editableStage ? "pb-56" : "pb-6"}`}>
-        {/* Fase 8Q2: albarán de esta parada y carta de porte del viaje, en
-            PDF -- "control de mercancía por carretera en modo virtual"
-            pedido por Raúl. Se abren en el visor de PDF del propio móvil,
-            listos para enseñar en un control de carretera. */}
+        {/* Fase 8Q2: albarán de esta parada y DeCA del viaje, en PDF --
+            "control de mercancía por carretera en modo virtual" pedido por
+            Raúl; el DeCA se rediseñó por completo en la Fase 8X (plantilla
+            visual real, Orden FOM/2861/2012 · Ley 15/2009 LCTTM). Se abren en
+            el visor de PDF del propio móvil, listos para enseñar en un
+            control de carretera. */}
         <div className="flex gap-2">
           <button
             onClick={() => viewDocumentPdf(`/driver-app/stops/${id}/documents/delivery-note.pdf`)}
@@ -251,7 +253,7 @@ export default function StopDetailPage() {
               onClick={() => viewDocumentPdf(`/driver-app/shipments/${data.shipment!.id}/documents/carriage-note.pdf`)}
               className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-brand-700 text-center"
             >
-              🚚 Carta de porte
+              🚚 DeCA
             </button>
           )}
         </div>

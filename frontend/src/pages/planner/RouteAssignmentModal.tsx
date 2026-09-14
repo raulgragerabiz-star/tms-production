@@ -240,21 +240,23 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
             </div>
             <div className="flex flex-col items-end gap-1.5">
               <StatusBadge status={route.status} />
-              {/* Fase 8Q2: carta de porte en PDF -- "control de mercancía por
-                  carretera en modo virtual" pedido por Raúl. Disponible en
-                  cuanto la ruta tiene paradas, aunque todavía no tenga
-                  transportista/vehículo/conductor asignado (el documento
-                  simplemente muestra "—" en lo que falte). */}
+              {/* Fase 8Q2: DeCA en PDF -- "control de mercancía por carretera
+                  en modo virtual" pedido por Raúl; rediseñado por completo en
+                  la Fase 8X (plantilla visual real, Orden FOM/2861/2012 · Ley
+                  15/2009 LCTTM). Disponible en cuanto la ruta tiene paradas,
+                  aunque todavía no tenga transportista/vehículo/conductor
+                  asignado (el documento simplemente muestra "—" en lo que
+                  falte). */}
               {route.stops.length > 0 && (
                 <div className="flex gap-2">
                   <button
                     onClick={() => viewDocumentPdf(`/routes/${routeId}/documents/carriage-note.pdf`)}
                     className="text-xs text-brand-600 hover:text-brand-700 font-medium"
                   >
-                    Ver carta de porte (PDF)
+                    Ver DeCA (PDF)
                   </button>
                   <button
-                    onClick={() => downloadDocumentPdf(`/routes/${routeId}/documents/carriage-note.pdf`, `carta-porte-${routeId?.slice(0, 8)}.pdf`)}
+                    onClick={() => downloadDocumentPdf(`/routes/${routeId}/documents/carriage-note.pdf`, `deca-${routeId?.slice(0, 8)}.pdf`)}
                     className="text-xs text-slate-400 hover:text-slate-600"
                   >
                     Descargar

@@ -397,6 +397,19 @@ model Carrier {
   taxId                 String                @unique @map("tax_id")
   city                  String?
   province              String?
+  // Fase 8X: dirección completa, código postal y teléfono del transportista
+  // -- petición de Raúl para el DeCA (documento de control administrativo
+  // del transporte, Orden FOM/2861/2012 · Ley 15/2009 LCTTM), que necesita
+  // identificar al "transportista efectivo" con sus datos completos, no solo
+  // ciudad/provincia. Opcionales: sin rellenar, el documento simplemente
+  // omite esa línea, igual que ya hace con los datos de Company. Si la
+  // empresa cargadora subcontrata el transporte a otra empresa distinta de
+  // la habitual, se resuelve dando de alta esa empresa como su propio
+  // Carrier y asignándola a la ruta -- no hay un campo aparte "por envío",
+  // decisión explícita de Raúl.
+  address               String?
+  postalCode            String?               @map("postal_code")
+  phone                 String?
   serviceType           CarrierServiceType    @default(both) @map("service_type")
   ownsFleet             Boolean               @default(false) @map("owns_fleet")
   temperatureCapability TemperatureCapability @default(ambient) @map("temperature_capability")

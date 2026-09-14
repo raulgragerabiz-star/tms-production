@@ -11,6 +11,11 @@ const carrierSchema = z.object({
   taxId: z.string().min(1),
   city: z.string().optional(),
   province: z.string().optional(),
+  // Fase 8X: datos completos del transportista para el DeCA -- ver
+  // comentario en el modelo Carrier (schema.prisma).
+  address: z.string().optional(),
+  postalCode: z.string().optional(),
+  phone: z.string().optional(),
   serviceType: z.enum(["full_truck", "pallet", "both"]).optional(),
   ownsFleet: z.boolean().optional(),
   temperatureCapability: z.enum(["ambient", "refrigerated", "frozen", "mixed"]).optional(),

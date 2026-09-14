@@ -21,12 +21,12 @@ import ImportProductsModal from "@/pages/masters/ImportProductsModal";
 // clave que se usa para actualizar en vez de duplicar al volver a importar
 // el catálogo (ver ImportProductsModal / product-master-import.service.ts).
 //
-// Los campos ADR, Frío, Retornable, Descripción carta de porte y los pesos
-// no vienen en la plantilla comercial de Bigmat -- son específicos de este
-// TMS (transporte ADR real, generación de la carta de porte, cálculo de
-// peso por ruta) y se quedan como sección aparte, pendientes de rellenar a
-// mano para cada producto igual que cualquier otro dato que no traiga la
-// plantilla.
+// Los campos ADR, Frío, Retornable, Descripción DeCA y los pesos no vienen en
+// la plantilla comercial de Bigmat -- son específicos de este TMS (transporte
+// ADR real, generación del DeCA -- Fase 8X, antes "carta de porte" --,
+// cálculo de peso por ruta) y se quedan como sección aparte, pendientes de
+// rellenar a mano para cada producto igual que cualquier otro dato que no
+// traiga la plantilla.
 interface ProductRow {
   id: string;
   sku: string;
@@ -228,7 +228,7 @@ export default function ProductsPage() {
               <th className="text-left px-3 py-3 bg-brand-50/50">ADR</th>
               <th className="text-left px-3 py-3 bg-brand-50/50">Frío</th>
               <th className="text-left px-3 py-3 bg-brand-50/50">Retornable</th>
-              <th className="text-left px-3 py-3 bg-brand-50/50">Descripción carta de porte</th>
+              <th className="text-left px-3 py-3 bg-brand-50/50">Descripción DeCA</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
