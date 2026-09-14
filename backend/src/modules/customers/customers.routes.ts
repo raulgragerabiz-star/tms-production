@@ -70,6 +70,11 @@ customersRouter.get(
   asyncHandler(async (req, res) => {
     const companyId = req.auth!.companyId;
     const search = (req.query.search as string) ?? "";
+    // Mejora (2026-09-14): filtro por circuito de reparto (DeliveryZone) --
+    // petición explícita de Raúl para poder ver/segmentar qué clientes
+    // pertenecen a cada ruta (MAD1, Portu 4...). "sin-circuito" es un valor
+    // especial para encontrar los clientes todavía sin asignar.
+    const deliveryZoneId = req.query.deliveryZoneId as string | undefined;
     const page = parseInt((req.query.page as string) ?? "1", 10);
     const pageSize = Math.min(parseInt((req.query.pageSize as string) ?? "25", 10), 100);
 
@@ -84,6 +89,11 @@ customersRouter.get(
             ],
           }
         : {}),
+      ...(deliveryZoneId === "sin-circuito"
+        ? { deliveryZoneId: null }
+        : deliveryZoneId
+          ? { deliveryZoneId }
+          : {}),
     };
 
     const [items, total] = await Promise.all([

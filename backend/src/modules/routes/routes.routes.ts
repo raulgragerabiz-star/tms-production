@@ -9,6 +9,7 @@ import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, 
 import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
 import { broadcastToWarehouse } from "@/realtime/ws.server";
 import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
+import { summarizeOrderPallets } from "@/modules/orders/lib/line-pallets";
 
 export const routesRouter = Router();
 
@@ -179,7 +180,10 @@ routesRouter.get(
           select: { id: true, address: true, city: true, lat: true, lng: true, contactPhone: true, contactEmail: true },
         },
         warehouse: { select: { id: true, name: true, lat: true, lng: true } },
-        lines: true,
+        // Mejora (2026-09-14): join con producto para poder mostrar
+        // bultos/palés de cada pedido pendiente directamente en el tablero
+        // del Planificador -- petición explícita de Raúl.
+        lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
       },
       orderBy: { priority: "desc" },
     });
@@ -194,6 +198,16 @@ routesRouter.get(
       include: {
         warehouse: { select: { id: true, name: true, lat: true, lng: true } },
         loadPlan: true,
+        // Mejora (2026-09-14): capacidad real del vehículo ya asignado (si lo
+        // hay), para poder comparar en el frontend la carga de un pedido
+        // arrastrado contra el hueco que le queda a la ruta -- cuando no hay
+        // vehículo asignado, el frontend recurre a `suggestedVehicleType` (ya
+        // calculado más abajo) como referencia aproximada.
+        vehicle: {
+          include: {
+            vehicleType: { select: { id: true, name: true, maxWeightKg: true, maxPallets: true, maxVolumeM3: true } },
+          },
+        },
         stops: {
           orderBy: { sequence: "asc" },
           include: {
@@ -211,7 +225,7 @@ routesRouter.get(
                     contactEmail: true,
                   },
                 },
-                lines: true,
+                lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
               },
             },
           },
@@ -240,12 +254,36 @@ routesRouter.get(
       })
     );
 
-    res.json({
-      pendingOrders: pendingOrders.map((o) => ({
+    // Mejora (2026-09-14): mismo cálculo de bultos/palés (helper compartido con
+    // /api/orders) tanto para los pedidos pendientes como para los que ya están
+    // en una parada de ruta -- así la tarjeta de un pedido muestra el mismo dato
+    // esté o no ya asignado, y el frontend puede sumar la carga de una ruta
+    // arrastre a arrastre sin volver a pedir cada pedido por separado.
+    // Nota: `quantity`/`lineWeightKg` son `Decimal` en Prisma -- se tipan aquí
+    // como `any` (igual que el resto de usos de campos Decimal en este mismo
+    // archivo, p.ej. `recalculateLoadPlan` más arriba) en vez de importar
+    // `Prisma.Decimal`, que el cliente generado y trackeado en git de este
+    // sandbox no exporta.
+    const withOrderTotals = <T extends { lines: { quantity: any; lineWeightKg: any; product: { unitsPerPallet: number | null; unitsPerBox: number | null } }[] }>(
+      o: T
+    ) => {
+      const { totalPallets, totalBoxes } = summarizeOrderPallets(
+        o.lines.map((l) => ({ quantity: Number(l.quantity), product: l.product }))
+      );
+      return {
         ...o,
         totalWeightKg: o.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0),
+        totalPallets,
+        totalBoxes,
+      };
+    };
+
+    res.json({
+      pendingOrders: pendingOrders.map((o) => withOrderTotals(o)),
+      routes: routesWithSuggestion.map((r) => ({
+        ...r,
+        stops: r.stops.map((s) => ({ ...s, order: withOrderTotals(s.order) })),
       })),
-      routes: routesWithSuggestion,
     });
   })
 );

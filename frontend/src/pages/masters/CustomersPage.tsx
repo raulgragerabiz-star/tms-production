@@ -19,6 +19,15 @@ interface CustomerRow {
   defaultCity: string | null;
   defaultPostalCode: string | null;
   _count: { deliveryPoints: number };
+  // Mejora (2026-09-14): circuito de reparto (MAD1, Portu 4...) -- petición
+  // explícita de Raúl para ver/segmentar qué clientes pertenecen a cada ruta.
+  deliveryZone: { id: string; name: string } | null;
+}
+
+interface DeliveryZoneOption {
+  id: string;
+  name: string;
+  scheduleNotes: string[];
 }
 
 export default function CustomersPage() {
@@ -54,15 +63,29 @@ export default function CustomersPage() {
   // backend) no había forma de verlos desde aquí.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  // Mejora (2026-09-14): filtro por circuito de reparto -- "" es "todos",
+  // "sin-circuito" es el valor especial que reconoce el backend para los
+  // clientes sin asignar todavía.
+  const [deliveryZoneId, setDeliveryZoneId] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["customers", search, page, pageSize],
+    queryKey: ["customers", search, page, pageSize, deliveryZoneId],
     queryFn: async () =>
-      (await api.get("/customers", { params: { search, page, pageSize } })).data as {
+      (
+        await api.get("/customers", {
+          params: { search, page, pageSize, deliveryZoneId: deliveryZoneId || undefined },
+        })
+      ).data as {
         items: CustomerRow[];
         total: number;
       },
   });
+
+  const { data: zonesData } = useQuery({
+    queryKey: ["delivery-zones", "options"],
+    queryFn: async () => (await api.get("/delivery-zones")).data as { items: DeliveryZoneOption[] },
+  });
+  const selectedZone = zonesData?.items.find((z) => z.id === deliveryZoneId);
 
   return (
     <div>
@@ -81,6 +104,22 @@ export default function CustomersPage() {
             }}
             className="rounded-lg border border-slate-300 text-sm px-3 py-2 w-64"
           />
+          <select
+            value={deliveryZoneId}
+            onChange={(e) => {
+              setDeliveryZoneId(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-2"
+          >
+            <option value="">Todos los circuitos</option>
+            <option value="sin-circuito">Sin circuito</option>
+            {zonesData?.items.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setImportModalOpen(true)}
             className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg whitespace-nowrap"
@@ -96,6 +135,17 @@ export default function CustomersPage() {
         </div>
       </div>
 
+      {/* Mejora (2026-09-14): recordatorio de los días de reparto del circuito
+          seleccionado -- viene de `scheduleNote` (texto libre por transportista
+          en la tarifa del circuito), no de un campo estructurado, así que puede
+          haber más de uno si varios transportistas reparten esa zona en días
+          distintos. */}
+      {selectedZone && selectedZone.scheduleNotes.length > 0 && (
+        <p className="text-xs text-slate-500 mb-2">
+          Circuito {selectedZone.name} — reparto: {selectedZone.scheduleNotes.join(" / ")}
+        </p>
+      )}
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-xs font-semibold uppercase tracking-wide sticky top-0 z-10">
@@ -104,6 +154,7 @@ export default function CustomersPage() {
               <th className="text-left px-4 py-3">Razón social</th>
               <th className="text-left px-4 py-3">Nombre comercial</th>
               <th className="text-left px-4 py-3">Dirección por defecto</th>
+              <th className="text-left px-4 py-3">Circuito</th>
               <th className="text-right px-4 py-3">Puntos de entrega</th>
               <th className="text-left px-4 py-3">Estado</th>
               <th className="text-left px-4 py-3">Acción</th>
@@ -112,7 +163,7 @@ export default function CustomersPage() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={8} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {data?.items.map((c) => (
@@ -131,12 +182,18 @@ export default function CustomersPage() {
                     "—"
                   )}
                 </td>
+                <td className="px-4 py-3">
+                  {c.deliveryZone ? <Chip color="purple">{c.deliveryZone.name}</Chip> : <span className="text-slate-300">—</span>}
+                </td>
                 <td className="px-4 py-3 text-right font-mono text-slate-600">{c._count.deliveryPoints}</td>
                 <td className="px-4 py-3">
                   <Chip color={c.active ? "teal" : "slate"}>{c.active ? "Activo" : "Inactivo"}</Chip>
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
-                  <button onClick={() => setEditingCustomer(c)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
+                  <button
+                    onClick={() => setEditingCustomer({ ...c, deliveryZoneId: c.deliveryZone?.id ?? null })}
+                    className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3"
+                  >
                     Editar
                   </button>
                   <button onClick={() => handleDelete(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">

@@ -58,15 +58,34 @@ const zoneSchema = z.object({
 deliveryZonesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
+    const now = new Date();
     const items = await prisma.deliveryZone.findMany({
       where: { companyId: req.auth!.companyId },
       orderBy: { name: "asc" },
       include: {
         warehouse: { select: { id: true, name: true } },
         _count: { select: { customers: true, rates: true } },
+        // Mejora (2026-09-14): "indicar los días de la semana en que esa
+        // ruta está programada para enviar, tal y como se indica en la
+        // plantilla" -- el único dato de vigencia/reparto que existe hoy es
+        // el `scheduleNote` libre (p.ej. "Martes y Jueves") de cada tarifa
+        // circuito+transportista (DeliveryZoneRate). Un mismo circuito puede
+        // tener varios transportistas con notas distintas, así que aquí se
+        // traen TODAS las notas vigentes (sin repetir) en vez de asumir una
+        // sola -- se deduplican y filtran en el propio handler, no hace
+        // falta un campo nuevo en el schema para esto.
+        rates: {
+          where: { OR: [{ validTo: null }, { validTo: { gte: now } }] },
+          select: { scheduleNote: true },
+        },
       },
     });
-    res.json({ items, total: items.length });
+    const withSchedule = items.map((z) => {
+      const scheduleNotes = [...new Set(z.rates.map((r) => r.scheduleNote).filter((n): n is string => !!n?.trim()))];
+      const { rates, ...rest } = z;
+      return { ...rest, scheduleNotes };
+    });
+    res.json({ items: withSchedule, total: withSchedule.length });
   })
 );
 

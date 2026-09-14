@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
+import Chip from "@/components/Chip";
 import Toast from "@/components/Toast";
 import Pagination from "@/components/Pagination";
 import { useToast } from "@/hooks/use-toast";
@@ -16,9 +17,25 @@ interface OrderRow {
   priority: string;
   requestedDeliveryDate: string;
   totalWeightKg: number;
-  customer: { businessCode: string; legalName: string };
+  // Mejora (2026-09-14): bultos/palés visibles en el listado -- petición
+  // explícita de Raúl. `totalBoxes` es null cuando ningún producto del
+  // pedido tiene todavía `unitsPerBox` cargado en el maestro.
+  totalPallets: number;
+  totalBoxes: number | null;
+  customer: { businessCode: string; legalName: string; deliveryZone: { id: string; name: string } | null };
   deliveryPoint: { address: string; city: string | null };
   warehouse: { name: string };
+}
+
+interface DeliveryZoneOption {
+  id: string;
+  name: string;
+  scheduleNotes: string[];
+}
+
+function formatPalletsBoxes(totalPallets: number, totalBoxes: number | null): string {
+  const palletsLabel = `${totalPallets.toFixed(1)} palés`;
+  return totalBoxes != null ? `${palletsLabel} · ${Math.round(totalBoxes)} bultos` : palletsLabel;
 }
 
 // Fase 8O: sondeo del campo de búsqueda antes de disparar la consulta --
@@ -49,6 +66,11 @@ export default function OrdersPage() {
   // (por defecto 25) el resto quedaba invisible sin ninguna forma de verlo.
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  // Mejora (2026-09-14): filtro por circuito de reparto, para poder segmentar
+  // los pedidos integrados según la ruta a la que pertenece su cliente --
+  // petición explícita de Raúl. "" = todos, "sin-circuito" = clientes sin
+  // asignar todavía (mismo valor especial que reconoce /customers).
+  const [deliveryZoneId, setDeliveryZoneId] = useState("");
 
   // Fase 8O: debounce del buscador -- ver comentario junto a
   // SEARCH_DEBOUNCE_MS más arriba.
@@ -61,17 +83,29 @@ export default function OrdersPage() {
   }, [orderNumberInput]);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["orders", status, orderNumberSearch, page, pageSize],
+    queryKey: ["orders", status, orderNumberSearch, page, pageSize, deliveryZoneId],
     queryFn: async () =>
       (
         await api.get("/orders", {
-          params: { ...(status ? { status } : {}), ...(orderNumberSearch ? { orderNumber: orderNumberSearch } : {}), page, pageSize },
+          params: {
+            ...(status ? { status } : {}),
+            ...(orderNumberSearch ? { orderNumber: orderNumberSearch } : {}),
+            ...(deliveryZoneId ? { deliveryZoneId } : {}),
+            page,
+            pageSize,
+          },
         })
       ).data as {
         items: OrderRow[];
         total: number;
       },
   });
+
+  const { data: zonesData } = useQuery({
+    queryKey: ["delivery-zones", "options"],
+    queryFn: async () => (await api.get("/delivery-zones")).data as { items: DeliveryZoneOption[] },
+  });
+  const selectedZone = zonesData?.items.find((z) => z.id === deliveryZoneId);
 
   return (
     <div>
@@ -107,6 +141,22 @@ export default function OrdersPage() {
             <option value="incident">Incidencia</option>
             <option value="cancelled">Cancelado</option>
           </select>
+          <select
+            value={deliveryZoneId}
+            onChange={(e) => {
+              setDeliveryZoneId(e.target.value);
+              setPage(1);
+            }}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-2"
+          >
+            <option value="">Todos los circuitos</option>
+            <option value="sin-circuito">Sin circuito</option>
+            {zonesData?.items.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => setImportModalOpen(true)}
             className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg"
@@ -122,6 +172,14 @@ export default function OrdersPage() {
         </div>
       </div>
 
+      {/* Mejora (2026-09-14): mismo recordatorio de días de reparto que en
+          Clientes -- ver comentario allí sobre `scheduleNotes`. */}
+      {selectedZone && selectedZone.scheduleNotes.length > 0 && (
+        <p className="text-xs text-slate-500 mb-2">
+          Circuito {selectedZone.name} — reparto: {selectedZone.scheduleNotes.join(" / ")}
+        </p>
+      )}
+
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
           {/* 2026-09-09: cabecera fija (sticky) y fila resaltada en ámbar al
@@ -132,24 +190,26 @@ export default function OrdersPage() {
             <tr>
               <th className="text-left px-4 py-3">Nº pedido</th>
               <th className="text-left px-4 py-3">Cliente</th>
+              <th className="text-left px-4 py-3">Circuito</th>
               <th className="text-left px-4 py-3">Punto de entrega</th>
               <th className="text-left px-4 py-3">Almacén</th>
               <th className="text-left px-4 py-3">Fecha comprometida</th>
               <th className="text-right px-4 py-3">Peso (kg)</th>
+              <th className="text-left px-4 py-3">Bultos/Palés</th>
               <th className="text-left px-4 py-3">Estado</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                   Cargando…
                 </td>
               </tr>
             )}
             {!isLoading && data?.items.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
                   No hay pedidos para este filtro.
                 </td>
               </tr>
@@ -165,6 +225,13 @@ export default function OrdersPage() {
                 <td className="px-4 py-3">
                   {o.customer.businessCode} — {o.customer.legalName}
                 </td>
+                <td className="px-4 py-3">
+                  {o.customer.deliveryZone ? (
+                    <Chip color="purple">{o.customer.deliveryZone.name}</Chip>
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-slate-500">
                   {o.deliveryPoint.address}
                   {o.deliveryPoint.city ? `, ${o.deliveryPoint.city}` : ""}
@@ -174,6 +241,9 @@ export default function OrdersPage() {
                   {new Date(o.requestedDeliveryDate).toLocaleDateString("es-ES")}
                 </td>
                 <td className="px-4 py-3 text-right font-mono text-slate-600">{o.totalWeightKg.toFixed(1)}</td>
+                <td className="px-4 py-3">
+                  <Chip color="blue">{formatPalletsBoxes(o.totalPallets, o.totalBoxes)}</Chip>
+                </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={o.status} />
                 </td>

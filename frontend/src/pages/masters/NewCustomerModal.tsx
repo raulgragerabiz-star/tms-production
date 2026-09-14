@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Modal from "@/components/Modal";
 import Field from "@/components/Field";
@@ -18,6 +18,10 @@ export interface CustomerEditable {
   commercialName: string | null;
   taxId: string | null;
   active: boolean;
+  // Mejora (2026-09-14): circuito de reparto (MAD1, Portu 4...) -- petición
+  // explícita de Raúl. CustomersPage lo rellena a partir de `deliveryZone.id`
+  // al abrir la edición (el listado trae el objeto anidado, no el id suelto).
+  deliveryZoneId: string | null;
 }
 
 interface Props {
@@ -39,6 +43,15 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
   const [commercialName, setCommercialName] = useState("");
   const [taxId, setTaxId] = useState("");
   const [active, setActive] = useState(true);
+  // "" = sin circuito asignado.
+  const [deliveryZoneId, setDeliveryZoneId] = useState("");
+
+  const { data: zonesData } = useQuery({
+    queryKey: ["delivery-zones", "options"],
+    queryFn: async () =>
+      (await api.get("/delivery-zones")).data as { items: { id: string; name: string }[] },
+    enabled: open,
+  });
 
   // Rellena el formulario cuando se abre para editar un cliente concreto, y
   // lo limpia cuando se abre para dar uno de alta -- sin esto, reabrir el
@@ -50,6 +63,7 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
     setCommercialName(customer?.commercialName ?? "");
     setTaxId(customer?.taxId ?? "");
     setActive(customer?.active ?? true);
+    setDeliveryZoneId(customer?.deliveryZoneId ?? "");
   }, [open, customer]);
 
   const mutation = useMutation({
@@ -60,6 +74,7 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
         commercialName: commercialName.trim() || undefined,
         taxId: taxId.trim() || undefined,
         active,
+        deliveryZoneId: deliveryZoneId || null,
       };
       if (isEdit) return (await api.put(`/customers/${customer!.id}`, payload)).data;
       return (await api.post("/customers", payload)).data;
@@ -97,6 +112,16 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
         </Field>
         <Field label="Nombre comercial">
           <input className={inputCls} value={commercialName} onChange={(e) => setCommercialName(e.target.value)} />
+        </Field>
+        <Field label="Circuito de reparto" hint="Para segmentar sus pedidos por ruta (MAD1, Portu 4...)">
+          <select className={inputCls} value={deliveryZoneId} onChange={(e) => setDeliveryZoneId(e.target.value)}>
+            <option value="">Sin circuito</option>
+            {zonesData?.items.map((z) => (
+              <option key={z.id} value={z.id}>
+                {z.name}
+              </option>
+            ))}
+          </select>
         </Field>
         {isEdit && (
           <label className="flex items-center gap-2 text-sm text-slate-600">

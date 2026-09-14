@@ -1,8 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
+import Chip from "@/components/Chip";
 import Modal from "@/components/Modal";
 import { viewDocumentPdf, downloadDocumentPdf } from "@/lib/document-pdf";
+
+// Mejora (2026-09-14): bultos/palés por línea y total del pedido en su ficha
+// -- petición explícita de Raúl ("indicar dentro de los pedidos... el número
+// de bultos/palets... tiene que ser visual"). Misma fórmula que el backend
+// (backend/src/modules/orders/lib/line-pallets.ts), replicada aquí porque la
+// ficha ya trae el producto completo y no merece la pena un viaje extra al
+// servidor solo para este cálculo. Palés: sin `unitsPerPallet` cargado se
+// asume 1 (mismo criterio ya establecido en el motor de rutas/asignación).
+// Bultos: sin `unitsPerBox` cargado no se calcula (null), en vez de inventar
+// un valor -- no hay ningún precedente de "1 unidad = 1 bulto" en el proyecto.
+function computeLinePallets(quantity: number, unitsPerPallet: number | null): number {
+  const perPallet = unitsPerPallet ?? 1;
+  return perPallet > 0 ? quantity / perPallet : 0;
+}
+function computeLineBoxes(quantity: number, unitsPerBox: number | null): number | null {
+  if (unitsPerBox == null || unitsPerBox <= 0) return null;
+  return quantity / unitsPerBox;
+}
+function formatPalletsBoxes(totalPallets: number, totalBoxes: number | null): string {
+  const palletsLabel = `${totalPallets.toFixed(1)} palés`;
+  return totalBoxes != null ? `${palletsLabel} · ${Math.round(totalBoxes)} bultos` : palletsLabel;
+}
 
 // "Ficha única del pedido" (instrucciones del proyecto ampliadas): integra
 // albaranes digitales, observaciones, documentos, incidencias, estado y
@@ -73,7 +96,11 @@ interface OrderDetail {
   customer: { businessCode: string; legalName: string };
   deliveryPoint: { address: string; city: string | null };
   warehouse: { name: string };
-  lines: { quantity: number; unit: string; product: { sku: string; description: string } }[];
+  lines: {
+    quantity: number;
+    unit: string;
+    product: { sku: string; description: string; unitsPerPallet: number | null; unitsPerBox: number | null };
+  }[];
   documents: DocumentRow[];
   routeStops: RouteStopRow[];
   timeline: TimelineEvent[];
@@ -210,18 +237,35 @@ export default function OrderDetailModal({ orderId, onClose }: Props) {
           )}
 
           <div>
-            <h3 className="text-xs font-medium text-slate-500 uppercase mb-2">Líneas</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-medium text-slate-500 uppercase">Líneas</h3>
+              <Chip color="blue">
+                {formatPalletsBoxes(
+                  data.lines.reduce((acc, l) => acc + computeLinePallets(l.quantity, l.product.unitsPerPallet), 0),
+                  data.lines.some((l) => l.product.unitsPerBox != null)
+                    ? data.lines.reduce((acc, l) => acc + (computeLineBoxes(l.quantity, l.product.unitsPerBox) ?? 0), 0)
+                    : null
+                )}
+              </Chip>
+            </div>
             <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
-              {data.lines.map((l, i) => (
-                <li key={i} className="px-3 py-2 flex justify-between text-sm">
-                  <span className="text-slate-700">
-                    {l.product.sku} — {l.product.description}
-                  </span>
-                  <span className="text-slate-500">
-                    {l.quantity} {l.unit}
-                  </span>
-                </li>
-              ))}
+              {data.lines.map((l, i) => {
+                const linePallets = computeLinePallets(l.quantity, l.product.unitsPerPallet);
+                const lineBoxes = computeLineBoxes(l.quantity, l.product.unitsPerBox);
+                return (
+                  <li key={i} className="px-3 py-2 flex items-center justify-between text-sm gap-3">
+                    <span className="text-slate-700 min-w-0 truncate">
+                      {l.product.sku} — {l.product.description}
+                    </span>
+                    <span className="text-slate-500 whitespace-nowrap text-right">
+                      <span className="block">
+                        {l.quantity} {l.unit}
+                      </span>
+                      <span className="block text-xs text-slate-400">{formatPalletsBoxes(linePallets, lineBoxes)}</span>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 

@@ -30,9 +30,24 @@ interface OrderLite {
   orderNumber: string;
   priority: string;
   totalWeightKg: number;
+  // Mejora (2026-09-14): bultos/palés de cada pedido, visibles de un vistazo
+  // en el tablero del Planificador -- petición explícita de Raúl. `totalBoxes`
+  // es null cuando ningún producto del pedido tiene todavía `unitsPerBox`
+  // cargado en el maestro (dato parcial-pero-honesto, igual que en el resto
+  // del proyecto).
+  totalPallets: number;
+  totalBoxes: number | null;
   customer: { businessCode: string; legalName: string };
   deliveryPoint: DeliveryPoint;
   warehouse: Warehouse;
+}
+
+// Mejora (2026-09-14): formato compacto "X.X palés" (+ "· N bultos" cuando se
+// conoce) reutilizado en la tarjeta de pedido pendiente y en el resumen de
+// cada ruta.
+function formatPalletsBoxes(totalPallets: number, totalBoxes: number | null): string {
+  const palletsLabel = `${totalPallets.toFixed(1)} palés`;
+  return totalBoxes != null ? `${palletsLabel} · ${Math.round(totalBoxes)} bultos` : palletsLabel;
 }
 
 interface RouteStopLite {
@@ -61,18 +76,75 @@ interface RouteLite {
     volumeOccupancyPct: number;
     distanceKm: string | null;
     estimatedDurationMin: number | null;
+    // Mejora (2026-09-14): totales absolutos (no solo el % de ocupación),
+    // necesarios para poder proyectar "¿y si añado este pedido arrastrado?"
+    // durante el hover, antes de soltarlo -- ya venían en la respuesta del
+    // backend (`loadPlan: true` sin recortar campos), solo faltaba tiparlos.
+    totalWeightKg: number;
+    totalPallets: number;
   } | null;
   // Objetivo 2: sugerencia de tipo de vehículo según la zona de km del
   // almacén -- null si la ruta ya tiene vehículo asignado o si el almacén
   // no tiene zonas de influencia definidas para esa distancia.
   suggestedVehicleType: {
-    vehicleType: { id: string; name: string };
+    vehicleType: { id: string; name: string; maxWeightKg: number; maxPallets: number; maxVolumeM3: number | null };
     fitsWeight: boolean;
     fitsPallets: boolean;
     fitsVolume: boolean;
     reasons: string[];
   } | null;
+  // Mejora (2026-09-14): capacidad real cuando la ruta ya tiene vehículo
+  // asignado -- referencia preferente sobre `suggestedVehicleType` (que es
+  // solo una aproximación por zona de km) para el chequeo predictivo de hueco
+  // al arrastrar un pedido. Decimal -> string al venir por JSON, igual que
+  // `loadPlan.distanceKm`.
+  vehicle: {
+    vehicleType: { maxWeightKg: string; maxPallets: number };
+  } | null;
   stops: RouteStopLite[];
+}
+
+interface CapacityRef {
+  maxWeightKg: number;
+  maxPallets: number;
+}
+
+// Mejora (2026-09-14): referencia de capacidad para el chequeo predictivo --
+// el vehículo real si ya está asignado, si no la sugerencia por zona de km
+// (ya calculada en /planner-board). Devuelve null si no hay ninguna
+// referencia todavía (ruta sin vehículo y sin sugerencia posible).
+function getCapacityRef(route: RouteLite): CapacityRef | null {
+  if (route.vehicle?.vehicleType) {
+    return {
+      maxWeightKg: Number(route.vehicle.vehicleType.maxWeightKg),
+      maxPallets: route.vehicle.vehicleType.maxPallets,
+    };
+  }
+  if (route.suggestedVehicleType?.vehicleType) {
+    return {
+      maxWeightKg: route.suggestedVehicleType.vehicleType.maxWeightKg,
+      maxPallets: route.suggestedVehicleType.vehicleType.maxPallets,
+    };
+  }
+  return null;
+}
+
+// Mejora (2026-09-14): bultos/palés totales de una ruta ya construida, para
+// mostrarlos junto a la ocupación % existente. Los palés reutilizan el total
+// ya calculado en el backend (`loadPlan.totalPallets`, la misma fórmula de
+// siempre); los bultos se suman aquí en el cliente a partir de cada parada,
+// con el mismo criterio "parcial-pero-honesto" que en el pedido individual:
+// si ninguna parada tiene bultos conocidos, el total es null, no 0.
+function sumRouteBoxes(route: RouteLite): number | null {
+  let total = 0;
+  let anyKnown = false;
+  for (const s of route.stops) {
+    if (s.order.totalBoxes != null) {
+      anyKnown = true;
+      total += s.order.totalBoxes;
+    }
+  }
+  return anyKnown ? total : null;
 }
 
 interface BoardData {
@@ -189,6 +261,61 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
     return lines;
   }, [routesOfSameService, routeColorMap]);
 
+  // Mejora (2026-09-14): "ofrecer una alternativa a la hora de enviar el
+  // producto si no entra completa, indicando cuántos bultos quedarán
+  // pendientes de envío y si hay otra ruta en la que se puedan integrar" --
+  // NO existe envío parcial real en el sistema (no hay ningún modelo para
+  // repartir las líneas de un pedido entre paradas/rutas distintas), así que
+  // esto es deliberadamente un aviso predictivo mientras se arrastra, no una
+  // división real del pedido: si no cabe entero, se muestra una magnitud
+  // aproximada de lo que sobraría y qué otras rutas SÍ tienen hueco para el
+  // pedido completo. El pedido se puede soltar igualmente -- no se bloquea el
+  // drop, igual que el resto del tablero (sugerencia, no una acción forzada).
+  const draggingOrder = useMemo(
+    () => (boardQuery.data?.pendingOrders ?? []).find((o) => o.id === draggingOrderId) ?? null,
+    [boardQuery.data, draggingOrderId]
+  );
+
+  const hoverFitCheck = useMemo(() => {
+    if (!draggingOrder || !dragOverRouteId) return null;
+    const route = routesOfSameService.find((r) => r.id === dragOverRouteId);
+    if (!route) return null;
+    const capacity = getCapacityRef(route);
+    if (!capacity) return { known: false as const };
+
+    const currentWeight = route.loadPlan?.totalWeightKg ?? 0;
+    const currentPallets = route.loadPlan?.totalPallets ?? 0;
+    const projectedWeight = currentWeight + draggingOrder.totalWeightKg;
+    const projectedPallets = currentPallets + draggingOrder.totalPallets;
+    const fits = projectedWeight <= capacity.maxWeightKg && projectedPallets <= capacity.maxPallets;
+    if (fits) return { known: true as const, fits: true as const };
+
+    const overWeightKg = Math.max(0, projectedWeight - capacity.maxWeightKg);
+    const overPallets = Math.max(0, projectedPallets - capacity.maxPallets);
+    // Proporción aproximada del pedido que "no entra" -- usada solo para dar
+    // una magnitud orientativa de bultos/palés pendientes, no un reparto real.
+    const overRatio = Math.min(
+      1,
+      Math.max(
+        draggingOrder.totalWeightKg > 0 ? overWeightKg / draggingOrder.totalWeightKg : 0,
+        draggingOrder.totalPallets > 0 ? overPallets / draggingOrder.totalPallets : 0
+      )
+    );
+    const pendingPallets = draggingOrder.totalPallets * overRatio;
+    const pendingBoxes = draggingOrder.totalBoxes != null ? draggingOrder.totalBoxes * overRatio : null;
+
+    const alternatives = routesOfSameService.filter((alt) => {
+      if (alt.id === route.id) return false;
+      const altCapacity = getCapacityRef(alt);
+      if (!altCapacity) return false;
+      const altWeight = (alt.loadPlan?.totalWeightKg ?? 0) + draggingOrder.totalWeightKg;
+      const altPallets = (alt.loadPlan?.totalPallets ?? 0) + draggingOrder.totalPallets;
+      return altWeight <= altCapacity.maxWeightKg && altPallets <= altCapacity.maxPallets;
+    });
+
+    return { known: true as const, fits: false as const, pendingPallets, pendingBoxes, alternatives };
+  }, [draggingOrder, dragOverRouteId, routesOfSameService]);
+
   function handleDragStart(e: DragEvent<HTMLDivElement>, orderId: string) {
     setDraggingOrderId(orderId);
     e.dataTransfer.setData("text/plain", orderId);
@@ -244,6 +371,9 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
               <p className="text-slate-400 text-xs">
                 {o.deliveryPoint.city ?? o.deliveryPoint.address} · <span className="font-mono">{o.totalWeightKg.toFixed(0)} kg</span>
               </p>
+              <p className="mt-1">
+                <Chip color="blue">{formatPalletsBoxes(o.totalPallets, o.totalBoxes)}</Chip>
+              </p>
             </div>
           ))}
         </div>
@@ -281,6 +411,12 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                 <p className="text-xs text-slate-500 mb-1">{r.warehouse.name}</p>
                 <p className="text-slate-700 mb-1">
                   <span className="font-mono font-bold">{r.stops.length}</span> paradas
+                  {r.loadPlan && (
+                    <>
+                      {" · "}
+                      <Chip color="blue">{formatPalletsBoxes(r.loadPlan.totalPallets, sumRouteBoxes(r))}</Chip>
+                    </>
+                  )}
                 </p>
                 {r.stops.length > 0 && (
                   <div className="space-y-1 max-h-40 overflow-y-auto pr-1 mb-1 border border-slate-100 rounded-md bg-slate-50/60 p-1.5">
@@ -335,6 +471,24 @@ export default function DragDropBoard({ warehouseId, routeDate, serviceType, onC
                       ? ` (${r.suggestedVehicleType.reasons.join("; ")})`
                       : ""}
                   </p>
+                )}
+                {dragOverRouteId === r.id && hoverFitCheck?.known && !hoverFitCheck.fits && (
+                  <div className="mt-1.5 text-xs bg-amber-50 border border-amber-200 rounded-md p-1.5 text-amber-700">
+                    <p className="font-semibold">
+                      No cabe entero: sobrarían ~{hoverFitCheck.pendingPallets.toFixed(1)} palés
+                      {hoverFitCheck.pendingBoxes != null && ` (~${Math.round(hoverFitCheck.pendingBoxes)} bultos)`}
+                    </p>
+                    {hoverFitCheck.alternatives.length > 0 ? (
+                      <p className="mt-0.5">
+                        Cabe entero en:{" "}
+                        {hoverFitCheck.alternatives
+                          .map((alt) => `ruta ${alt.id.slice(0, 8)}`)
+                          .join(", ")}
+                      </p>
+                    ) : (
+                      <p className="mt-0.5">Ninguna otra ruta en construcción tiene hueco para el pedido completo.</p>
+                    )}
+                  </div>
                 )}
                 <p className="text-[11px] text-slate-400 mt-2 italic">Suelta aquí un pedido para añadirlo</p>
               </div>

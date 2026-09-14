@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { computeLineWeightKg } from "./lib/line-weight";
+import { summarizeOrderPallets } from "./lib/line-pallets";
 import { classifyOrder } from "@/modules/segmentation/segmentation.service";
 import { buildOrdersImportTemplate, startOrdersExcelImportJob } from "./orders-excel-import.service";
 import { getImportJob } from "./lib/import-jobs.store";
@@ -50,6 +51,11 @@ ordersRouter.get(
     // ya existente -- antes solo se podía filtrar por estado o recorrer
     // páginas a mano para encontrar un pedido concreto.
     const orderNumber = (req.query.orderNumber as string | undefined)?.trim();
+    // Mejora (2026-09-14): filtro por circuito de reparto (DeliveryZone) del
+    // cliente del pedido -- petición explícita de Raúl, para poder segmentar
+    // Pedidos según a qué ruta pertenece cada cliente (ver
+    // customers.routes.ts, mismo filtro añadido ahí).
+    const deliveryZoneId = req.query.deliveryZoneId as string | undefined;
     const page = parseInt((req.query.page as string) ?? "1", 10);
     const pageSize = Math.min(parseInt((req.query.pageSize as string) ?? "25", 10), 100);
 
@@ -57,6 +63,11 @@ ordersRouter.get(
       companyId: req.auth!.companyId,
       ...(status ? { status: status as any } : {}),
       ...(orderNumber ? { orderNumber: { contains: orderNumber, mode: "insensitive" as const } } : {}),
+      ...(deliveryZoneId === "sin-circuito"
+        ? { customer: { deliveryZoneId: null } }
+        : deliveryZoneId
+          ? { customer: { deliveryZoneId } }
+          : {}),
     };
 
     const [items, total] = await Promise.all([
@@ -66,19 +77,32 @@ ordersRouter.get(
         take: pageSize,
         orderBy: { requestedDeliveryDate: "asc" },
         include: {
-          customer: { select: { businessCode: true, legalName: true } },
+          customer: {
+            select: { businessCode: true, legalName: true, deliveryZone: { select: { id: true, name: true } } },
+          },
           deliveryPoint: { select: { id: true, address: true, city: true, lat: true, lng: true } },
           warehouse: { select: { id: true, name: true, lat: true, lng: true } },
-          lines: true,
+          // Mejora (2026-09-14): se añade el producto de cada línea (solo
+          // unitsPerPallet/unitsPerBox) para poder calcular bultos/palés por
+          // pedido -- antes `lines: true` traía las líneas en bruto, sin
+          // producto, y este listado no calculaba nada más que el peso.
+          lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
         },
       }),
       prisma.order.count({ where }),
     ]);
 
-    const withTotals = items.map((o) => ({
-      ...o,
-      totalWeightKg: o.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0),
-    }));
+    const withTotals = items.map((o) => {
+      const { totalPallets, totalBoxes } = summarizeOrderPallets(
+        o.lines.map((l) => ({ quantity: Number(l.quantity), product: l.product }))
+      );
+      return {
+        ...o,
+        totalWeightKg: o.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0),
+        totalPallets,
+        totalBoxes,
+      };
+    });
 
     res.json({ items: withTotals, total, page, pageSize });
   })
