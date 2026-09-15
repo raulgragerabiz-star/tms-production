@@ -170,7 +170,15 @@ export default function InfluenceZonesPage({ embedded = false }: { embedded?: bo
                 zone={zone}
                 vehicleTypes={vehicleTypes}
                 onSave={(patch) => updateMutation.mutate({ id: zone.id, ...patch })}
-                onDelete={() => deleteMutation.mutate(zone.id)}
+                onDelete={() => {
+                  // Fase 10: esta franja se borraba sin pedir confirmación --
+                  // único borrado de la app sin ese paso (auditoría a
+                  // petición de Raúl: "revisa todos los campos"). Mismo
+                  // criterio que el resto de eliminaciones.
+                  if (window.confirm("¿Eliminar esta franja de influencia? Esta acción no se puede deshacer.")) {
+                    deleteMutation.mutate(zone.id);
+                  }
+                }}
               />
             ))}
           </tbody>

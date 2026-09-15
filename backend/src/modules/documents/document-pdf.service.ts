@@ -486,7 +486,12 @@ export interface CarriageNoteRoute {
     phone?: string | null;
   } | null;
   vehicle: { plate: string; trailerPlate: string | null } | null;
-  driver: { fullName: string; taxId: string } | null;
+  // Fase 10: se añade `phone` -- petición de Raúl ("no hay ningún campo con
+  // los datos del conductor: nombre, dni, telefono"). `fullName`/`taxId` (DNI)
+  // ya se consultaban en los 3 sitios que llaman a esta función, pero nunca
+  // se llegaban a IMPRIMIR en el documento -- ver más abajo, tarjeta
+  // "Conductor asignado".
+  driver: { fullName: string; taxId: string; phone?: string | null } | null;
   costSimulations: { estimatedCost: any }[];
   // Fase 8Y: apartado rellenable por ruta para cuando el transportista
   // asignado (carrier, arriba) subcontrata a otra empresa distinta para
@@ -544,9 +549,34 @@ export interface CarriageNoteRoute {
 //    mantiene como ayuda opcional en "Gestionar ruta"), esos datos se usan
 //    solo como VALOR INICIAL del campo -- el campo sigue siendo editable
 //    dentro del PDF por quien lo abra, nunca de solo lectura.
-export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
+// Fase 10: "cargador contractual" del DeCA -- corrección explícita de Raúl:
+// este TMS es de una única empresa (BigMat), así que este bloque NUNCA debe
+// depender de lo que tenga (o no) rellenado el registro `Company` de cada
+// entorno -- se fija con los datos fiscales reales que aportó él mismo, para
+// que el documento sea siempre correcto sin importar el estado de esa tabla.
+// El parámetro `company` de la función se conserva (mismo tipo/firma que
+// `renderDeliveryNotePdf`, que sí sigue leyendo de `Company` con normalidad)
+// pero deja de usarse dentro de esta función -- el DeCA ya no lo necesita.
+const BIGMAT_CARGADOR: CompanyProfile = {
+  name: "BIGMAT IBERIA S.A.",
+  taxId: "A81759813",
+  address: "Avenida de los Pirineos, 7, 1ª planta",
+  postalCode: "28703",
+  city: "San Sebastián de los Reyes",
+  province: "Madrid",
+  phone: "91 623 71 60",
+  mercantileRegistryText: "Inscrita en el Registro Mercantil de Madrid",
+};
+
+export async function renderCarriageNotePdf(route: CarriageNoteRoute, _company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);
+  // Fase 10: fecha/hora de generación del documento -- la norma exige que el
+  // DeCA la muestre. Como el documento se regenera al vuelo cada vez que se
+  // abre/descarga (siempre con el mismo Nº DECA, ver más abajo), este dato
+  // siempre refleja el momento real de la descarga/consulta, no el de
+  // creación de la ruta.
+  const generatedAt = new Date();
 
   // Nº DECA: determinista a partir del id de la ruta y su fecha de
   // expedición -- regenerar el mismo PDF más adelante da siempre el mismo
@@ -589,9 +619,16 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     .fontSize(8.5)
     .fillColor("#334155")
     .text(formatDate(route.routeDate), rightX, y + 25, { width: rightColWidth, align: "right" });
+  // Fase 10: fecha y hora de EMISIÓN del documento (distinta de la fecha de
+  // la ruta, arriba) -- exigida por la norma, ver comentario de `generatedAt`.
+  doc
+    .font("Helvetica")
+    .fontSize(6.5)
+    .fillColor("#94a3b8")
+    .text(`Emitido: ${formatDateTime(generatedAt)}`, rightX, y + 38, { width: rightColWidth, align: "right" });
   doc.fillColor("#000000").font("Helvetica");
 
-  y = Math.max(y + Math.max(logoHeight, 40), y + 42) + 8;
+  y = Math.max(y + Math.max(logoHeight, 40), y + 52) + 8;
   doc
     .moveTo(PAGE_MARGIN, y)
     .lineTo(doc.page.width - PAGE_MARGIN, y)
@@ -605,10 +642,13 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   const gap = 14;
   const colWidth = (doc.page.width - PAGE_MARGIN * 2 - gap) / 2;
 
-  const cargadorLines: InfoBoxLine[] = [{ text: company.name, bold: true }, { text: `CIF: ${company.taxId}` }];
-  if (company.address) cargadorLines.push({ text: company.address });
-  const companyCityLine = formatAddressLine([company.postalCode, company.city, company.province]);
+  // Fase 10: datos fijos de BigMat (ver `BIGMAT_CARGADOR` arriba) -- ya no se
+  // leen de `company` (parámetro de la función, ahora sin usar en el DeCA).
+  const cargadorLines: InfoBoxLine[] = [{ text: BIGMAT_CARGADOR.name, bold: true }, { text: `CIF: ${BIGMAT_CARGADOR.taxId}` }];
+  if (BIGMAT_CARGADOR.address) cargadorLines.push({ text: BIGMAT_CARGADOR.address });
+  const companyCityLine = formatAddressLine([BIGMAT_CARGADOR.postalCode, BIGMAT_CARGADOR.city, BIGMAT_CARGADOR.province]);
   if (companyCityLine) cargadorLines.push({ text: companyCityLine });
+  if (BIGMAT_CARGADOR.phone) cargadorLines.push({ text: `Tel: ${BIGMAT_CARGADOR.phone}` });
 
   // "Transportista contratado" -- siempre el Carrier asignado a la ruta en el
   // Planificador (antes se llamaba "Transportista efectivo" y era sustituido
@@ -767,14 +807,31 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     }
   );
 
+  // Fase 10: petición de Raúl -- el DeCA no tenía ningún campo con los datos
+  // del conductor (nombre, DNI, teléfono). Se combinan "Vehículo" (antes 2
+  // tarjetas separadas para tractora/remolque) y "Conductor asignado" en la
+  // misma fila -- mismo criterio visual que el resto del documento (tarjetas
+  // de 2 columnas) sin añadir una tarjeta nueva a ancho completo de más.
+  const vehiculoLines: InfoBoxLine[] = [
+    { text: `Tractora: ${route.vehicle?.plate || "—"}`, bold: true },
+    { text: `Remolque: ${route.vehicle?.trailerPlate || "—"}` },
+  ];
+  const conductorLines: InfoBoxLine[] = route.driver
+    ? [
+        { text: route.driver.fullName, bold: true },
+        { text: `DNI: ${route.driver.taxId}` },
+        ...(route.driver.phone ? [{ text: `Tel: ${route.driver.phone}` }] : []),
+      ]
+    : [{ text: "Sin conductor asignado todavía", color: "#94a3b8" }];
+
   y = drawInfoBoxRow(
     doc,
     PAGE_MARGIN,
     y,
     colWidth,
     gap,
-    { label: "Matrícula tractora", lines: [{ text: route.vehicle?.plate || "—", bold: true }] },
-    { label: "Matrícula remolque", lines: [{ text: route.vehicle?.trailerPlate || "—", bold: true }] }
+    { label: "Vehículo", lines: vehiculoLines },
+    { label: "Conductor asignado", lines: conductorLines }
   );
 
   const observaciones = Array.from(new Set(route.stops.map((s) => s.order.notes).filter((n): n is string => !!n && n.trim().length > 0)));
@@ -793,15 +850,24 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
   // pedía Raúl explícitamente ("incluyendo las líneas de producto"); con una
   // sola parada pendiente es la misma dirección que ya se ve arriba, pero
   // aquí con el detalle de mercancía.
-  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("Detalle de paradas y mercancía pendientes", PAGE_MARGIN, y);
+  // Fase 10: bloque "Paradas" -- petición explícita de Raúl para dejar claro,
+  // parada a parada, origen y destino del pedido, mercancía y peso (en vez de
+  // interpretar el DeCA multi-parada como "inventario instantáneo del
+  // camión"). El origen es siempre el mismo almacén para todas las filas
+  // (una ruta sale de un único almacén), pero se repite en su propia columna
+  // en cada parada porque así lo pidió expresamente, en vez de darlo por
+  // sobreentendido con la tarjeta "Lugar de origen / carga" de más arriba.
+  doc.fontSize(8.5).font("Helvetica-Bold").fillColor("#0f172a").text("Paradas", PAGE_MARGIN, y);
   doc.fillColor("#000000");
   y += 12;
 
+  const origenTexto = route.warehouse.name;
   const columns = [
-    { label: "PEDIDO / DESTINATARIO", x: PAGE_MARGIN, width: 190 },
-    { label: "DIRECCIÓN DE ENTREGA", x: PAGE_MARGIN + 190, width: 190 },
-    { label: "MERCANCÍA", x: PAGE_MARGIN + 380, width: doc.page.width - PAGE_MARGIN * 2 - 380 - 70 },
-    { label: "PESO (KG)", x: doc.page.width - PAGE_MARGIN - 70, width: 70, align: "right" as const },
+    { label: "PEDIDO", x: PAGE_MARGIN, width: 130 },
+    { label: "ORIGEN", x: PAGE_MARGIN + 130, width: 75 },
+    { label: "DESTINO", x: PAGE_MARGIN + 205, width: 140 },
+    { label: "MERCANCÍA", x: PAGE_MARGIN + 345, width: doc.page.width - PAGE_MARGIN * 2 - 345 - 60 },
+    { label: "PESO (KG)", x: doc.page.width - PAGE_MARGIN - 60, width: 60, align: "right" as const },
   ];
   y = drawTableHeader(doc, y, columns);
 
@@ -832,8 +898,9 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     const rowHeight =
       Math.max(
         doc.heightOfString(pedidoText, { width: columns[0].width }),
-        doc.heightOfString(dpLine, { width: columns[1].width }),
-        doc.heightOfString(goodsText, { width: columns[2].width }),
+        doc.heightOfString(origenTexto, { width: columns[1].width }),
+        doc.heightOfString(dpLine, { width: columns[2].width }),
+        doc.heightOfString(goodsText, { width: columns[3].width }),
         11
       ) + 8;
 
@@ -845,9 +912,10 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     }
 
     doc.text(pedidoText, columns[0].x, y, { width: columns[0].width });
-    doc.text(dpLine, columns[1].x, y, { width: columns[1].width });
-    doc.text(goodsText, columns[2].x, y, { width: columns[2].width });
-    doc.text(stopWeight.toLocaleString("es-ES", { maximumFractionDigits: 2 }), columns[3].x, y, { width: columns[3].width, align: "right" });
+    doc.text(origenTexto, columns[1].x, y, { width: columns[1].width });
+    doc.text(dpLine, columns[2].x, y, { width: columns[2].width });
+    doc.text(goodsText, columns[3].x, y, { width: columns[3].width });
+    doc.text(stopWeight.toLocaleString("es-ES", { maximumFractionDigits: 2 }), columns[4].x, y, { width: columns[4].width, align: "right" });
     y += rowHeight;
   }
   y += 10;
@@ -890,7 +958,7 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, company: C
     { width: doc.page.width - PAGE_MARGIN * 2 }
   );
   doc.fillColor("#000000");
-  drawFooter(doc, company, decaNumber);
+  drawFooter(doc, BIGMAT_CARGADOR, decaNumber);
 
   doc.end();
   const pdfkitBytes = await bufferPromise;

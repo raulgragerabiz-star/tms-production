@@ -328,6 +328,30 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
     }
   }
 
+  // Fase 10: mismo patrón de arriba ("Desactivar/Reactivar" + "Eliminar"),
+  // ahora también para el propio Vehículo -- hasta ahora una matrícula dada
+  // de alta por error no se podía ni desactivar ni quitar de la lista.
+  const toggleVehicleActiveMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => (await api.patch(`/vehicles/${id}/active`, { active })).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vehicles"] }),
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo actualizar el vehículo"),
+  });
+
+  const deleteVehicleMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/vehicles/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+      showSuccess("Vehículo eliminado");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo eliminar el vehículo"),
+  });
+
+  function handleDeleteVehicle(v: VehicleRow) {
+    if (window.confirm(`¿Eliminar definitivamente el vehículo "${v.plate}"? Esta acción no se puede deshacer.`)) {
+      deleteVehicleMutation.mutate(v.id);
+    }
+  }
+
   return (
     <div>
       {!embedded && (
@@ -394,12 +418,13 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                 <th className="text-left px-4 py-3">Conductor</th>
                 <th className="text-left px-4 py-3">QR vehículo</th>
                 <th className="text-left px-4 py-3">Ficha</th>
+                <th className="text-left px-4 py-3">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {vehiclesQuery.isLoading && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                  <td colSpan={11} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
                 </tr>
               )}
               {vehiclesQuery.data?.items.map((v) => (
@@ -446,6 +471,22 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                   <td className="px-4 py-3">
                     <button onClick={() => setEditingVehicleId(v.id)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">
                       Editar ficha
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <button
+                      onClick={() => toggleVehicleActiveMutation.mutate({ id: v.id, active: !v.active })}
+                      disabled={toggleVehicleActiveMutation.isPending}
+                      className="text-xs text-slate-500 hover:text-slate-700 font-medium mr-3 disabled:opacity-50"
+                    >
+                      {v.active ? "Desactivar" : "Reactivar"}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteVehicle(v)}
+                      disabled={deleteVehicleMutation.isPending}
+                      className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
+                    >
+                      Eliminar
                     </button>
                   </td>
                 </tr>

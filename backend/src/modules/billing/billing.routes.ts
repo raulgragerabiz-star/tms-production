@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { resolveShipmentCost } from "../rates/rate-resolution.service";
 
 export const billingRouter = Router();
@@ -447,5 +448,30 @@ billingRouter.get(
       byDeliveryZone: toSortedArray(byDeliveryZone),
       byCustomer: toSortedArray(byCustomer),
     });
+  })
+);
+
+// Fase 10: petición explícita de Raúl -- "en el caso de liquidaciones
+// transportista no se puede eliminar una que se introduce", a diferencia de
+// Pedidos/Productos, que sí se pueden borrar para corregir/limpiar pruebas.
+// Mismo criterio de "borrado en cascada total" ya aplicado a Pedidos (Fase 9):
+// se borra la liquidación sin importar en qué estado esté (draft/validated/
+// approved/paid/disputed) -- no hay marcha atrás, y así se advierte en el
+// `window.confirm` del Backoffice antes de llamar a este endpoint. Las
+// `SettlementLine` de esta liquidación se borran solas: el esquema ya define
+// `onDelete: Cascade` de SettlementLine hacia CarrierSettlement.
+billingRouter.delete(
+  "/settlements/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
+  asyncHandler(async (req, res) => {
+    const settlement = await prisma.carrierSettlement.findFirst({
+      where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } },
+      include: { _count: { select: { lines: true } } },
+    });
+    if (!settlement) throw HttpError.notFound("Liquidación no encontrada");
+
+    await prisma.carrierSettlement.delete({ where: { id: settlement.id } });
+
+    res.json({ deleted: true, lineasEliminadas: settlement._count.lines });
   })
 );

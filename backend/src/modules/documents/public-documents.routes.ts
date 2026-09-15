@@ -89,7 +89,8 @@ publicDocumentsRouter.get(
             },
           },
         },
-        shipment: { include: { driver: { select: { fullName: true, taxId: true } } } },
+        // Fase 10: `phone` -- el DeCA ya muestra los datos del conductor.
+        shipment: { include: { driver: { select: { fullName: true, taxId: true, phone: true } } } },
       },
     });
     if (!route) throw HttpError.notFound("Documento no encontrado");

@@ -484,7 +484,25 @@ routesRouter.post(
         companyId,
         warehouseId: data.warehouseId,
         status: status as any,
-        ...(data.serviceType ? { serviceType: data.serviceType } : {}),
+        // Fase 10 (fix): `serviceType` solo se usa para FILTRAR la consulta
+        // cuando NO viene una selección explícita de `orderIds` -- ese es el
+        // caso de compatibilidad de un llamador que pide "todos los
+        // pendientes de tal servicio" sin elegir pedido a pedido.
+        //
+        // Cuando SÍ vienen `orderIds` (siempre el caso desde la pestaña
+        // "Planificación", tanto en modo "Por categoría" como "Unificado"),
+        // este filtro NO debe aplicarse aquí: `serviceType` en ese modo solo
+        // sirve para forzar que los pedidos seleccionados caigan todos en el
+        // MISMO grupo más abajo (para poder ir en el mismo vehículo/ruta con
+        // varias paradas), nunca para decidir cuáles de los ya seleccionados
+        // se recuperan. Antes de este fix, al elegir "Unificado" con un
+        // pedido paletería y otro paletería_pesada, el pedido que no
+        // coincidía con el tipo dominante forzado quedaba fuera de esta
+        // consulta -- solo entraba a planificar UNO de los dos, dando la
+        // sensación (bug real reportado por Raúl) de que ambos pedidos se
+        // "unificaban en uno solo" en vez de acabar en la misma ruta con dos
+        // paradas independientes.
+        ...(data.serviceType && !(data.orderIds && data.orderIds.length > 0) ? { serviceType: data.serviceType } : {}),
         requestedDeliveryDate: data.routeDate,
         // Siempre acotado a este almacén/fecha/estado (no a cualquier id que
         // llegue en el body) -- así una selección manipulada o desactualizada
@@ -836,7 +854,9 @@ routesRouter.get(
             },
           },
         },
-        shipment: { include: { driver: { select: { fullName: true, taxId: true } } } },
+        // Fase 10: `phone` -- el DeCA ya muestra los datos del conductor
+        // (nombre, DNI, teléfono), antes solo se consultaban 2 de los 3.
+        shipment: { include: { driver: { select: { fullName: true, taxId: true, phone: true } } } },
       },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");

@@ -600,7 +600,8 @@ driverAppRouter.get(
           },
         },
         company: true,
-        shipment: { include: { driver: { select: { fullName: true, taxId: true } } } },
+        // Fase 10: `phone` -- el DeCA ya muestra los datos del conductor.
+        shipment: { include: { driver: { select: { fullName: true, taxId: true, phone: true } } } },
       },
     });
 

@@ -324,3 +324,46 @@ vehiclesRouter.delete(
     res.status(204).send();
   })
 );
+
+// Fase 10: el propio Vehículo (matrícula) no se podía ni desactivar ni
+// eliminar desde Backoffice -- solo el Conductor (patrón de arriba). Mismo
+// criterio: "Desactivar/Reactivar" (active=false/true, ya existía la columna
+// en el esquema) siempre disponible, y "Eliminar" físico solo si el vehículo
+// todavía no tiene ninguna ruta ni envío registrado (si los tiene, se pide
+// desactivarlo para no destruir histórico real). Se registra DESPUÉS de
+// "/drivers/:id" (arriba) a propósito -- Express probaría "/:id" primero si
+// estuviera antes, y "drivers" se colaría como si fuera un id de vehículo.
+vehiclesRouter.patch(
+  "/:id/active",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ active: z.boolean() });
+    const { active } = schema.parse(req.body);
+
+    const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
+    if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
+
+    const updated = await prisma.vehicle.update({ where: { id: vehicle.id }, data: { active } });
+    res.json({ id: updated.id, active: updated.active });
+  })
+);
+
+vehiclesRouter.delete(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
+    if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
+
+    const [routeCount, shipmentCount] = await Promise.all([
+      prisma.route.count({ where: { vehicleId: vehicle.id } }),
+      prisma.shipment.count({ where: { vehicleId: vehicle.id } }),
+    ]);
+    if (routeCount > 0 || shipmentCount > 0) {
+      throw HttpError.badRequest(
+        `Este vehículo ya tiene ${routeCount} ruta(s) y ${shipmentCount} envío(s) registrados -- no se puede eliminar sin perder ese histórico. Desactívalo en su lugar.`
+      );
+    }
+
+    await prisma.vehicle.delete({ where: { id: vehicle.id } });
+    res.status(204).send();
+  })
+);

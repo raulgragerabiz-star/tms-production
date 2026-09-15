@@ -4,6 +4,7 @@ import { api } from "@/api/client";
 import StatusBadge from "@/components/StatusBadge";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/use-toast";
+import { useAuthStore } from "@/store/auth-store";
 
 // Fase 8V: mejora explícita de Raúl -- "establecer bien las facturaciones
 // asociadas con los transportistas en cuanto a gasto y facturacion en
@@ -128,6 +129,12 @@ export default function BillingPage() {
   const [resolveTarget, setResolveTarget] = useState<SettlementLineDetail | null>(null);
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
+  // Fase 10: petición explícita de Raúl -- "en el caso de liquidaciones
+  // transportista no se puede eliminar una que se introduce", corrigiendo esa
+  // laguna con el mismo patrón ya usado en Pedidos/Productos (botón
+  // solo visible para admin_empresa/admin_plataforma + confirmación).
+  const user = useAuthStore((s) => s.user);
+  const canDeleteSettlements = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
 
   const carriersQuery = useQuery({
     queryKey: ["carriers"],
@@ -174,6 +181,26 @@ export default function BillingPage() {
     },
     onError: () => showError("No se ha podido actualizar el estado"),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => api.delete(`/billing/settlements/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settlements"] });
+      showSuccess("Liquidación eliminada");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se ha podido eliminar la liquidación"),
+  });
+
+  function handleDeleteSettlement(s: SettlementRow) {
+    if (
+      !window.confirm(
+        `¿Eliminar la liquidación de "${s.carrier.legalName}" (${s.lines.length} línea(s), ${Number(s.totalAmount).toFixed(2)} €)?\n\nEsta acción no se puede deshacer -- se borrarán también todas sus líneas.`
+      )
+    ) {
+      return;
+    }
+    deleteMutation.mutate(s.id);
+  }
 
   const disputeMutation = useMutation({
     mutationFn: async (payload: { lineId: string; comment: string }) =>
@@ -433,6 +460,15 @@ export default function BillingPage() {
                       >
                         {isExpanded ? "Ocultar detalle" : "Ver detalle"}
                       </button>
+                      {canDeleteSettlements && (
+                        <button
+                          onClick={() => handleDeleteSettlement(s)}
+                          disabled={deleteMutation.isPending}
+                          className="text-red-500 hover:text-red-600 text-xs font-medium ml-3 disabled:opacity-50"
+                        >
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   </tr>
                   {isExpanded && (
