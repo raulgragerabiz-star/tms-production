@@ -3,7 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { geocodeAddress } from "@/modules/routing/ors.service";
+import { deleteWarehouseCascade } from "./warehouse-delete.service";
 
 export const warehousesRouter = Router();
 
@@ -100,13 +102,17 @@ warehousesRouter.put(
 // Customer/Carrier -- así que la baja es marcarlo inactivo; GET / ya solo
 // lista los activos, y el propio almacén, sus rutas y pedidos históricos no
 // se tocan para nada.
+// Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier dato
+// desde el perfil de administrador, incluidos datos que contengan
+// histórico". Sustituye la baja lógica anterior por un borrado en cascada
+// total (ver warehouse-delete.service.ts): sus pedidos y rutas (con paradas,
+// envíos, etc.) desaparecen con él. Solo admin: es irreversible.
 warehousesRouter.delete(
   "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
-    const warehouse = await prisma.warehouse.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
-    if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
-    await prisma.warehouse.update({ where: { id: warehouse.id }, data: { active: false } });
-    res.status(204).send();
+    const summary = await deleteWarehouseCascade(req.params.id, req.auth!.companyId);
+    res.json(summary);
   })
 );
 

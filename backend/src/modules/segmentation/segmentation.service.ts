@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma, ServiceType } from "@prisma/client";
 import { getOrLoad, invalidate } from "@/lib/memory-cache";
+import { computeLinePallets } from "@/modules/orders/lib/line-pallets";
 
 export interface SegmentationRuleInput {
   segment: ServiceType;
@@ -123,7 +124,9 @@ export async function classifyOrder(
         select: {
           quantity: true,
           lineWeightKg: true,
-          product: { select: { unitsPerPallet: true, fullPalletWeightKg: true } },
+          // Fase 11: + lengthM/widthM para el factor de "palé europeo
+          // equivalente" (computeLinePallets, line-pallets.ts).
+          product: { select: { unitsPerPallet: true, fullPalletWeightKg: true, lengthM: true, widthM: true } },
         },
       },
     },
@@ -137,8 +140,10 @@ export async function classifyOrder(
     const weight = Number(line.lineWeightKg ?? 0);
     totalWeightKg += weight;
 
-    const unitsPerPallet = line.product.unitsPerPallet ?? 1;
-    const palletsForLine = unitsPerPallet > 0 ? Number(line.quantity) / unitsPerPallet : 0;
+    const palletsForLine = computeLinePallets({
+      quantity: Number(line.quantity),
+      product: { unitsPerPallet: line.product.unitsPerPallet, lengthM: line.product.lengthM, widthM: line.product.widthM },
+    });
     totalPallets += palletsForLine;
 
     const fullPalletWeight = Number(line.product.fullPalletWeightKg ?? 0);

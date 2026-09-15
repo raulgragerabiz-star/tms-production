@@ -56,8 +56,12 @@ export default function PlannerPage() {
   const setView = usePlannerFiltersStore((s) => s.setView);
   const warehouseId = usePlannerFiltersStore((s) => s.warehouseId);
   const setWarehouseId = usePlannerFiltersStore((s) => s.setWarehouseId);
-  const routeDate = usePlannerFiltersStore((s) => s.routeDate);
-  const setRouteDate = usePlannerFiltersStore((s) => s.setRouteDate);
+  // Fase 11: un único día era un caso particular de rango (dateFrom ===
+  // dateTo) -- ver comentario en planner-filters-store.ts.
+  const dateFrom = usePlannerFiltersStore((s) => s.dateFrom);
+  const dateTo = usePlannerFiltersStore((s) => s.dateTo);
+  const setDateFrom = usePlannerFiltersStore((s) => s.setDateFrom);
+  const setDateTo = usePlannerFiltersStore((s) => s.setDateTo);
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -137,22 +141,34 @@ export default function PlannerPage() {
             </option>
           ))}
         </select>
-        <input
-          type="date"
-          value={routeDate}
-          onChange={(e) => setRouteDate(e.target.value)}
-          className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
-        />
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-slate-500">Desde</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+          />
+          <label className="text-xs text-slate-500">Hasta</label>
+          <input
+            type="date"
+            value={dateTo}
+            min={dateFrom}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-1.5"
+          />
+        </div>
       </div>
 
       {view === "planificacion" && (
-        <PlanificacionTab warehouseId={warehouseId} routeDate={routeDate} onPlanned={handlePlanned} />
+        <PlanificacionTab warehouseId={warehouseId} dateFrom={dateFrom} dateTo={dateTo} onPlanned={handlePlanned} />
       )}
 
       {view === "rutas" && (
         <RutasTab
           warehouseId={warehouseId}
-          routeDate={routeDate}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
           onManageRoute={setAssigningRouteId}
           onSuccess={showSuccess}
           onError={showError}
@@ -162,7 +178,8 @@ export default function PlannerPage() {
       {view === "despacho" && (
         <DispatchBoard
           warehouseId={warehouseId}
-          routeDate={routeDate}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
           onManageRoute={setAssigningRouteId}
           onSuccess={showSuccess}
           onError={showError}

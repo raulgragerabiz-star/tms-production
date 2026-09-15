@@ -18,24 +18,40 @@ import { create } from "zustand";
 // que deba sobrevivir a cerrar el navegador ni compartirse entre pestañas.
 export type PlannerView = "planificacion" | "rutas" | "despacho";
 
+// Fase 11 (petición explícita de Raúl): "poder no solo elegir un día
+// concreto para planificación si no también un rango de fechas en las que
+// poder tener una vista más amplia de las salidas programadas". Antes solo
+// existía `routeDate` (un único día); ahora es un rango `dateFrom`/`dateTo`
+// -- con ambos iguales (el valor por defecto, hoy) se comporta exactamente
+// como el selector de un solo día de siempre, así que nada se rompe para
+// quien no toque "Hasta". Mismo patrón de dos fechas que ya usa BillingPage.
+const today = new Date().toISOString().slice(0, 10);
+
 interface PlannerFiltersState {
   warehouseId: string;
-  routeDate: string;
+  dateFrom: string;
+  dateTo: string;
   view: PlannerView;
   orderStatus: string;
   setWarehouseId: (id: string) => void;
-  setRouteDate: (date: string) => void;
+  setDateFrom: (date: string) => void;
+  setDateTo: (date: string) => void;
+  /** Fija dateFrom Y dateTo al mismo día -- atajo para volver a "un solo día". */
+  setSingleDate: (date: string) => void;
   setView: (view: PlannerView) => void;
   setOrderStatus: (status: string) => void;
 }
 
 export const usePlannerFiltersStore = create<PlannerFiltersState>((set) => ({
   warehouseId: "",
-  routeDate: new Date().toISOString().slice(0, 10),
+  dateFrom: today,
+  dateTo: today,
   view: "planificacion",
   orderStatus: "validated",
   setWarehouseId: (warehouseId) => set({ warehouseId }),
-  setRouteDate: (routeDate) => set({ routeDate }),
+  setDateFrom: (dateFrom) => set({ dateFrom }),
+  setDateTo: (dateTo) => set({ dateTo }),
+  setSingleDate: (date) => set({ dateFrom: date, dateTo: date }),
   setView: (view) => set({ view }),
   setOrderStatus: (orderStatus) => set({ orderStatus }),
 }));

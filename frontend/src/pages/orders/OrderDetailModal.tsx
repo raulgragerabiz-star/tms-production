@@ -14,9 +14,29 @@ import { viewDocumentPdf, downloadDocumentPdf } from "@/lib/document-pdf";
 // asume 1 (mismo criterio ya establecido en el motor de rutas/asignación).
 // Bultos: sin `unitsPerBox` cargado no se calcula (null), en vez de inventar
 // un valor -- no hay ningún precedente de "1 unidad = 1 bulto" en el proyecto.
-function computeLinePallets(quantity: number, unitsPerPallet: number | null): number {
+//
+// Fase 11 (corrección explícita de Raúl): además de cantidad/unitsPerPallet,
+// se multiplica por el factor de "palé europeo equivalente" -- la superficie
+// real del palé de este producto (lengthM×widthM) frente a la del palé
+// europeo (1.20×0.80 = 0.96 m²). Sin medidas cargadas, factor 1 (se asume
+// palé europeo estándar). Misma fórmula que `computePalletFootprintFactor`
+// en line-pallets.ts.
+const EURO_PALLET_AREA_M2 = 1.2 * 0.8;
+function computePalletFootprintFactor(lengthM: number | string | null, widthM: number | string | null): number {
+  const length = lengthM != null ? Number(lengthM) : null;
+  const width = widthM != null ? Number(widthM) : null;
+  if (length == null || width == null || !(length > 0) || !(width > 0)) return 1;
+  return (length * width) / EURO_PALLET_AREA_M2;
+}
+function computeLinePallets(
+  quantity: number,
+  unitsPerPallet: number | null,
+  lengthM: number | string | null = null,
+  widthM: number | string | null = null
+): number {
   const perPallet = unitsPerPallet ?? 1;
-  return perPallet > 0 ? quantity / perPallet : 0;
+  const rawPallets = perPallet > 0 ? quantity / perPallet : 0;
+  return rawPallets * computePalletFootprintFactor(lengthM, widthM);
 }
 function computeLineBoxes(quantity: number, unitsPerBox: number | null): number | null {
   if (unitsPerBox == null || unitsPerBox <= 0) return null;
@@ -99,7 +119,14 @@ interface OrderDetail {
   lines: {
     quantity: number;
     unit: string;
-    product: { sku: string; description: string; unitsPerPallet: number | null; unitsPerBox: number | null };
+    product: {
+      sku: string;
+      description: string;
+      unitsPerPallet: number | null;
+      unitsPerBox: number | null;
+      lengthM: number | string | null;
+      widthM: number | string | null;
+    };
   }[];
   documents: DocumentRow[];
   routeStops: RouteStopRow[];
@@ -241,7 +268,10 @@ export default function OrderDetailModal({ orderId, onClose }: Props) {
               <h3 className="text-xs font-medium text-slate-500 uppercase">Líneas</h3>
               <Chip color="blue">
                 {formatPalletsBoxes(
-                  data.lines.reduce((acc, l) => acc + computeLinePallets(l.quantity, l.product.unitsPerPallet), 0),
+                  data.lines.reduce(
+                    (acc, l) => acc + computeLinePallets(l.quantity, l.product.unitsPerPallet, l.product.lengthM, l.product.widthM),
+                    0
+                  ),
                   data.lines.some((l) => l.product.unitsPerBox != null)
                     ? data.lines.reduce((acc, l) => acc + (computeLineBoxes(l.quantity, l.product.unitsPerBox) ?? 0), 0)
                     : null
@@ -250,7 +280,7 @@ export default function OrderDetailModal({ orderId, onClose }: Props) {
             </div>
             <ul className="divide-y divide-slate-100 border border-slate-100 rounded-lg">
               {data.lines.map((l, i) => {
-                const linePallets = computeLinePallets(l.quantity, l.product.unitsPerPallet);
+                const linePallets = computeLinePallets(l.quantity, l.product.unitsPerPallet, l.product.lengthM, l.product.widthM);
                 const lineBoxes = computeLineBoxes(l.quantity, l.product.unitsPerBox);
                 return (
                   <li key={i} className="px-3 py-2 flex items-center justify-between text-sm gap-3">

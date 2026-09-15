@@ -275,7 +275,15 @@ async function importOneOrder(
           // 8c más arriba).
           deliveryPointId: deliveryPointId!,
           warehouseId,
-          status: "received",
+          // Fase 11 (petición explícita de Raúl): "los pedidos que se
+          // incluyan en el sistema ya tienen que figurar con estado
+          // disponible para planificar". Antes se creaban como "received" y
+          // se quedaban invisibles en el Planificador (que filtra por
+          // "validated" por defecto -- ver routes.routes.ts /planner-board)
+          // hasta validarlos uno a uno a mano, un paso manual que no aportaba
+          // ninguna comprobación real -- la importación ya valida cliente,
+          // punto de entrega, almacén y líneas antes de llegar aquí.
+          status: "validated",
           requestedDeliveryDate: parsed.requestedDeliveryDate!,
           deliveryTimeWindowFrom: parsed.windowFrom,
           deliveryTimeWindowTo: parsed.windowTo,

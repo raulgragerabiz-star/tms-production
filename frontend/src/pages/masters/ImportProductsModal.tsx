@@ -31,6 +31,7 @@ interface ProductMasterImportSummary {
   productosActualizados: number;
   erroresParseo: string[];
   errores: ProductImportErrorRow[];
+  productosSinPesoCargado: string[];
 }
 
 interface ImportStatusResponse {
@@ -216,6 +217,22 @@ export default function ImportProductsModal({ open, onClose, onSuccess, onError 
               <p className="text-xs text-slate-500">Con errores</p>
             </div>
           </div>
+
+          {summary.productosSinPesoCargado.length > 0 && (
+            <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 max-h-48 overflow-y-auto">
+              <h3 className="text-xs font-semibold text-amber-700 uppercase mb-2">
+                Sin peso cargado ({summary.productosSinPesoCargado.length})
+              </h3>
+              <p className="text-xs text-amber-700 mb-1">
+                Esta plantilla no trae el peso en kg de cada producto ("Medida a Peso" solo indica la unidad, no el
+                valor). Sin peso, sus pedidos saldrán con peso "—" en vez de uno real -- complétalos desde Maestros
+                &gt; Productos.
+              </p>
+              <p className="text-xs text-amber-600 font-mono break-all">
+                {summary.productosSinPesoCargado.join(", ")}
+              </p>
+            </div>
+          )}
 
           {(summary.erroresParseo.length > 0 || summary.errores.length > 0) && (
             <div className="border border-red-200 rounded-lg p-3 max-h-48 overflow-y-auto">

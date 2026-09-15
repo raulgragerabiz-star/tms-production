@@ -88,7 +88,9 @@ ordersRouter.get(
           // unitsPerPallet/unitsPerBox) para poder calcular bultos/palés por
           // pedido -- antes `lines: true` traía las líneas en bruto, sin
           // producto, y este listado no calculaba nada más que el peso.
-          lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
+          // Fase 11: + lengthM/widthM -- ahora hacen falta para el factor de
+          // "palé europeo equivalente" de computeLinePallets.
+          lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true, lengthM: true, widthM: true } } } },
         },
       }),
       prisma.order.count({ where }),
@@ -96,7 +98,15 @@ ordersRouter.get(
 
     const withTotals = items.map((o) => {
       const { totalPallets, totalBoxes } = summarizeOrderPallets(
-        o.lines.map((l) => ({ quantity: Number(l.quantity), product: l.product }))
+        o.lines.map((l) => ({
+          quantity: Number(l.quantity),
+          product: {
+            unitsPerPallet: l.product.unitsPerPallet,
+            unitsPerBox: l.product.unitsPerBox,
+            lengthM: l.product.lengthM != null ? Number(l.product.lengthM) : null,
+            widthM: l.product.widthM != null ? Number(l.product.widthM) : null,
+          },
+        }))
       );
       return {
         ...o,

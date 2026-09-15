@@ -5,6 +5,7 @@ import Chip from "@/components/Chip";
 import NewCarrierModal, { CarrierEditable } from "@/pages/masters/NewCarrierModal";
 import NewZoneAssignmentModal from "@/pages/masters/NewZoneAssignmentModal";
 import ZoneAssignmentFichaModal from "@/pages/masters/ZoneAssignmentFichaModal";
+import { useAuthStore } from "@/store/auth-store";
 
 // Fase 8: sustituye a las antiguas pestañas "Empresa" + "Vehículos" +
 // "Tarifas" de Flota y Transportistas por una única tabla, tal y como pidió
@@ -149,18 +150,29 @@ export default function TransportistasTab() {
     onError: () => notifyError("No se pudo eliminar la asignación"),
   });
 
+  // Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier
+  // dato desde el perfil de administrador, incluidos datos que contengan
+  // histórico". Ya no es una baja lógica: borra el transportista y todos sus
+  // vehículos, conductores, envíos, liquidaciones y tarifas en cascada.
+  const user = useAuthStore((s) => s.user);
+  const canDeleteCarrier = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
+
   const deleteCarrierMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/carriers/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["carriers"] });
       queryClient.invalidateQueries({ queryKey: ["delivery-zone-assignments"] });
-      notifySuccess("Transportista dado de baja correctamente");
+      notifySuccess("Transportista eliminado, junto con sus vehículos, conductores y envíos asociados");
     },
-    onError: (err: any) => notifyError(err?.response?.data?.message ?? "No se pudo dar de baja el transportista"),
+    onError: (err: any) => notifyError(err?.response?.data?.message ?? "No se pudo eliminar el transportista"),
   });
 
   function handleDeleteCarrier(c: { id: string; legalName: string }) {
-    if (window.confirm(`¿Dar de baja al transportista "${c.legalName}"? Sus rutas y liquidaciones históricas no se ven afectadas.`)) {
+    if (
+      window.confirm(
+        `¿Eliminar definitivamente al transportista "${c.legalName}"? Esta acción no se puede deshacer: se borrarán también sus vehículos, conductores, envíos, liquidaciones y tarifas, aunque sean históricos reales.`
+      )
+    ) {
       deleteCarrierMutation.mutate(c.id);
     }
   }
@@ -294,9 +306,11 @@ export default function TransportistasTab() {
                       <button onClick={() => setEditingCarrier(c)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
                         Editar
                       </button>
-                      <button onClick={() => handleDeleteCarrier(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
-                        Eliminar
-                      </button>
+                      {canDeleteCarrier && (
+                        <button onClick={() => handleDeleteCarrier(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

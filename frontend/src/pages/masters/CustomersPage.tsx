@@ -7,6 +7,7 @@ import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import ImportCustomersModal from "@/pages/masters/ImportCustomersModal";
 import NewCustomerModal, { CustomerEditable } from "@/pages/masters/NewCustomerModal";
+import { useAuthStore } from "@/store/auth-store";
 
 interface CustomerRow {
   id: string;
@@ -42,18 +43,28 @@ export default function CustomersPage() {
   const [editingCustomer, setEditingCustomer] = useState<CustomerEditable | "new" | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
+  // Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier
+  // dato desde el perfil de administrador, incluidos datos que contengan
+  // histórico". Ya no es una baja lógica: borra al cliente y TODOS sus datos
+  // (pedidos, direcciones, tarifas, facturas, devoluciones) en cascada.
+  const user = useAuthStore((s) => s.user);
+  const canDelete = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/customers/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
-      showSuccess("Cliente dado de baja correctamente");
+      showSuccess("Cliente eliminado, junto con todos sus pedidos y datos asociados");
     },
-    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo dar de baja el cliente"),
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo eliminar el cliente"),
   });
 
   function handleDelete(c: CustomerRow) {
-    if (window.confirm(`¿Dar de baja al cliente "${c.legalName}"? Sus pedidos y direcciones históricas no se ven afectados.`)) {
+    if (
+      window.confirm(
+        `¿Eliminar definitivamente al cliente "${c.legalName}"? Esta acción no se puede deshacer: se borrarán también todos sus pedidos, direcciones de entrega, tarifas, facturas y devoluciones, aunque sean históricos reales.`
+      )
+    ) {
       deleteMutation.mutate(c.id);
     }
   }
@@ -196,9 +207,11 @@ export default function CustomersPage() {
                   >
                     Editar
                   </button>
-                  <button onClick={() => handleDelete(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
-                    Eliminar
-                  </button>
+                  {canDelete && (
+                    <button onClick={() => handleDelete(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                      Eliminar
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

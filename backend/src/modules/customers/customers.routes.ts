@@ -3,7 +3,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { buildCustomerMasterTemplate, runCustomerMasterImport } from "./customer-master-import.service";
+import { deleteCustomerCascade } from "./customer-delete.service";
 
 export const customersRouter = Router();
 
@@ -156,15 +158,17 @@ customersRouter.put(
   })
 );
 
+// Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier dato
+// desde el perfil de administrador, incluidos datos que contengan
+// histórico". Sustituye la baja lógica anterior por un borrado en cascada
+// total (ver customer-delete.service.ts): sus pedidos, direcciones de
+// entrega, tarifas, facturas y devoluciones desaparecen con él. Solo admin:
+// es irreversible.
 customersRouter.delete(
   "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
-    const customer = await prisma.customer.findFirst({
-      where: { id: req.params.id, companyId: req.auth!.companyId },
-    });
-    if (!customer) throw HttpError.notFound("Cliente no encontrado");
-    // Soft delete: nunca se borra físicamente un maestro referenciado por pedidos históricos.
-    await prisma.customer.update({ where: { id: customer.id }, data: { deletedAt: new Date(), active: false } });
-    res.status(204).send();
+    const summary = await deleteCustomerCascade(req.params.id, req.auth!.companyId);
+    res.json(summary);
   })
 );

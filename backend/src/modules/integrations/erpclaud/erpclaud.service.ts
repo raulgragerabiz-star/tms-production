@@ -142,7 +142,15 @@ async function resolveWarehouseId(tx: Prisma.TransactionClient, companyId: strin
  * (companyId, externalSourceSystem, externalOrderId): reimportar el mismo
  * pedido actualiza sus líneas y cabecera en vez de duplicarlo, pero NUNCA
  * pisa el estado de ciclo de vida (`status`) de un pedido que ya avanzó más
- * allá de "received" — solo se fija `status: "received"` en la creación.
+ * allá de la creación — solo se fija `status` al crearlo.
+ *
+ * Fase 11 (petición explícita de Raúl): "los pedidos que se incluyan en el
+ * sistema ya tienen que figurar con estado disponible para planificar" —
+ * antes se creaban como "received" y el Planificador filtra "validated" por
+ * defecto (ver routes.routes.ts /planner-board), así que quedaban invisibles
+ * hasta validarlos uno a uno a mano. El pedido ya llega validado por este
+ * mismo import (SKUs resueltos, cliente/almacén resueltos arriba), así que
+ * ahora se crea directamente como "validated".
  */
 export async function processErpclaudImport(companyId: string, payload: ErpclaudImportPayload): Promise<ImportSummary> {
   const summary: ImportSummary = {
@@ -219,7 +227,7 @@ export async function processErpclaudImport(companyId: string, payload: Erpclaud
                 orderNumber: `ERPC-${pedido.externalOrderId}`,
                 requestedDeliveryDate: new Date(pedido.fechaPromesa),
                 createdAt: new Date(pedido.fechaCreacion),
-                status: "received",
+                status: "validated",
               },
               select: { id: true },
             });

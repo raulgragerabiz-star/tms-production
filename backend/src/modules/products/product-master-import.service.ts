@@ -36,6 +36,18 @@ export interface ProductMasterImportSummary {
   productosActualizados: number;
   erroresParseo: string[];
   errores: ProductImportErrorRow[];
+  // Fase 11 (petición explícita de Raúl: "revisar por qué los pesos no
+  // tienen una traducción real desde productos a pedidos"). Causa real: la
+  // plantilla REAL de Bigmat no trae ninguna columna con el peso en kg de
+  // cada producto -- "Medida a Peso" es solo la unidad ("kg"), no un valor
+  // (ver weightUnit en schema.prisma / product-master-parser.ts). Sin
+  // grossWeightKg/fullPalletWeightKg, `computeLineWeightKg` (line-weight.ts)
+  // devuelve `null` para cualquier línea de pedido de ese producto -- un
+  // peso "—", no un peso real. No hay forma de inventar ese dato desde el
+  // Excel: se avisa aquí para que se complete a mano desde Maestros >
+  // Productos (columnas ya editables in situ), en vez de dejarlo pasar en
+  // silencio como hasta ahora.
+  productosSinPesoCargado: string[];
 }
 
 export interface ProductCatalogWipeSummary {
@@ -83,7 +95,7 @@ async function importOneProduct(
 ): Promise<void> {
   const rowLabel = row.internalCode || row.ean || `fila ${row.rowNumber}`;
   try {
-    let existing: { id: string } | null = null;
+    let existing: { id: string; grossWeightKg: unknown; fullPalletWeightKg: unknown } | null = null;
     if (row.internalCode) {
       existing = await prisma.product.findFirst({ where: { companyId, internalCode: row.internalCode } });
     }
@@ -119,6 +131,20 @@ async function importOneProduct(
       minOrderQtyB2c: row.minOrderQtyB2c,
       ...derivePalletMeters(row),
     };
+
+    // Fase 11: la plantilla real de Bigmat no trae ningún valor de peso en
+    // kg (ver comentario en ProductMasterImportSummary) -- `data` (arriba)
+    // nunca incluye grossWeightKg/fullPalletWeightKg porque el parser no los
+    // lee de ninguna columna, así que un producto NUEVO siempre se crea sin
+    // peso, y uno YA EXISTENTE conserva el que ya tuviera (el `update` de
+    // abajo no los toca). Se avisa por cada producto que se queda sin
+    // NINGUNO de los dos, para completarlo a mano desde Maestros > Productos.
+    const stillMissingWeight = existing
+      ? existing.grossWeightKg == null && existing.fullPalletWeightKg == null
+      : true;
+    if (stillMissingWeight) {
+      summary.productosSinPesoCargado.push(rowLabel);
+    }
 
     if (existing) {
       // Un producto reactivado por una nueva carga (estaba desactivado por un
@@ -175,6 +201,7 @@ export function startProductMasterImportJob(
     productosActualizados: 0,
     erroresParseo: parseErrors,
     errores: [],
+    productosSinPesoCargado: [],
   };
 
   const job = createProductImportJob(products.length);

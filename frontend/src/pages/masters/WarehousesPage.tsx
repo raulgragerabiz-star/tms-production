@@ -5,6 +5,7 @@ import Toast from "@/components/Toast";
 import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewWarehouseModal, { WarehouseEditable } from "@/pages/masters/NewWarehouseModal";
+import { useAuthStore } from "@/store/auth-store";
 
 interface WarehouseRow {
   id: string;
@@ -31,17 +32,28 @@ export default function WarehousesPage() {
     queryFn: async () => (await api.get("/warehouses")).data as { items: WarehouseRow[]; total: number },
   });
 
+  // Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier
+  // dato desde el perfil de administrador, incluidos datos que contengan
+  // histórico". Ya no es una baja lógica: borra el almacén y todos sus
+  // pedidos/rutas en cascada.
+  const user = useAuthStore((s) => s.user);
+  const canDelete = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/warehouses/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["warehouses"] });
-      showSuccess("Almacén dado de baja correctamente");
+      showSuccess("Almacén eliminado, junto con todos sus pedidos y rutas asociadas");
     },
-    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo dar de baja el almacén"),
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo eliminar el almacén"),
   });
 
   function handleDelete(w: WarehouseRow) {
-    if (window.confirm(`¿Dar de baja el almacén "${w.name}"? Sus rutas y pedidos históricos no se ven afectados.`)) {
+    if (
+      window.confirm(
+        `¿Eliminar definitivamente el almacén "${w.name}"? Esta acción no se puede deshacer: se borrarán también todos sus pedidos y rutas (con sus paradas, envíos y documentos), aunque sean históricos reales.`
+      )
+    ) {
       deleteMutation.mutate(w.id);
     }
   }
@@ -105,9 +117,11 @@ export default function WarehousesPage() {
                   <button onClick={() => setEditing(w)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
                     Editar
                   </button>
-                  <button onClick={() => handleDelete(w)} className="text-xs text-red-500 hover:text-red-600 font-medium">
-                    Eliminar
-                  </button>
+                  {canDelete && (
+                    <button onClick={() => handleDelete(w)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                      Eliminar
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

@@ -1,9 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { issueVehicleQrToken } from "./vehicle-qr.service";
+import { vehicleCascadeDeleteTx, driverCascadeDeleteTx } from "./vehicle-delete.service";
 
 export const vehiclesRouter = Router();
 
@@ -301,26 +304,20 @@ vehiclesRouter.patch(
   })
 );
 
+// Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier dato
+// desde el perfil de administrador, incluidos datos que contengan
+// histórico". Sustituye el bloqueo anterior (400 si ya tenía jornadas/envíos)
+// por un borrado en cascada total -- ver `driverCascadeDeleteTx`, que borra
+// también sus DriverShift (jornadas) y desvincula sus Shipment (el envío en
+// sí se conserva, solo pierde el conductor). Solo admin: es irreversible.
 vehiclesRouter.delete(
   "/drivers/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
     const driver = await prisma.driver.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
     if (!driver) throw HttpError.notFound("Conductor no encontrado");
 
-    const [shipmentCount, shiftCount] = await Promise.all([
-      prisma.shipment.count({ where: { driverId: driver.id } }),
-      prisma.driverShift.count({ where: { driverId: driver.id } }),
-    ]);
-    if (shipmentCount > 0 || shiftCount > 0) {
-      throw HttpError.badRequest(
-        `Este conductor ya tiene ${shipmentCount} envío(s) y ${shiftCount} jornada(s) registrados -- no se puede eliminar sin perder ese histórico. Desactívalo en su lugar.`
-      );
-    }
-
-    // vehicleDriver sí se puede borrar sin problema: es solo el histórico de
-    // a qué vehículo ha estado asignado, no un registro operativo en sí.
-    await prisma.vehicleDriver.deleteMany({ where: { driverId: driver.id } });
-    await prisma.driver.delete({ where: { id: driver.id } });
+    await prisma.$transaction((tx: Prisma.TransactionClient) => driverCascadeDeleteTx(tx, driver.id));
     res.status(204).send();
   })
 );
@@ -347,23 +344,17 @@ vehiclesRouter.patch(
   })
 );
 
+// Fase 11: mismo criterio que el borrado de Conductor de arriba -- ya no se
+// bloquea por tener rutas/envíos reales, se borra todo en cascada (ver
+// `vehicleCascadeDeleteTx`). Solo admin.
 vehiclesRouter.delete(
   "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
     const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
     if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");
 
-    const [routeCount, shipmentCount] = await Promise.all([
-      prisma.route.count({ where: { vehicleId: vehicle.id } }),
-      prisma.shipment.count({ where: { vehicleId: vehicle.id } }),
-    ]);
-    if (routeCount > 0 || shipmentCount > 0) {
-      throw HttpError.badRequest(
-        `Este vehículo ya tiene ${routeCount} ruta(s) y ${shipmentCount} envío(s) registrados -- no se puede eliminar sin perder ese histórico. Desactívalo en su lugar.`
-      );
-    }
-
-    await prisma.vehicle.delete({ where: { id: vehicle.id } });
+    await prisma.$transaction((tx: Prisma.TransactionClient) => vehicleCascadeDeleteTx(tx, vehicle.id));
     res.status(204).send();
   })
 );

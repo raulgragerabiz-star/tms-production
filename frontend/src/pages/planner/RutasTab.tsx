@@ -39,7 +39,10 @@ interface RouteRow {
 
 interface Props {
   warehouseId: string;
-  routeDate: string;
+  // Fase 11: rango de fechas (ver planner-filters-store.ts) en vez de un
+  // único día -- con ambos iguales (por defecto) es el mismo día de siempre.
+  dateFrom: string;
+  dateTo: string;
   onManageRoute: (routeId: string) => void;
   // Fase 8j: petición de Raúl -- "debe poder eliminarse rutas creadas, por
   // si se ha cometido algún error y que no se queden ahí fijas".
@@ -49,16 +52,16 @@ interface Props {
 
 const GETAFE_CENTER = { lat: 40.3058, lng: -3.7327 };
 
-export default function RutasTab({ warehouseId, routeDate, onManageRoute, onSuccess, onError }: Props) {
+export default function RutasTab({ warehouseId, dateFrom, dateTo, onManageRoute, onSuccess, onError }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const queryKey = ["dispatch-board", warehouseId, routeDate];
+  const queryKey = ["dispatch-board", warehouseId, dateFrom, dateTo];
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async () =>
       (
-        await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, date: routeDate } })
+        await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, dateFrom, dateTo } })
       ).data as { items: RouteRow[]; unassignedOrdersCount: number },
   });
 

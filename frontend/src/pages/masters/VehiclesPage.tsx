@@ -5,6 +5,7 @@ import Toast from "@/components/Toast";
 import Chip from "@/components/Chip";
 import { useToast } from "@/hooks/use-toast";
 import NewDriverModal from "@/pages/masters/DriversModal";
+import { useAuthStore } from "@/store/auth-store";
 
 // Fase 8Q: características que faltaban de la ficha del vehículo (MMA, peso
 // útil, etiqueta ambiental, radio de acción, equipamiento especial) --
@@ -140,6 +141,11 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   const [editingDriverId, setEditingDriverId] = useState<string | null>(null);
   const { toast, showSuccess, showError, dismiss } = useToast();
   const queryClient = useQueryClient();
+  // Fase 11: los borrados de vehículo/conductor ahora exigen admin en el
+  // backend (cascada total, incluido histórico) -- se oculta el botón para
+  // quien no lo sea, en vez de dejar que falle al pulsarlo.
+  const user = useAuthStore((s) => s.user);
+  const canDelete = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
 
   const vehiclesQuery = useQuery({
     queryKey: ["vehicles"],
@@ -323,7 +329,11 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   });
 
   function handleDeleteDriver(d: DriverRow) {
-    if (window.confirm(`¿Eliminar definitivamente al conductor "${d.fullName}"? Esta acción no se puede deshacer.`)) {
+    if (
+      window.confirm(
+        `¿Eliminar definitivamente al conductor "${d.fullName}"? Esta acción no se puede deshacer: se borrarán también sus jornadas registradas, aunque sean históricas reales.`
+      )
+    ) {
       deleteDriverMutation.mutate(d.id);
     }
   }
@@ -347,7 +357,11 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
   });
 
   function handleDeleteVehicle(v: VehicleRow) {
-    if (window.confirm(`¿Eliminar definitivamente el vehículo "${v.plate}"? Esta acción no se puede deshacer.`)) {
+    if (
+      window.confirm(
+        `¿Eliminar definitivamente el vehículo "${v.plate}"? Esta acción no se puede deshacer: se borrarán también sus envíos registrados, aunque sean históricos reales.`
+      )
+    ) {
       deleteVehicleMutation.mutate(v.id);
     }
   }
@@ -481,13 +495,15 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                     >
                       {v.active ? "Desactivar" : "Reactivar"}
                     </button>
-                    <button
-                      onClick={() => handleDeleteVehicle(v)}
-                      disabled={deleteVehicleMutation.isPending}
-                      className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
-                    >
-                      Eliminar
-                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => handleDeleteVehicle(v)}
+                        disabled={deleteVehicleMutation.isPending}
+                        className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
+                      >
+                        Eliminar
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -595,9 +611,11 @@ export default function VehiclesPage({ embedded = false, activeTab }: Props) {
                       >
                         {d.active ? "Desactivar" : "Reactivar"}
                       </button>
-                      <button onClick={() => handleDeleteDriver(d)} className="text-xs text-red-700 hover:text-red-800 font-semibold">
-                        Eliminar
-                      </button>
+                      {canDelete && (
+                        <button onClick={() => handleDeleteDriver(d)} className="text-xs text-red-700 hover:text-red-800 font-semibold">
+                          Eliminar
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

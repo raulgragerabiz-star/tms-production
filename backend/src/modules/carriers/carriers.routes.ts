@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
+import { deleteCarrierCascade } from "./carrier-delete.service";
 
 export const carriersRouter = Router();
 
@@ -83,20 +85,19 @@ carriersRouter.put(
   })
 );
 
-// Fase 7b: faltaba dar de baja un transportista desde la aplicación (solo
-// existía alta y edición). Igual que en customers.routes.ts, nunca se borra
-// físicamente -- un transportista dado de baja puede seguir referenciado por
-// rutas, envíos o liquidaciones históricas -- se marca inactivo y con fecha
-// de baja, y desaparece de los listados (GET / ya filtra deletedAt: null).
+// Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier dato
+// desde el perfil de administrador, incluidos datos que contengan
+// histórico". Sustituye la baja lógica de la Fase 7b (deletedAt+active:false)
+// por un borrado en cascada total (ver carrier-delete.service.ts): vehículos,
+// conductores, envíos, liquidaciones y tarifas de este transportista
+// desaparecen con él; sus rutas se conservan, solo se desvinculan. Solo
+// admin: es irreversible.
 carriersRouter.delete(
   "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
-    const carrier = await prisma.carrier.findFirst({
-      where: { id: req.params.id, companyId: req.auth!.companyId },
-    });
-    if (!carrier) throw HttpError.notFound("Transportista no encontrado");
-    await prisma.carrier.update({ where: { id: carrier.id }, data: { deletedAt: new Date(), active: false } });
-    res.status(204).send();
+    const summary = await deleteCarrierCascade(req.params.id, req.auth!.companyId);
+    res.json(summary);
   })
 );
 

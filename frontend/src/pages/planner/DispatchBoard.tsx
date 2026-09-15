@@ -48,6 +48,10 @@ interface RouteRow {
   id: string;
   status: string;
   serviceType: string;
+  // Fase 11: hace falta para poder acotar la línea de tiempo (Gantt, un solo
+  // día) a un día concreto cuando el rango mostrado (dateFrom/dateTo) abarca
+  // más de uno -- ver comentario junto a `ganttRoutes` más abajo.
+  routeDate: string;
   warehouse: { id: string; name: string; lat: number | null; lng: number | null };
   carrier: { id: string; legalName: string } | null;
   vehicle: { id: string; plate: string } | null;
@@ -76,7 +80,10 @@ interface DispatchBoardData {
 
 interface Props {
   warehouseId: string;
-  routeDate: string;
+  // Fase 11: rango de fechas (ver planner-filters-store.ts) en vez de un
+  // único día -- con ambos iguales (por defecto) es el mismo día de siempre.
+  dateFrom: string;
+  dateTo: string;
   onManageRoute: (routeId: string) => void;
   // Fase 8k: "eliminar ruta" desde el mismo panel de detalle donde ya está
   // "Llamar al conductor" -- necesita avisar de éxito/error igual que el
@@ -115,16 +122,16 @@ function toWhatsAppDigits(phone: string): string {
   return digits.length === 9 ? `34${digits}` : digits;
 }
 
-export default function DispatchBoard({ warehouseId, routeDate, onManageRoute, onSuccess, onError }: Props) {
+export default function DispatchBoard({ warehouseId, dateFrom, dateTo, onManageRoute, onSuccess, onError }: Props) {
   const [selection, setSelection] = useState<Selection>(null);
   const queryClient = useQueryClient();
-  const queryKey = ["dispatch-board", warehouseId, routeDate];
+  const queryKey = ["dispatch-board", warehouseId, dateFrom, dateTo];
 
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async () =>
       (
-        await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, date: routeDate } })
+        await api.get("/routes/dispatch-board", { params: { warehouseId: warehouseId || undefined, dateFrom, dateTo } })
       ).data as DispatchBoardData,
     refetchInterval: POLL_INTERVAL_MS,
   });
@@ -299,28 +306,36 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute, o
     return null;
   }, [selectedEntry]);
 
+  // Fase 11: la línea de tiempo (Gantt) dibuja un único día en su eje --
+  // sigue siendo así aunque `routes` ahora pueda traer un rango de varios
+  // días (dateFrom/dateTo), así que se acota a las rutas de `dateFrom` (el
+  // primer día del rango; con un solo día seleccionado esto no cambia nada,
+  // como siempre). El aviso de debajo dentro del render deja claro qué día
+  // se está mostrando cuando el rango abarca más de uno.
   const ganttRoutes: GanttRoute[] = useMemo(
     () =>
-      routes.map((r) => ({
-        id: r.id,
-        label: routeLabel(r),
-        color: routeColorMap.get(r.id) ?? PENDING_COLOR,
-        stops: r.stops.map((s) => ({
-          id: s.id,
-          sequence: s.sequence,
-          status: s.status,
-          eta: s.eta,
-          deliveredAt: s.pod?.deliveredAt ?? null,
-          orderNumber: s.order.orderNumber,
-          customerName: s.order.customer.legalName,
-          address: s.order.deliveryPoint.city ?? s.order.deliveryPoint.address,
-          timeWindow:
-            s.order.deliveryTimeWindowFrom || s.order.deliveryTimeWindowTo
-              ? `${s.order.deliveryTimeWindowFrom ?? "—"} - ${s.order.deliveryTimeWindowTo ?? "—"}`
-              : null,
+      routes
+        .filter((r) => r.routeDate.slice(0, 10) === dateFrom)
+        .map((r) => ({
+          id: r.id,
+          label: routeLabel(r),
+          color: routeColorMap.get(r.id) ?? PENDING_COLOR,
+          stops: r.stops.map((s) => ({
+            id: s.id,
+            sequence: s.sequence,
+            status: s.status,
+            eta: s.eta,
+            deliveredAt: s.pod?.deliveredAt ?? null,
+            orderNumber: s.order.orderNumber,
+            customerName: s.order.customer.legalName,
+            address: s.order.deliveryPoint.city ?? s.order.deliveryPoint.address,
+            timeWindow:
+              s.order.deliveryTimeWindowFrom || s.order.deliveryTimeWindowTo
+                ? `${s.order.deliveryTimeWindowFrom ?? "—"} - ${s.order.deliveryTimeWindowTo ?? "—"}`
+                : null,
+          })),
         })),
-      })),
-    [routes, routeColorMap]
+    [routes, routeColorMap, dateFrom]
   );
 
   function selectStop(stopId: string) {
@@ -636,14 +651,21 @@ export default function DispatchBoard({ warehouseId, routeDate, onManageRoute, o
         </div>
       </div>
 
-      {/* Línea de tiempo (Gantt) */}
+      {/* Línea de tiempo (Gantt) -- un único eje de tiempo, siempre el
+          primer día del rango mostrado (ver comentario en ganttRoutes). */}
       <div className="mt-4 bg-white rounded-xl border border-slate-200 p-4">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">
-          Línea de tiempo del día
+          Línea de tiempo del día {dateFrom !== dateTo && <span className="font-mono normal-case text-slate-400">({dateFrom})</span>}
         </p>
+        {dateFrom !== dateTo && (
+          <p className="text-xs text-amber-600 mb-3">
+            El rango mostrado abarca varios días -- la línea de tiempo solo puede mostrar uno a la vez, así que se
+            muestra el primer día del rango ({dateFrom}). La tabla y el mapa de arriba sí incluyen todo el rango.
+          </p>
+        )}
         <DispatchGantt
           routes={ganttRoutes}
-          routeDateIso={routeDate}
+          routeDateIso={dateFrom}
           selectedStopId={selectedStopId}
           onSelectStop={(id) => selectStop(id)}
         />

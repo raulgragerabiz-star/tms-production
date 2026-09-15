@@ -8,6 +8,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 
 export const zonesRouter = Router();
 
@@ -86,8 +87,13 @@ zonesRouter.patch(
 );
 
 // DELETE /api/zones/:id
+// Fase 11: "borrar cualquier dato desde el perfil de administrador" -- se
+// añade el mismo requireRole que el resto de maestros, aunque aquí el
+// borrado ya era físico y sin riesgo de histórico real (una franja de
+// influencia no tiene datos hijos).
 zonesRouter.delete(
   "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
   asyncHandler(async (req, res) => {
     const zone = await prisma.influenceZone.findFirst({
       where: { id: req.params.id, warehouse: { companyId: req.auth!.companyId } },

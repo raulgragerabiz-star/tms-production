@@ -65,7 +65,11 @@ interface PendingOrder {
 
 interface Props {
   warehouseId: string;
-  routeDate: string;
+  // Fase 11: antes un único `routeDate` -- ahora un rango (con ambos iguales
+  // por defecto, hoy) para poder ver de un vistazo una ventana más amplia de
+  // pedidos pendientes, no solo el día en curso. Ver planner-filters-store.ts.
+  dateFrom: string;
+  dateTo: string;
   onPlanned: (summary: string, ok: boolean) => void;
 }
 
@@ -105,7 +109,7 @@ const statusOptions: { value: string; label: string }[] = [
   { value: "cancelled", label: "Cancelado" },
 ];
 
-export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: Props) {
+export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlanned }: Props) {
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Fase 9: modal "por categoría / unificado" -- ver comentario de cabecera.
@@ -120,13 +124,13 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
   const status = usePlannerFiltersStore((s) => s.orderStatus);
   const setStatus = usePlannerFiltersStore((s) => s.setOrderStatus);
 
-  const queryKey = ["planner-board", warehouseId, routeDate, status];
+  const queryKey = ["planner-board", warehouseId, dateFrom, dateTo, status];
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async () =>
       (
         await api.get("/routes/planner-board", {
-          params: { warehouseId: warehouseId || undefined, date: routeDate || undefined, status },
+          params: { warehouseId: warehouseId || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, status },
         })
       ).data as { pendingOrders: PendingOrder[] },
   });
@@ -155,12 +159,18 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
   // hacía el backend caer todo en un único grupo/ruta (ver comentario de
   // cabecera y /routes/auto-plan). Si viene vacío (modo "Por categoría"), se
   // omite el campo -- comportamiento de siempre, una ruta por tipología.
+  // Fase 11: una ruta sale un único día concreto, aunque la lista de pedidos
+  // pendientes ahora pueda mostrar un rango más amplio -- se usa "Desde"
+  // como fecha de salida de la ruta creada (con el rango en su valor por
+  // defecto, un solo día, esto es exactamente el mismo `routeDate` de
+  // siempre). El aviso de abajo dentro del modal deja claro qué fecha se va
+  // a usar antes de confirmar.
   const autoPlanMutation = useMutation({
     mutationFn: async (forcedServiceType: string | undefined) =>
       (
         await api.post("/routes/auto-plan", {
           warehouseId,
-          routeDate,
+          routeDate: dateFrom,
           status,
           orderIds: Array.from(selected),
           ...(forcedServiceType ? { serviceType: forcedServiceType } : {}),
@@ -279,7 +289,7 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
               {!isLoading && pendingOrders.length === 0 && (
                 <tr>
                   <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
-                    No hay pedidos en ese estado para este almacén/fecha.
+                    No hay pedidos en ese estado para este almacén/rango de fechas.
                   </td>
                 </tr>
               )}
@@ -344,6 +354,12 @@ export default function PlanificacionTab({ warehouseId, routeDate, onPlanned }: 
           cabecera. Aparece siempre, nunca se salta. */}
       <Modal open={showPlanModeModal} title="¿Cómo agrupar estos pedidos en rutas?" onClose={() => setShowPlanModeModal(false)}>
         <div className="space-y-3">
+          {dateFrom !== dateTo && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              La ruta se creará con fecha de salida <span className="font-mono font-semibold">{dateFrom}</span> (el
+              primer día del rango mostrado), independientemente de la fecha de entrega solicitada de cada pedido.
+            </p>
+          )}
           <button
             onClick={handlePlanByCategory}
             className="w-full text-left rounded-lg border border-slate-200 hover:border-brand-400 hover:bg-brand-50/40 px-4 py-3"

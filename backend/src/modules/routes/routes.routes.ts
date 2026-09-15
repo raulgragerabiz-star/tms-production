@@ -9,7 +9,7 @@ import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, 
 import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
 import { broadcastToWarehouse } from "@/realtime/ws.server";
 import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
-import { summarizeOrderPallets } from "@/modules/orders/lib/line-pallets";
+import { summarizeOrderPallets, computeLinePallets } from "@/modules/orders/lib/line-pallets";
 
 export const routesRouter = Router();
 
@@ -39,13 +39,22 @@ export async function recalculateLoadPlan(routeId: string) {
   // clasificador de segmento (segmentation.service.ts) — antes esto era un placeholder
   // fijo de "1 palé por parada", que infravaloraba o sobrevaloraba la ocupación real según
   // el pedido y hacía inútil cualquier filtro de capacidad por palés.
+  // Fase 11: se usa `computeLinePallets` (line-pallets.ts) en vez de repetir la
+  // fórmula aquí -- ahora incluye el factor de "palé europeo equivalente"
+  // (1.20×0.80 = 1 unidad; más pequeño/grande escala proporcionalmente), pedido
+  // explícito de Raúl para que la capacidad de carga se base en palés reales.
   const totalPallets = stops.reduce(
     (acc, s) =>
       acc +
-      s.order.lines.reduce((a, l) => {
-        const unitsPerPallet = l.product.unitsPerPallet ?? 1;
-        return a + (unitsPerPallet > 0 ? Number(l.quantity) / unitsPerPallet : 0);
-      }, 0),
+      s.order.lines.reduce(
+        (a, l) =>
+          a +
+          computeLinePallets({
+            quantity: Number(l.quantity),
+            product: { unitsPerPallet: l.product.unitsPerPallet, lengthM: l.product.lengthM, widthM: l.product.widthM },
+          }),
+        0
+      ),
     0
   );
 
@@ -140,6 +149,27 @@ export async function recalculateLoadPlan(routeId: string) {
   });
 }
 
+// Fase 11 (petición explícita de Raúl): "poder no solo elegir un día
+// concreto para planificación si no también un rango de fechas en las que
+// poder tener una vista más amplia de las salidas programadas". Antes
+// /planner-board y /dispatch-board solo aceptaban ?date= (un único día,
+// comparado por igualdad exacta). Este helper acepta ADEMÁS ?dateFrom=&
+// ?dateTo=, devolviendo un filtro Prisma `gte`/`lt` -- con dateFrom===dateTo
+// (o con el ?date= de siempre) el resultado cubre exactamente ese único día,
+// así que ningún llamador antiguo cambia de comportamiento.
+function dateRangeFilter(query: Record<string, unknown>): { gte: Date; lt: Date } | undefined {
+  const dateFrom = (query.dateFrom as string | undefined) || undefined;
+  const dateTo = (query.dateTo as string | undefined) || undefined;
+  const date = (query.date as string | undefined) || undefined;
+  const from = dateFrom ?? date;
+  const to = dateTo ?? dateFrom ?? date;
+  if (!from && !to) return undefined;
+  const start = new Date(from ?? to!);
+  const end = new Date(to ?? from!);
+  end.setDate(end.getDate() + 1);
+  return { gte: start, lt: end };
+}
+
 // Tablero del planificador (Fase 5, Pantalla 4): pedidos validados pendientes de asignar
 // a una ruta + rutas draft/optimized del almacén y fecha dados, con coordenadas listas
 // para pintar en el mapa. Pensado para una sola llamada por carga de pantalla.
@@ -148,7 +178,9 @@ routesRouter.get(
   asyncHandler(async (req, res) => {
     const companyId = req.auth!.companyId;
     const warehouseId = req.query.warehouseId as string | undefined;
-    const date = req.query.date as string | undefined;
+    // Fase 11: ?date= (un solo día, compatibilidad) o ?dateFrom=&?dateTo=
+    // (rango) -- ver dateRangeFilter más arriba.
+    const dateFilter = dateRangeFilter(req.query as Record<string, unknown>);
     // Fase 7b: filtro de servicio opcional -- ya no lo usa la pestaña
     // "Planificación" (Fase 8: ahora se ve la tipología de cada pedido como
     // etiqueta según su peso, en vez de obligar a elegir un único servicio
@@ -171,7 +203,7 @@ routesRouter.get(
         companyId,
         status: status as any,
         ...(warehouseId ? { warehouseId } : {}),
-        ...(date ? { requestedDeliveryDate: new Date(date) } : {}),
+        ...(dateFilter ? { requestedDeliveryDate: dateFilter } : {}),
         ...(serviceType ? { serviceType: serviceType as any } : {}),
       },
       include: {
@@ -183,7 +215,9 @@ routesRouter.get(
         // Mejora (2026-09-14): join con producto para poder mostrar
         // bultos/palés de cada pedido pendiente directamente en el tablero
         // del Planificador -- petición explícita de Raúl.
-        lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
+        // Fase 11: + lengthM/widthM para el factor de "palé europeo
+        // equivalente" (ver line-pallets.ts).
+        lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true, lengthM: true, widthM: true } } } },
       },
       orderBy: { priority: "desc" },
     });
@@ -193,7 +227,7 @@ routesRouter.get(
         companyId,
         status: { in: ["draft", "optimized"] },
         ...(warehouseId ? { warehouseId } : {}),
-        ...(date ? { routeDate: new Date(date) } : {}),
+        ...(dateFilter ? { routeDate: dateFilter } : {}),
       },
       include: {
         warehouse: { select: { id: true, name: true, lat: true, lng: true } },
@@ -225,7 +259,7 @@ routesRouter.get(
                     contactEmail: true,
                   },
                 },
-                lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true } } } },
+                lines: { include: { product: { select: { unitsPerPallet: true, unitsPerBox: true, lengthM: true, widthM: true } } } },
               },
             },
           },
@@ -264,11 +298,19 @@ routesRouter.get(
     // archivo, p.ej. `recalculateLoadPlan` más arriba) en vez de importar
     // `Prisma.Decimal`, que el cliente generado y trackeado en git de este
     // sandbox no exporta.
-    const withOrderTotals = <T extends { lines: { quantity: any; lineWeightKg: any; product: { unitsPerPallet: number | null; unitsPerBox: number | null } }[] }>(
+    const withOrderTotals = <T extends { lines: { quantity: any; lineWeightKg: any; product: { unitsPerPallet: number | null; unitsPerBox: number | null; lengthM?: any; widthM?: any } }[] }>(
       o: T
     ) => {
       const { totalPallets, totalBoxes } = summarizeOrderPallets(
-        o.lines.map((l) => ({ quantity: Number(l.quantity), product: l.product }))
+        o.lines.map((l) => ({
+          quantity: Number(l.quantity),
+          product: {
+            unitsPerPallet: l.product.unitsPerPallet,
+            unitsPerBox: l.product.unitsPerBox,
+            lengthM: l.product.lengthM != null ? Number(l.product.lengthM) : null,
+            widthM: l.product.widthM != null ? Number(l.product.widthM) : null,
+          },
+        }))
       );
       return {
         ...o,
@@ -300,12 +342,15 @@ routesRouter.get(
   asyncHandler(async (req, res) => {
     const companyId = req.auth!.companyId;
     const warehouseId = req.query.warehouseId as string | undefined;
-    const date = (req.query.date as string | undefined) ?? new Date().toISOString().slice(0, 10);
+    // Fase 11: ?date= (un solo día, compatibilidad) o ?dateFrom=&?dateTo=
+    // (rango) -- ver dateRangeFilter más arriba. Por defecto, hoy (igual que
+    // siempre) cuando no se manda ninguno de los dos.
+    const dateFilter = dateRangeFilter(req.query as Record<string, unknown>) ?? dateRangeFilter({ date: new Date().toISOString().slice(0, 10) })!;
 
     const routes = await prisma.route.findMany({
       where: {
         companyId,
-        routeDate: new Date(date),
+        routeDate: dateFilter,
         ...(warehouseId ? { warehouseId } : {}),
       },
       include: {
@@ -360,7 +405,7 @@ routesRouter.get(
       where: {
         companyId,
         status: "validated",
-        requestedDeliveryDate: new Date(date),
+        requestedDeliveryDate: dateFilter,
         ...(warehouseId ? { warehouseId } : {}),
       },
     });
@@ -503,16 +548,31 @@ routesRouter.post(
         // "unificaban en uno solo" en vez de acabar en la misma ruta con dos
         // paradas independientes.
         ...(data.serviceType && !(data.orderIds && data.orderIds.length > 0) ? { serviceType: data.serviceType } : {}),
-        requestedDeliveryDate: data.routeDate,
-        // Siempre acotado a este almacén/fecha/estado (no a cualquier id que
-        // llegue en el body) -- así una selección manipulada o desactualizada
-        // nunca puede colar un pedido de otra empresa, otro día o ya
-        // planificado.
+        // Fase 11 (mismo fix que el de `serviceType` justo arriba, mismo
+        // motivo): `requestedDeliveryDate` solo se usa para FILTRAR cuando NO
+        // viene una selección explícita de `orderIds`. La pestaña
+        // "Planificación" ahora deja elegir pedidos de un RANGO de fechas
+        // (vista más amplia de salidas programadas, petición explícita de
+        // Raúl) -- si aquí se siguiera exigiendo que cada pedido seleccionado
+        // tenga exactamente `routeDate` como fecha de entrega solicitada,
+        // cualquier pedido del rango que no cayera justo en ese día quedaría
+        // fuera de esta consulta en silencio, reproduciendo el mismo bug ya
+        // corregido para `serviceType` ("se unifican en uno solo" en vez de
+        // planificarse todos). `routeDate` sigue siendo la fecha de SALIDA de
+        // la ruta que se crea -- no tiene por qué coincidir con la fecha de
+        // entrega solicitada de cada pedido.
+        ...(data.orderIds && data.orderIds.length > 0 ? {} : { requestedDeliveryDate: data.routeDate }),
+        // Siempre acotado a este almacén/estado (no a cualquier id que llegue
+        // en el body) -- así una selección manipulada o desactualizada nunca
+        // puede colar un pedido de otra empresa o ya planificado.
         ...(data.orderIds && data.orderIds.length > 0 ? { id: { in: data.orderIds } } : {}),
       },
       include: {
         deliveryPoint: { select: { lat: true, lng: true } },
-        lines: { include: { product: { select: { unitsPerPallet: true } } } },
+        // Fase 11: + lengthM/widthM para el factor de "palé europeo
+        // equivalente" que ahora aplica también `computeLinePallets` al
+        // construir los trabajos de VROOM (antes solo cantidad/unitsPerPallet).
+        lines: { include: { product: { select: { unitsPerPallet: true, lengthM: true, widthM: true } } } },
       },
       orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
       take: MAX_AUTO_PLAN_JOBS + 50, // margen para poder informar de cuántos quedan fuera tras descartar sin coordenadas
@@ -637,10 +697,15 @@ routesRouter.post(
         const passOrders = remainingOrders.slice(0, MAX_AUTO_PLAN_JOBS);
         const jobs: VroomJob[] = passOrders.map((order, idx) => {
           const weightKg = order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
-          const pallets = order.lines.reduce((acc, l) => {
-            const upp = l.product.unitsPerPallet ?? 1;
-            return acc + (upp > 0 ? Number(l.quantity) / upp : 0);
-          }, 0);
+          const pallets = order.lines.reduce(
+            (acc, l) =>
+              acc +
+              computeLinePallets({
+                quantity: Number(l.quantity),
+                product: { unitsPerPallet: l.product.unitsPerPallet, lengthM: l.product.lengthM, widthM: l.product.widthM },
+              }),
+            0
+          );
           const fromSec = timeStringToSeconds(order.deliveryTimeWindowFrom);
           const toSec = timeStringToSeconds(order.deliveryTimeWindowTo);
           return {
