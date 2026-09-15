@@ -142,7 +142,11 @@ export async function classifyOrder(
 
     const palletsForLine = computeLinePallets({
       quantity: Number(line.quantity),
-      product: { unitsPerPallet: line.product.unitsPerPallet, lengthM: line.product.lengthM, widthM: line.product.widthM },
+      product: {
+        unitsPerPallet: line.product.unitsPerPallet,
+        lengthM: line.product.lengthM != null ? Number(line.product.lengthM) : null,
+        widthM: line.product.widthM != null ? Number(line.product.widthM) : null,
+      },
     });
     totalPallets += palletsForLine;
 

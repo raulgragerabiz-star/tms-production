@@ -51,7 +51,11 @@ export async function recalculateLoadPlan(routeId: string) {
           a +
           computeLinePallets({
             quantity: Number(l.quantity),
-            product: { unitsPerPallet: l.product.unitsPerPallet, lengthM: l.product.lengthM, widthM: l.product.widthM },
+            product: {
+              unitsPerPallet: l.product.unitsPerPallet,
+              lengthM: l.product.lengthM != null ? Number(l.product.lengthM) : null,
+              widthM: l.product.widthM != null ? Number(l.product.widthM) : null,
+            },
           }),
         0
       ),
@@ -702,7 +706,11 @@ routesRouter.post(
               acc +
               computeLinePallets({
                 quantity: Number(l.quantity),
-                product: { unitsPerPallet: l.product.unitsPerPallet, lengthM: l.product.lengthM, widthM: l.product.widthM },
+                product: {
+                  unitsPerPallet: l.product.unitsPerPallet,
+                  lengthM: l.product.lengthM != null ? Number(l.product.lengthM) : null,
+                  widthM: l.product.widthM != null ? Number(l.product.widthM) : null,
+                },
               }),
             0
           );
