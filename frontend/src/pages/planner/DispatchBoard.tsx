@@ -478,6 +478,11 @@ export default function DispatchBoard({ warehouseId, dateFrom, dateTo, onManageR
                     <StatusBadge status={r.status} />
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
+                    {/* Fase 12: petición de Raúl -- con el rango de fechas
+                        (Fase 11) hacía falta ver a qué día concreto
+                        corresponde cada ruta, no solo el rango del filtro. */}
+                    <span className="font-mono">{new Date(r.routeDate).toLocaleDateString("es-ES")}</span>
+                    {" · "}
                     {r.stops.length} paradas
                     {r.loadPlan?.distanceKm ? ` · ${Math.round(Number(r.loadPlan.distanceKm))} km` : ""}
                     {r.loadPlan?.estimatedDurationMin ? ` · ${Math.round(r.loadPlan.estimatedDurationMin)} min` : ""}

@@ -25,12 +25,12 @@ import { usePlannerFiltersStore } from "@/store/planner-filters-store";
 //    puede ser de un servicio).
 //  - Se añade un selector de "Estado del pedido": por defecto "Validado"
 //    (los pendientes de planificar de siempre -- nada cambia si no se
-//    toca), pero se puede elegir otro estado para hacer planificaciones de
-//    prueba con pedidos recién importados que aún no se han validado uno a
-//    uno. Esto era lo que de verdad impedía ver pedidos de fechas pasadas
-//    en las pruebas -- no había ningún bloqueo real de fechas, sino que
-//    todo pedido importado (Excel/ERP) entra como "Recibido" y no
-//    aparecía aquí hasta validarlo a mano.
+//    toca), pero se puede elegir otro estado para ver pedidos en pasos
+//    posteriores del ciclo (planificado/expedido/en tránsito...).
+//    Fase 12: ya no existe "Recibido" como paso intermedio -- todo pedido
+//    importado (Excel/ERP) o creado a mano entra directamente como
+//    "Validado", listo para planificar sin ningún paso de validación manual
+//    de por medio (ver statusTransitions en orders.routes.ts).
 //
 // Fase 9: Raúl pidió que, al pulsar "Planificar automáticamente", salte
 // SIEMPRE un selector con 2 opciones -- hasta ahora la agrupación "por
@@ -97,12 +97,16 @@ const serviceTypeColor: Record<string, ChipColor> = {
 // único que importaba hasta ahora (el paso normal antes de planificar) y se
 // mantiene como opción por defecto; el resto sirve para probar la
 // planificación con pedidos que aún no han pasado por ese paso.
+//
+// Fase 12: se retiran "Recibido" y "En carga" -- ningún proceso real de la
+// app los usaba (ver comentario largo en orders.routes.ts, statusTransitions);
+// todo pedido nace ya "Validado". "Despachado" pasa a llamarse "Expedido"
+// (mismo estado `dispatched`, ahora se marca solo al confirmar la ruta) para
+// usar el mismo término que ya usa el filtro de estado de Pedidos.
 const statusOptions: { value: string; label: string }[] = [
   { value: "validated", label: "Validado (pendientes de planificar)" },
-  { value: "received", label: "Recibido (sin validar todavía)" },
   { value: "planned", label: "Planificado" },
-  { value: "loading", label: "En carga" },
-  { value: "dispatched", label: "Despachado" },
+  { value: "dispatched", label: "Expedido" },
   { value: "in_transit", label: "En tránsito" },
   { value: "incident", label: "Con incidencia" },
   { value: "delivered", label: "Entregado" },
@@ -272,6 +276,10 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
                 <th className="text-left px-3 py-2">Pedido</th>
                 <th className="text-left px-3 py-2">Cliente</th>
                 <th className="text-left px-3 py-2">Destino</th>
+                {/* Fase 12: petición de Raúl -- con el filtro por rango de
+                    fechas (Fase 11) hacía falta ver a qué día concreto
+                    corresponde cada pedido, no solo el rango completo. */}
+                <th className="text-left px-3 py-2">Fecha</th>
                 <th className="text-left px-3 py-2">Ventana</th>
                 <th className="text-left px-3 py-2">Tipología</th>
                 <th className="text-left px-3 py-2">Prioridad</th>
@@ -281,14 +289,14 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                     Cargando…
                   </td>
                 </tr>
               )}
               {!isLoading && pendingOrders.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                     No hay pedidos en ese estado para este almacén/rango de fechas.
                   </td>
                 </tr>
@@ -312,6 +320,9 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
                     <td className="px-3 py-2 text-slate-500">
                       {o.deliveryPoint.city ?? o.deliveryPoint.address}
                       {noCoords && <span className="ml-1.5 text-amber-600 text-xs">(sin coordenadas)</span>}
+                    </td>
+                    <td className="px-3 py-2 text-slate-500 font-mono text-xs">
+                      {new Date(o.requestedDeliveryDate).toLocaleDateString("es-ES")}
                     </td>
                     <td className="px-3 py-2 text-slate-500 text-xs">
                       {o.deliveryTimeWindowFrom || o.deliveryTimeWindowTo

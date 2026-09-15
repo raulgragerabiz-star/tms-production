@@ -28,6 +28,10 @@ interface RouteRow {
   id: string;
   status: string;
   serviceType: string;
+  // Fase 12: petición de Raúl -- con el filtro por rango de fechas (Fase 11)
+  // hacía falta ver a qué día concreto de salida corresponde cada ruta, no
+  // solo el rango completo mostrado arriba.
+  routeDate: string;
   warehouse: { id: string; name: string; lat: number | null; lng: number | null };
   carrier: { id: string; legalName: string } | null;
   vehicle: { id: string; plate: string } | null;
@@ -164,6 +168,8 @@ export default function RutasTab({ warehouseId, dateFrom, dateTo, onManageRoute,
                     <StatusBadge status={r.status} />
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
+                    <span className="font-mono">{new Date(r.routeDate).toLocaleDateString("es-ES")}</span>
+                    {" · "}
                     {r.stops.length} paradas
                     {r.loadPlan?.distanceKm ? ` · ${Math.round(Number(r.loadPlan.distanceKm))} km` : ""}
                     {r.loadPlan?.estimatedDurationMin ? ` · ${Math.round(r.loadPlan.estimatedDurationMin)} min` : ""}

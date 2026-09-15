@@ -795,7 +795,14 @@ model Order {
   customerId             String            @map("customer_id")
   deliveryPointId        String            @map("delivery_point_id")
   warehouseId            String            @map("warehouse_id")
-  status                 OrderStatus       @default(received)
+  // Fase 12: el valor por defecto pasa de "received" a "validated" -- ya no
+  // hay ningún proceso real que distinga "recibido" de "validado" (nada en
+  // la app hacía nunca ese paso a mano), así que un pedido nace directamente
+  // en el único estado real de partida. "received" se mantiene en el enum
+  // de abajo por compatibilidad con datos/código histórico, pero deja de
+  // usarse -- ver migrate-fase12-order-status.ts para los pedidos antiguos
+  // que aún estén en "received".
+  status                 OrderStatus       @default(validated)
   priority               OrderPriority     @default(standard)
   requestedDeliveryDate  DateTime          @map("requested_delivery_date")
   deliveryTimeWindowFrom String?           @map("delivery_time_window_from")

@@ -359,12 +359,21 @@ ordersRouter.post(
   })
 );
 
+// Fase 12: petición de Raúl -- se retiran "received" y "loading" del ciclo
+// de vida real. "received" ya no lo usa ningún camino de creación de
+// pedidos (todos crean directamente en "validated" desde la Fase 11) y
+// ningún sitio de la app lo pasaba nunca a mano a "validated" -- tenerlo
+// como estado propio solo dejaba pedidos antiguos colgados ahí para
+// siempre (ver migrate-fase12-order-status.ts para los ya existentes).
+// "loading" tampoco lo marcaba ningún proceso real. "dispatched" (Expedido)
+// pasa a ser un paso real: se marca solo, automáticamente, al confirmar la
+// ruta que lleva el pedido (ver PATCH /routes/:id/status) -- es el punto
+// intermedio que pedía Raúl para trazabilidad, entre "ya no es solo un plan
+// (validated/planned)" y "el conductor ya ha salido a reparto (in_transit)".
 const statusTransitions: Record<string, string[]> = {
-  received: ["validated", "cancelled"],
   validated: ["planned", "cancelled"],
-  planned: ["loading", "cancelled"],
-  loading: ["dispatched"],
-  dispatched: ["in_transit"],
+  planned: ["dispatched", "cancelled"],
+  dispatched: ["in_transit", "cancelled"],
   in_transit: ["delivered", "incident"],
   incident: ["in_transit", "delivered"],
   delivered: [],

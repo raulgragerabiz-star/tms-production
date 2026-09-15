@@ -1052,7 +1052,9 @@ routesRouter.patch(
 
     const route = await prisma.route.findFirst({
       where: { id: req.params.id, companyId: req.auth!.companyId },
-      include: { warehouse: true, carrier: true, loadPlan: true },
+      // Fase 12: `stops` hace falta para poder pasar sus pedidos a
+      // "dispatched" en cuanto la ruta se confirma (ver más abajo).
+      include: { warehouse: true, carrier: true, loadPlan: true, stops: { select: { orderId: true } } },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
 
@@ -1083,6 +1085,24 @@ routesRouter.patch(
       where: { id: route.id },
       data: { status: data.status, carrierId: data.carrierId, vehicleId: data.vehicleId },
     });
+
+    // Fase 12: petición de Raúl -- "el paso por planificación, cuando se
+    // confirma la ruta enviada, ese es el punto de pedido expedido... es un
+    // tránsito entre que ya no figura como validado pero tampoco figura
+    // como cargado, para trazabilidad". Al confirmar la ruta (el punto de no
+    // retorno de arriba, ya validado con la jornada máxima) sus pedidos
+    // pasan de "planned" a "dispatched" -- solo los que sigan en "planned",
+    // para no pisar un pedido que por lo que sea ya esté más adelante en su
+    // ciclo (in_transit/delivered) si se reconfirma una ruta.
+    if (data.status === "confirmed") {
+      const orderIds = route.stops.map((s: { orderId: string }) => s.orderId);
+      if (orderIds.length > 0) {
+        await prisma.order.updateMany({
+          where: { id: { in: orderIds }, status: "planned" },
+          data: { status: "dispatched" },
+        });
+      }
+    }
 
     if (data.vehicleId) await recalculateLoadPlan(route.id);
 

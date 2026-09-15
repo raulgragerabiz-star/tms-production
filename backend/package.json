@@ -16,6 +16,7 @@
     "db:import-surtido": "tsx prisma/import-surtido.ts",
     "db:backfill-demo-cp": "tsx prisma/backfill-demo-postal-codes.ts",
     "db:fix-order-cp": "tsx prisma/fix-order-postal-code.ts",
+    "db:migrate-fase12-order-status": "tsx prisma/migrate-fase12-order-status.ts",
     "postgis:setup": "tsx src/scripts/setup-postgis.ts",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",

@@ -189,10 +189,11 @@ export default function OrdersPage() {
             className="rounded-lg border border-slate-300 text-sm px-3 py-2"
           >
             <option value="">Todos los estados</option>
-            <option value="received">Recibido</option>
+            {/* Fase 12: se retiran "Recibido" y "En carga" -- ningún proceso
+                real de la app los usaba, ver orders.routes.ts
+                (statusTransitions). Todo pedido nace ya "Validado". */}
             <option value="validated">Validado</option>
             <option value="planned">Planificado</option>
-            <option value="loading">En carga</option>
             <option value="dispatched">Expedido</option>
             <option value="in_transit">En reparto</option>
             <option value="delivered">Entregado</option>
