@@ -187,7 +187,39 @@ optimizationRouter.post(
     const deliveryZoneIds = new Set(route.stops.map((s) => s.order.customer.deliveryZoneId).filter(Boolean));
     const singleDeliveryZoneId = deliveryZoneIds.size === 1 ? ([...deliveryZoneIds][0] as string) : undefined;
 
+    // Fase 14: nombres de los transportistas candidatos -- hace falta para
+    // poder identificar en la respuesta a los que se quedan SIN tarifa
+    // vigente (ver `unresolvedCandidates` más abajo), no solo a los que sí
+    // consiguen un coste.
+    const candidateCarrierNames = new Map(
+      (
+        await prisma.carrier.findMany({
+          where: { id: { in: [...qualifyingByCarrier.keys()] } },
+          select: { id: true, legalName: true },
+        })
+      ).map((c: any) => [c.id, c.legalName])
+    );
+
     const results = [];
+    // Fase 14: bug real reportado por Raúl -- "da error y no llega a
+    // mostrar lista de tte con costes". Causa encontrada por revisión de
+    // código (sin acceso a la base de datos real para reproducirlo): si
+    // las paradas de la ruta pertenecen a más de un circuito de reparto (o
+    // a clientes sin circuito asignado todavía), `singleDeliveryZoneId`
+    // queda `undefined` y la tarifa por circuito+vehículo se salta para
+    // TODOS los candidatos -- si además ninguno tiene tampoco tarifa
+    // general (`by_zone`/`full_truck_rate`/`pallet_rate`) configurada como
+    // respaldo (caso habitual aquí, donde Raúl solo ha dado de alta
+    // tarifas por circuito en "Flota y Transportistas"), `resolved` sale
+    // `null` para todos y antes esto lanzaba un `HttpError.badRequest` que
+    // cortaba la respuesta entera: el frontend mostraba un error y nunca
+    // llegaba a pintar la lista de transportistas con capacidad. Se
+    // sustituye por una respuesta 200 con la lista de candidatos sin coste
+    // calculable (`unresolvedCandidates`), para que el comparador pueda
+    // mostrarlos igualmente con el motivo ("sin tarifa vigente") en vez de
+    // una pantalla de error -- y Raúl pueda revisar el circuito/tarifa que
+    // falta en vez de quedarse sin ninguna información.
+    const unresolvedCandidates: Array<{ carrierId: string; legalName: string; vehicleTypeId: string; reason: string }> = [];
     for (const { carrierId, vehicleTypeId } of qualifyingByCarrier.values()) {
       const resolved = await resolveShipmentCost({
         carrierId,
@@ -205,7 +237,17 @@ optimizationRouter.post(
         vehicleTypeId,
         weightKg: totalWeightKg,
       });
-      if (!resolved) continue;
+      if (!resolved) {
+        unresolvedCandidates.push({
+          carrierId,
+          legalName: candidateCarrierNames.get(carrierId) ?? carrierId,
+          vehicleTypeId,
+          reason: singleDeliveryZoneId
+            ? "Sin tarifa vigente para este transportista/vehículo en la fecha de la ruta"
+            : "Las paradas de la ruta pertenecen a más de un circuito de reparto (o a clientes sin circuito asignado), y no hay tarifa general de respaldo configurada",
+        });
+        continue;
+      }
 
       const sim = await prisma.costSimulation.create({
         data: {
@@ -213,6 +255,7 @@ optimizationRouter.post(
           carrierId,
           vehicleTypeId,
           estimatedCost: resolved.estimatedCost,
+          estimatedMargin: resolved.estimatedMargin,
           costBreakdown: resolved.breakdown as any,
         },
       });
@@ -220,12 +263,36 @@ optimizationRouter.post(
     }
 
     if (results.length === 0) {
-      throw HttpError.badRequest(
-        "Hay transportistas con capacidad suficiente pero ninguno tiene tarifa vigente para esta fecha/servicio"
-      );
+      // Se documenta el motivo más probable (ver comentario más arriba) en
+      // vez de cortar la respuesta -- así el comparador puede mostrar por
+      // qué ningún transportista tiene coste, en lugar de una pantalla de
+      // error sin ninguna pista.
+      res.json({
+        routeId: route.id,
+        totalWeightKg,
+        totalPallets,
+        candidates: [],
+        unresolvedCandidates,
+        autoAssign: null,
+        noValidRateReason: singleDeliveryZoneId
+          ? "Hay transportistas con capacidad suficiente pero ninguno tiene tarifa vigente para esta fecha/servicio"
+          : "Las paradas de esta ruta pertenecen a más de un circuito de reparto -- no se puede aplicar la tarifa por circuito+vehículo y no hay tarifa general configurada como respaldo",
+      });
+      return;
     }
 
-    results.sort((a, b) => Number(a.estimatedCost) - Number(b.estimatedCost));
+    // Fase 14: petición de Raúl -- "ofreciendo visión de coste vs beneficio...
+    // para ver cuál sería el más rentable". El candidato más rentable
+    // (mayor beneficio de empresa) va primero; sin beneficio calculable
+    // (tarifa que no viene de circuito+vehículo) se ordena al final, y entre
+    // esos el criterio sigue siendo el coste más bajo, como antes de esta
+    // fase.
+    results.sort((a, b) => {
+      const marginA = a.estimatedMargin != null ? Number(a.estimatedMargin) : -Infinity;
+      const marginB = b.estimatedMargin != null ? Number(b.estimatedMargin) : -Infinity;
+      if (marginA !== marginB) return marginB - marginA;
+      return Number(a.estimatedCost) - Number(b.estimatedCost);
+    });
     await prisma.route.update({ where: { id: route.id }, data: { status: "optimized" } });
 
     // Motor de inteligencia (3/3): si la empresa tiene activada la
@@ -244,7 +311,7 @@ optimizationRouter.post(
       autoAssign = { autoAssigned: false, routeId: route.id, confidence: null, reason: "auto_assign_error" };
     }
 
-    res.json({ routeId: route.id, totalWeightKg, totalPallets, candidates: results, autoAssign });
+    res.json({ routeId: route.id, totalWeightKg, totalPallets, candidates: results, unresolvedCandidates, autoAssign });
   })
 );
 

@@ -106,7 +106,7 @@ dashboardRouter.get(
             id: true,
             departedAt: true,
             finishedAt: true,
-            settlementLines: { select: { amount: true } },
+            settlementLines: { select: { amount: true, marginAmount: true } },
             incidents: { select: { id: true } },
           },
         },
@@ -122,6 +122,13 @@ dashboardRouter.get(
       incidents: number;
       costReal: number;
       costEstimated: number;
+      // Fase 14: beneficio real de BigMat (Descarga × paradas + Ingreso
+      // €/TN Socios × toneladas de la tarifa por circuito+vehículo, ver
+      // rate-resolution.service.ts) -- distinto de costReal, que es lo
+      // pagado al transportista. Solo cuenta líneas con beneficio
+      // calculable, ver marginUnknownLines.
+      marginReal: number;
+      marginUnknownLines: number;
       weightOccupancySum: number;
       palletOccupancySum: number;
       distanceKm: number;
@@ -157,6 +164,8 @@ dashboardRouter.get(
       incidents: 0,
       costReal: 0,
       costEstimated: 0,
+      marginReal: 0,
+      marginUnknownLines: 0,
       weightOccupancySum: 0,
       palletOccupancySum: 0,
       distanceKm: 0,
@@ -168,7 +177,7 @@ dashboardRouter.get(
     const OTD_TOLERANCE_MS = 15 * 60 * 1000;
 
     const buckets = new Map<string, Bucket>();
-    const byCarrier = new Map<string, { carrierId: string; legalName: string; routes: number; incidents: number; costReal: number }>();
+    const byCarrier = new Map<string, { carrierId: string; legalName: string; routes: number; incidents: number; costReal: number; marginReal: number; marginUnknownLines: number }>();
     // "Top zonas por volumen": peso movido por provincia (o población si no
     // hay provincia) del punto de entrega de cada parada -- aproximación real
     // a la idea de "ranking de rutas/zonas" del panel BI de referencia que
@@ -200,8 +209,10 @@ dashboardRouter.get(
     for (const r of routes) {
       const key = bucketKey(r.routeDate, granularity);
       const b = buckets.get(key) ?? emptyBucket(key);
-      const costReal = r.shipment?.settlementLines.reduce((acc, l) => acc + Number(l.amount), 0) ?? 0;
-      const costEstimated = r.costSimulations.reduce((acc, c) => acc + Number(c.estimatedCost), 0);
+      const costReal = r.shipment?.settlementLines.reduce((acc: number, l: any) => acc + Number(l.amount), 0) ?? 0;
+      const costEstimated = r.costSimulations.reduce((acc: number, c: any) => acc + Number(c.estimatedCost), 0);
+      const marginReal = r.shipment?.settlementLines.reduce((acc: number, l: any) => acc + (l.marginAmount != null ? Number(l.marginAmount) : 0), 0) ?? 0;
+      const marginUnknownLines = r.shipment?.settlementLines.filter((l: any) => l.marginAmount == null).length ?? 0;
       const incidents = r.shipment?.incidents.length ?? 0;
 
       b.routes += 1;
@@ -210,6 +221,8 @@ dashboardRouter.get(
       b.incidents += incidents;
       b.costReal += costReal;
       b.costEstimated += costEstimated;
+      b.marginReal += marginReal;
+      b.marginUnknownLines += marginUnknownLines;
       b.weightOccupancySum += r.loadPlan ? Number(r.loadPlan.weightOccupancyPct) : 0;
       b.palletOccupancySum += r.loadPlan ? Number(r.loadPlan.palletOccupancyPct) : 0;
       b.distanceKm += r.loadPlan?.distanceKm ? Number(r.loadPlan.distanceKm) : 0;
@@ -225,10 +238,12 @@ dashboardRouter.get(
       buckets.set(key, b);
 
       if (r.carrier) {
-        const c = byCarrier.get(r.carrier.id) ?? { carrierId: r.carrier.id, legalName: r.carrier.legalName, routes: 0, incidents: 0, costReal: 0 };
+        const c = byCarrier.get(r.carrier.id) ?? { carrierId: r.carrier.id, legalName: r.carrier.legalName, routes: 0, incidents: 0, costReal: 0, marginReal: 0, marginUnknownLines: 0 };
         c.routes += 1;
         c.incidents += incidents;
         c.costReal += costReal;
+        c.marginReal += marginReal;
+        c.marginUnknownLines += marginUnknownLines;
         byCarrier.set(r.carrier.id, c);
       }
 
@@ -329,13 +344,15 @@ dashboardRouter.get(
         incidents: acc.incidents + b.incidents,
         costReal: acc.costReal + b.costReal,
         costEstimated: acc.costEstimated + b.costEstimated,
+        marginReal: acc.marginReal + b.marginReal,
+        marginUnknownLines: acc.marginUnknownLines + b.marginUnknownLines,
         distanceKm: acc.distanceKm + b.distanceKm,
         otdEligible: acc.otdEligible + b.otdEligible,
         otdOnTime: acc.otdOnTime + b.otdOnTime,
         otsEligible: acc.otsEligible + b.otsEligible,
         otsOnTime: acc.otsOnTime + b.otsOnTime,
       }),
-      { routes: 0, stopsTotal: 0, stopsCompleted: 0, incidents: 0, costReal: 0, costEstimated: 0, distanceKm: 0, otdEligible: 0, otdOnTime: 0, otsEligible: 0, otsOnTime: 0 }
+      { routes: 0, stopsTotal: 0, stopsCompleted: 0, incidents: 0, costReal: 0, costEstimated: 0, marginReal: 0, marginUnknownLines: 0, distanceKm: 0, otdEligible: 0, otdOnTime: 0, otsEligible: 0, otsOnTime: 0 }
     );
 
     res.json({
@@ -354,6 +371,13 @@ dashboardRouter.get(
         costReal: totals.costReal,
         costEstimated: totals.costEstimated,
         costDeviationPct: totals.costEstimated > 0 ? Math.round(((totals.costReal - totals.costEstimated) / totals.costEstimated) * 1000) / 10 : null,
+        // Fase 14: beneficio real de BigMat en el periodo -- petición de
+        // Raúl de dar "el parámetro de coste beneficio por ruta" también en
+        // Analítica, no solo en Facturación. `marginUnknownLines` avisa
+        // cuántas liquidaciones del periodo no tienen beneficio calculable
+        // (generadas antes de esta fase, o con tarifa sin cobro a cliente).
+        marginReal: Math.round(totals.marginReal * 100) / 100,
+        marginUnknownLines: totals.marginUnknownLines,
         distanceKm: Math.round(totals.distanceKm),
         // Fase 8V: "total pedidos por ruta" -- media de pedidos (paradas) por
         // ruta en el periodo, no el total absoluto (ya lo da `stopsTotal` de
@@ -372,13 +396,18 @@ dashboardRouter.get(
         incidents: b.incidents,
         costReal: Math.round(b.costReal * 100) / 100,
         costEstimated: Math.round(b.costEstimated * 100) / 100,
+        // Fase 14: beneficio real de BigMat en el bucket -- mismo criterio
+        // que en `totals` (ver comentario más abajo), aquí por periodo para
+        // poder pintarlo junto a costReal/costEstimated en la serie temporal.
+        marginReal: Math.round(b.marginReal * 100) / 100,
+        marginUnknownLines: b.marginUnknownLines,
         weightOccupancyPct: b.routes > 0 ? Math.round((b.weightOccupancySum / b.routes) * 1000) / 10 : 0,
         palletOccupancyPct: b.routes > 0 ? Math.round((b.palletOccupancySum / b.routes) * 1000) / 10 : 0,
         distanceKm: Math.round(b.distanceKm),
       })),
       byCarrier: [...byCarrier.values()]
         .sort((a, b) => b.routes - a.routes)
-        .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100 })),
+        .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100, marginReal: Math.round(c.marginReal * 100) / 100 })),
       topZones,
       customerAbc,
       customerCompliance,

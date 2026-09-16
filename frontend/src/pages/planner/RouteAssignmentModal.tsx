@@ -45,11 +45,27 @@ interface RouteDetail {
   costSimulations: {
     id: string;
     estimatedCost: string;
+    // Fase 14: beneficio de BigMat para este candidato (ver
+    // rate-resolution.service.ts) -- `null` cuando la tarifa aplicada no
+    // viene de circuito+vehículo, no un beneficio "0" inventado.
+    estimatedMargin: string | null;
     isSelected: boolean;
     carrier: { id: string; legalName: string };
     vehicleType: { name: string } | null;
   }[];
   shipment: { id: string; status: string; driverId: string | null } | null;
+}
+
+// Fase 14: transportistas con capacidad suficiente para la ruta pero sin
+// tarifa vigente resuelta (motivo real de "da error y no llega a mostrar
+// lista de tte con costes" -- ver comentario en optimization.routes.ts).
+// No se persisten como CostSimulation (no tienen coste), llegan solo en la
+// respuesta de POST /simulate.
+interface UnresolvedCandidate {
+  carrierId: string;
+  legalName: string;
+  vehicleTypeId: string;
+  reason: string;
 }
 
 interface VehicleOption {
@@ -82,6 +98,11 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
   const [subTaxId, setSubTaxId] = useState("");
   const [subAddress, setSubAddress] = useState("");
   const [subPhone, setSubPhone] = useState("");
+  // Fase 14: solo llega en la respuesta de la última comparativa (no se
+  // persiste, ver UnresolvedCandidate) -- se pierde si se cierra el modal,
+  // igual que el resto del estado local de este componente.
+  const [unresolvedCandidates, setUnresolvedCandidates] = useState<UnresolvedCandidate[]>([]);
+  const [noValidRateReason, setNoValidRateReason] = useState<string | null>(null);
 
   const routeQuery = useQuery({
     queryKey: ["route-detail", routeId],
@@ -136,6 +157,8 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
     mutationFn: async () => (await api.post(`/optimization/${routeId}/simulate`)).data,
     onSuccess: (data: any) => {
       invalidateAll();
+      setUnresolvedCandidates(data.unresolvedCandidates ?? []);
+      setNoValidRateReason(data.noValidRateReason ?? null);
       // Motor de inteligencia (3/3): si la empresa tiene activada la
       // auto-asignación (Configuración) y el mejor candidato superó el
       // umbral de confianza, /simulate ya lo ha asignado -- se refleja aquí
@@ -145,6 +168,11 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
         onSuccess(
           `Comparativa generada (${data.candidates?.length ?? 0} candidatos) — transportista asignado automáticamente (confianza ${pct}%)`
         );
+      } else if (data.candidates?.length === 0) {
+        // Fase 14: antes esto era un error de red (HttpError.badRequest) --
+        // ahora es una respuesta normal sin candidatos con coste, ver
+        // `noValidRateReason`/`unresolvedCandidates` renderizados más abajo.
+        onError(data.noValidRateReason ?? "Ningún transportista tiene tarifa vigente para esta ruta");
       } else {
         onSuccess(`Comparativa generada (${data.candidates?.length ?? 0} candidatos)`);
       }
@@ -342,30 +370,70 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   <p className="text-xs text-slate-400">Todavía no se ha comparado ningún transportista para esta ruta.</p>
                 )}
 
-                {route.costSimulations.length > 0 && (
-                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
-                    {route.costSimulations.map((c) => (
-                      <div key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                        <div>
-                          <span className="font-medium text-slate-700">{c.carrier.legalName}</span>
-                          <span className="text-slate-400 text-xs ml-2">{c.vehicleType?.name}</span>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-slate-600">{Number(c.estimatedCost).toFixed(2)} €</span>
-                          {c.isSelected ? (
-                            <Chip color="teal">Seleccionado</Chip>
-                          ) : (
-                            route.status !== "confirmed" && (
-                              <button
-                                onClick={() => selectMutation.mutate(c.id)}
-                                disabled={selectMutation.isPending}
-                                className="text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
-                              >
-                                Seleccionar
-                              </button>
-                            )
-                          )}
-                        </div>
+                {route.costSimulations.length > 0 && (() => {
+                  // Fase 14: "más rentable" = mayor beneficio de empresa
+                  // calculable entre los candidatos -- mismo criterio de
+                  // orden que aplica el backend (optimization.routes.ts).
+                  const knownMargins = route.costSimulations
+                    .map((c) => (c.estimatedMargin != null ? Number(c.estimatedMargin) : null))
+                    .filter((m): m is number => m != null);
+                  const bestMargin = knownMargins.length > 0 ? Math.max(...knownMargins) : null;
+                  return (
+                    <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+                      {route.costSimulations.map((c) => {
+                        const margin = c.estimatedMargin != null ? Number(c.estimatedMargin) : null;
+                        const isMostProfitable = bestMargin != null && margin === bestMargin;
+                        return (
+                          <div key={c.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                            <div>
+                              <span className="font-medium text-slate-700">{c.carrier.legalName}</span>
+                              <span className="text-slate-400 text-xs ml-2">{c.vehicleType?.name}</span>
+                              {isMostProfitable && <Chip color="teal">Más rentable</Chip>}
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-right">
+                                <span className="font-mono text-slate-600 block">{Number(c.estimatedCost).toFixed(2)} € coste</span>
+                                <span className="font-mono text-xs block">
+                                  {margin != null ? (
+                                    <span className="text-emerald-600">{margin.toFixed(2)} € beneficio</span>
+                                  ) : (
+                                    <span className="text-slate-400">beneficio no calculable</span>
+                                  )}
+                                </span>
+                              </span>
+                              {c.isSelected ? (
+                                <Chip color="teal">Seleccionado</Chip>
+                              ) : (
+                                route.status !== "confirmed" && (
+                                  <button
+                                    onClick={() => selectMutation.mutate(c.id)}
+                                    disabled={selectMutation.isPending}
+                                    className="text-xs font-medium text-brand-600 hover:text-brand-700 disabled:opacity-50"
+                                  >
+                                    Seleccionar
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {/* Fase 14: transportistas con capacidad suficiente pero sin
+                    tarifa vigente resuelta -- antes esto hacía fallar toda la
+                    comparativa (bug reportado por Raúl), ahora se muestran
+                    aquí con el motivo para poder revisarlo (p. ej. dar de
+                    alta la tarifa del circuito que falta). */}
+                {unresolvedCandidates.length > 0 && (
+                  <div className="mt-2 border border-amber-200 bg-amber-50 rounded-lg divide-y divide-amber-100">
+                    {noValidRateReason && <p className="text-xs text-amber-700 px-3 pt-2">{noValidRateReason}</p>}
+                    {unresolvedCandidates.map((u) => (
+                      <div key={`${u.carrierId}-${u.vehicleTypeId}`} className="px-3 py-2 text-sm">
+                        <span className="font-medium text-amber-800">{u.legalName}</span>
+                        <p className="text-xs text-amber-700">{u.reason}</p>
                       </div>
                     ))}
                   </div>

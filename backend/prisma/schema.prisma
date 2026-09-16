@@ -1015,6 +1015,15 @@ model CostSimulation {
   carrierId     String       @map("carrier_id")
   vehicleTypeId String?      @map("vehicle_type_id")
   estimatedCost Decimal      @map("estimated_cost") @db.Decimal(12, 4)
+  // Fase 14: petición de Raúl -- "la tarifa base es el coste camión para la
+  // empresa, y los €/tn y paradas es el cobro a cliente por el envío...
+  // tiene que dar el parámetro de coste beneficio por ruta". Beneficio de
+  // BigMat para este candidato (Descarga × paradas + Ingreso €/TN Socios ×
+  // toneladas) -- distinto de `estimatedCost`, que sigue siendo solo lo que
+  // se pagaría al transportista. `null` cuando la tarifa resuelta no viene
+  // de una tarifa por circuito+vehículo (by_customer/by_zone/general no
+  // modelan ningún cobro a cliente todavía) -- no se inventa un beneficio 0.
+  estimatedMargin Decimal?   @map("estimated_margin") @db.Decimal(12, 4)
   costBreakdown Json?        @map("cost_breakdown")
   isSelected    Boolean      @default(false) @map("is_selected")
   createdAt     DateTime     @default(now()) @map("created_at")
@@ -1156,6 +1165,13 @@ model SettlementLine {
   shipmentId          String                @map("shipment_id")
   appliedRateId       String?               @map("applied_rate_id")
   amount              Decimal               @db.Decimal(12, 4)
+  // Fase 14: beneficio real de BigMat en este envío ya liquidado -- mismo
+  // criterio y misma fuente que `CostSimulation.estimatedMargin` (ver ese
+  // comentario), calculado en el momento de generar la liquidación. `null`
+  // en liquidaciones generadas antes de esta fase (no se recalcula a
+  // posteriori con datos que ya no reflejan la tarifa vigente en su momento)
+  // y en cualquier envío cuya tarifa no venga de circuito+vehículo.
+  marginAmount        Decimal?              @map("margin_amount") @db.Decimal(12, 4)
   breakdown           Json?
   // Fase 8V: gestión del gasto de transportistas -- disputa a nivel de línea
   // (un envío concreto dentro de la liquidación), independiente del estado

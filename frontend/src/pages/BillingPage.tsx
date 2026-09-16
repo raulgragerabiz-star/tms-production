@@ -19,6 +19,12 @@ interface SettlementLineRow {
   id: string;
   status: "accepted" | "disputed";
   amount: string;
+  // Fase 14: beneficio real de BigMat en este envío -- `null` cuando la
+  // tarifa aplicada no viene de circuito+vehículo (liquidada antes de esta
+  // fase, o con una tarifa que no modela cobro a cliente). Opcional porque
+  // GET /settlements (lista, para el recuento de líneas) no lo selecciona --
+  // solo GET /settlements/:id (detalle, SettlementLineDetail) lo trae.
+  marginAmount?: string | null;
 }
 
 interface SettlementRow {
@@ -64,10 +70,15 @@ interface ExpenseReportBucket {
   legalName?: string;
   name?: string;
   amount: number;
+  // Fase 14: beneficio real de BigMat en este bloque (petición de Raúl --
+  // "de ahí sacar las facturaciones segmentadas por transporte, rutas,
+  // centros, clientes"). Solo cuenta líneas con beneficio calculable, ver
+  // `marginUnknownLineCount` en los totales.
+  margin: number;
 }
 
 interface ExpenseReport {
-  totals: { totalAmount: number; lineCount: number; equalSplitLineCount: number };
+  totals: { totalAmount: number; totalMargin: number; lineCount: number; equalSplitLineCount: number; marginUnknownLineCount: number };
   byCarrier: ExpenseReportBucket[];
   byWarehouse: ExpenseReportBucket[];
   byDeliveryZone: ExpenseReportBucket[];
@@ -485,6 +496,7 @@ export default function BillingPage() {
                                   <th className="text-left px-3 py-2">Cliente(s)</th>
                                   <th className="text-left px-3 py-2">Vehículo / Conductor</th>
                                   <th className="text-right px-3 py-2">Importe</th>
+                                  <th className="text-right px-3 py-2">Beneficio</th>
                                   <th className="text-left px-3 py-2">Estado</th>
                                   <th className="text-right px-3 py-2">Acciones</th>
                                 </tr>
@@ -505,6 +517,9 @@ export default function BillingPage() {
                                       </td>
                                       <td className="px-3 py-2 text-right font-mono font-semibold text-slate-800">
                                         {Number(line.amount).toFixed(2)} €
+                                      </td>
+                                      <td className="px-3 py-2 text-right font-mono text-emerald-600">
+                                        {line.marginAmount != null ? `${Number(line.marginAmount).toFixed(2)} €` : "—"}
                                       </td>
                                       <td className="px-3 py-2">
                                         {line.status === "disputed" ? (
@@ -727,10 +742,19 @@ function ExpenseReportView({ data, isLoading }: { data: ExpenseReport | undefine
 
   return (
     <div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
         <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Gasto total</p>
           <p className="font-mono text-xl font-semibold text-slate-800">{data.totals.totalAmount.toFixed(2)} €</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Beneficio total</p>
+          <p className="font-mono text-xl font-semibold text-emerald-600">{data.totals.totalMargin.toFixed(2)} €</p>
+          {data.totals.marginUnknownLineCount > 0 && (
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {data.totals.marginUnknownLineCount} línea(s) sin beneficio calculable (tarifa sin cobro a cliente configurado).
+            </p>
+          )}
         </div>
         <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Liquidaciones</p>
@@ -761,6 +785,7 @@ function ExpenseReportPanel({ title, rows }: { title: string; rows: ExpenseRepor
   const top = rows.slice(0, 12);
   const max = top.reduce((m, r) => Math.max(m, r.amount), 0) || 1;
   const restAmount = rows.slice(12).reduce((sum, r) => sum + r.amount, 0);
+  const restMargin = rows.slice(12).reduce((sum, r) => sum + r.margin, 0);
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -781,11 +806,14 @@ function ExpenseReportPanel({ title, rows }: { title: string; rows: ExpenseRepor
             <span className="text-xs font-mono font-semibold text-slate-700 w-20 text-right flex-shrink-0">
               {row.amount.toFixed(0)} €
             </span>
+            <span className="text-xs font-mono text-emerald-600 w-20 text-right flex-shrink-0" title="Beneficio real">
+              {row.margin.toFixed(0)} €
+            </span>
           </div>
         ))}
         {rows.length > 12 && (
           <p className="text-[11px] text-slate-400 pt-1">
-            + {rows.length - 12} más ({restAmount.toFixed(0)} €)
+            + {rows.length - 12} más ({restAmount.toFixed(0)} € gasto, {restMargin.toFixed(0)} € beneficio)
           </p>
         )}
       </div>

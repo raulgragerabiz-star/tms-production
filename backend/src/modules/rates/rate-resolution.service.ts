@@ -89,6 +89,14 @@ export interface ResolveShipmentCostParams {
 
 export interface ResolvedShipmentCost {
   estimatedCost: number;
+  // Fase 14: petición de Raúl -- "la tarifa base es el coste camión para la
+  // empresa, y los €/tn y paradas es el cobro a cliente por el envío...
+  // sumar tarifa base y €/tn como coste camión y descarga + ingreso €/tn
+  // socios como beneficio empresa". Solo se calcula cuando la tarifa
+  // resuelta viene del nivel `by_delivery_zone_vehicle` (el único que
+  // modela un cobro a cliente hoy) -- `null` en cualquier otro nivel
+  // (by_customer/by_zone/general), nunca 0 fingido.
+  estimatedMargin: number | null;
   // Prisma.InputJsonValue (no Record<string, unknown>/unknown): esto se escribe
   // tal cual en la columna Json de settlement_line (billing.routes.ts) — con los
   // tipos genéricos anteriores, TypeScript rechazaba esa escritura porque
@@ -115,6 +123,9 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
   let baseRateId: string | undefined;
   let baseAmount: number | undefined;
   let baseBreakdown: Prisma.InputJsonValue | undefined;
+  // Fase 14: beneficio de BigMat -- solo se rellena en el nivel
+  // by_delivery_zone_vehicle (ver comentario en ResolvedShipmentCost).
+  let baseMargin: number | null = null;
 
   if (params.customerId) {
     const rows = await prisma.customerRate.findMany({
@@ -147,23 +158,40 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
       const flatFee = Number(vehicleRate.flatFee ?? 0);
       const unloadFee = Number(vehicleRate.unloadFee ?? 0);
       const pricePerTon = Number(vehicleRate.pricePerTon ?? 0);
+      const partnerIncomePerTon = vehicleRate.partnerIncomePerTon != null ? Number(vehicleRate.partnerIncomePerTon) : 0;
       const tons = (params.weightKg ?? 0) / 1000;
+      const stopsCount = params.stops ?? 0;
       const pricePerTonAmount = pricePerTon * tons;
+      // Fase 14: petición explícita de Raúl (aclarando el diseño original de
+      // la Fase 8T) -- "sumar tarifa base y €/tn como coste camión y
+      // descarga + ingreso €/tn socios como beneficio empresa". Antes se
+      // sumaban los 4 campos como coste al transportista; ahora:
+      //   - coste camión (lo que paga BigMat al transportista): flatFee + €/TN.
+      //   - beneficio empresa (lo que BigMat cobra de más al cliente por el
+      //     envío, no pagado al transportista): Descarga × nº de paradas +
+      //     Ingreso €/TN Socios × toneladas.
+      const unloadFeeTotal = unloadFee * stopsCount;
+      const partnerIncomeAmount = partnerIncomePerTon * tons;
       baseRateId = vehicleRate.id;
-      baseAmount = flatFee + unloadFee + pricePerTonAmount;
+      baseAmount = flatFee + pricePerTonAmount;
+      baseMargin = unloadFeeTotal + partnerIncomeAmount;
       baseBreakdown = {
         source: "by_delivery_zone_vehicle",
         deliveryZoneId: params.deliveryZoneId,
         vehicleTypeId: params.vehicleTypeId,
         flatFee,
-        unloadFee,
         pricePerTon,
         weightKg: params.weightKg ?? 0,
         pricePerTonAmount,
-        // Informativo únicamente (reparto de ingresos con el socio
-        // colaborador del circuito) -- no se suma al coste que paga BigMat
-        // al transportista, ver comentario del modelo en schema.prisma.
-        partnerIncomePerTon: vehicleRate.partnerIncomePerTon != null ? Number(vehicleRate.partnerIncomePerTon) : null,
+        // Beneficio de BigMat (no forma parte de `estimatedCost`, ver
+        // `estimatedMargin` más abajo) -- se deja también aquí, en el
+        // desglose, para poder auditar de dónde sale cada céntimo.
+        unloadFee,
+        stopsCount,
+        unloadFeeTotal,
+        partnerIncomePerTon,
+        partnerIncomeAmount,
+        companyMargin: baseMargin,
       };
     }
   }
@@ -235,6 +263,10 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
 
   return {
     estimatedCost: final.totalAmount,
+    // Fase 14: el beneficio de empresa no lleva suplementos (combustible,
+    // ADR, festivos, peajes, esperas) -- esos son costes extra que se pagan
+    // al transportista, no afectan a lo que BigMat cobra de más al cliente.
+    estimatedMargin: baseMargin != null ? round2(baseMargin) : null,
     breakdown: {
       baseRateId: baseRateId!,
       base: baseBreakdown!,

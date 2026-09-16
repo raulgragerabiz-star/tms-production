@@ -24,6 +24,10 @@ const PALETTE = {
   // secundaria, y los mismos semánticos teal/rojo que StatusBadge/KpiCard.
   slot1: "#c9791f", // ámbar -- serie principal (coste real / OTIF)
   slot2: "#5b8def", // azul -- segunda serie (coste estimado)
+  // Fase 14: tercera serie categórica (beneficio real) -- mismo teal que ya
+  // usa "good"/StatusBadge para valores positivos, en orden fijo detrás de
+  // slot1/slot2 (nunca sustituye a ninguna de las dos).
+  slot3: "#178a70",
   surface: "#ffffff",
   textPrimary: "#0f172a",
   textSecondary: "#64748b",
@@ -46,6 +50,11 @@ interface Bucket {
   incidents: number;
   costReal: number;
   costEstimated: number;
+  // Fase 14: beneficio real de BigMat en el periodo (ver dashboard.routes.ts)
+  // -- `marginUnknownLines` avisa cuántas liquidaciones del bucket no tienen
+  // beneficio calculable (no se cuenta como 0).
+  marginReal: number;
+  marginUnknownLines: number;
   weightOccupancyPct: number;
   palletOccupancyPct: number;
   distanceKm: number;
@@ -57,6 +66,8 @@ interface CarrierRow {
   routes: number;
   incidents: number;
   costReal: number;
+  marginReal: number;
+  marginUnknownLines: number;
 }
 
 interface ZoneRow {
@@ -96,6 +107,11 @@ interface HistoryResponse {
     costReal: number;
     costEstimated: number;
     costDeviationPct: number | null;
+    // Fase 14: petición de Raúl -- "tiene que dar el parámetro de coste
+    // beneficio por ruta" también en Analítica, no solo en Facturación. Ver
+    // comentario completo en dashboard.routes.ts.
+    marginReal: number;
+    marginUnknownLines: number;
     distanceKm: number;
     avgStopsPerRoute: number;
     // Mejora (2026-09-14): null cuando no hay ninguna muestra en el periodo/
@@ -315,6 +331,16 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
               value={data.totals.costDeviationPct == null ? "—" : `${data.totals.costDeviationPct > 0 ? "+" : ""}${data.totals.costDeviationPct}%`}
               tone={data.totals.costDeviationPct == null ? "default" : data.totals.costDeviationPct > 10 ? "danger" : "success"}
             />
+            <KpiCard
+              label="Beneficio real (empresa)"
+              value={formatEuros(data.totals.marginReal)}
+              tone="success"
+              sub={
+                data.totals.marginUnknownLines > 0
+                  ? `${data.totals.marginUnknownLines} liquidación(es) del periodo sin beneficio calculable (tarifa sin cobro a cliente configurado)`
+                  : "Descarga × paradas + Ingreso €/TN Socios × toneladas, tarifa por circuito+vehículo"
+              }
+            />
             <KpiCard label="Distancia planificada" value={`${data.totals.distanceKm.toLocaleString("es-ES")} km`} />
             <KpiCard label="Pedidos por ruta (media)" value={data.totals.avgStopsPerRoute} />
             <KpiCard
@@ -337,13 +363,14 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
 
           {data.buckets.length > 0 && (
             <div className="grid md:grid-cols-2 gap-4 mb-6">
-              <ChartCard title="Coste real vs. estimado">
+              <ChartCard title="Coste, estimado y beneficio">
                 <TimeSeriesLineChart
                   buckets={data.buckets}
                   groupBy={data.range.groupBy}
                   series={[
                     { key: "costReal", label: "Coste real", color: PALETTE.slot1 },
                     { key: "costEstimated", label: "Coste estimado", color: PALETTE.slot2 },
+                    { key: "marginReal", label: "Beneficio real", color: PALETTE.slot3 },
                   ]}
                   valueFormatter={formatEuros}
                 />
@@ -384,12 +411,13 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
                     <th className="text-right px-4 py-2">Rutas</th>
                     <th className="text-right px-4 py-2">Incidencias</th>
                     <th className="text-right px-4 py-2">Coste real</th>
+                    <th className="text-right px-4 py-2">Beneficio real</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {data.byCarrier.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-6 text-center text-slate-400">
+                      <td colSpan={5} className="px-4 py-6 text-center text-slate-400">
                         Sin datos para este periodo.
                       </td>
                     </tr>
@@ -400,6 +428,10 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
                       <td className="px-4 py-2 text-right font-mono text-slate-600">{c.routes}</td>
                       <td className="px-4 py-2 text-right font-mono text-slate-600">{c.incidents}</td>
                       <td className="px-4 py-2 text-right font-mono text-slate-600">{formatEuros(c.costReal)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-emerald-600">
+                        {formatEuros(c.marginReal)}
+                        {c.marginUnknownLines > 0 && <span className="text-slate-400 text-xs ml-1">({c.marginUnknownLines} sin calcular)</span>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

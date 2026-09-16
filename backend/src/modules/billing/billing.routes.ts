@@ -61,7 +61,15 @@ async function computeShipmentAmount(shipmentId: string) {
   });
 
   if (!resolved) return null; // excepción: queda para revisión manual (sin tarifa vigente)
-  return { amount: resolved.estimatedCost, appliedRateId: resolved.breakdown.baseRateId as string, breakdown: resolved.breakdown };
+  return {
+    amount: resolved.estimatedCost,
+    // Fase 14: beneficio real de BigMat en este envío -- mismo criterio que
+    // el comparador de transportistas (rate-resolution.service.ts), `null`
+    // cuando la tarifa aplicada no viene de circuito+vehículo.
+    marginAmount: resolved.estimatedMargin,
+    appliedRateId: resolved.breakdown.baseRateId as string,
+    breakdown: resolved.breakdown,
+  };
 }
 
 billingRouter.post(
@@ -100,6 +108,7 @@ billingRouter.post(
           shipmentId: shipment.id,
           appliedRateId: computed.appliedRateId,
           amount: computed.amount,
+          marginAmount: computed.marginAmount,
           breakdown: computed.breakdown,
         },
       });
@@ -351,6 +360,7 @@ billingRouter.get(
       },
       select: {
         amount: true,
+        marginAmount: true,
         carrierSettlement: {
           select: { carrierId: true, carrier: { select: { legalName: true } } },
         },
@@ -384,26 +394,38 @@ billingRouter.get(
       },
     });
 
-    const byCarrier = new Map<string, { legalName: string; amount: number }>();
-    const byWarehouse = new Map<string, { name: string; amount: number }>();
-    const byDeliveryZone = new Map<string, { name: string; amount: number }>();
-    const byCustomer = new Map<string, { legalName: string; amount: number }>();
+    const byCarrier = new Map<string, { legalName: string; amount: number; margin: number }>();
+    const byWarehouse = new Map<string, { name: string; amount: number; margin: number }>();
+    const byDeliveryZone = new Map<string, { name: string; amount: number; margin: number }>();
+    const byCustomer = new Map<string, { legalName: string; amount: number; margin: number }>();
     let totalAmount = 0;
+    let totalMargin = 0;
     let equalSplitLineCount = 0;
+    // Fase 14: cuántas líneas no llevan beneficio calculado (liquidadas antes
+    // de esta fase, o con una tarifa que no viene de circuito+vehículo) --
+    // mismo criterio de transparencia que `equalSplitLineCount`: el total de
+    // beneficio de este informe puede quedarse corto mientras existan estas
+    // líneas, y aquí se ve cuántas son en vez de fingir que no existen.
+    let marginUnknownLineCount = 0;
     const NO_ZONE_KEY = "__sin_circuito__";
 
     for (const line of lines) {
       const amount = Number(line.amount);
+      const margin = line.marginAmount != null ? Number(line.marginAmount) : null;
       totalAmount += amount;
+      if (margin != null) totalMargin += margin;
+      else marginUnknownLineCount += 1;
 
       const carrierId = line.carrierSettlement.carrierId;
-      const carrierBucket = byCarrier.get(carrierId) ?? { legalName: line.carrierSettlement.carrier.legalName, amount: 0 };
+      const carrierBucket = byCarrier.get(carrierId) ?? { legalName: line.carrierSettlement.carrier.legalName, amount: 0, margin: 0 };
       carrierBucket.amount += amount;
+      if (margin != null) carrierBucket.margin += margin;
       byCarrier.set(carrierId, carrierBucket);
 
       const warehouseId = line.shipment.route.warehouseId;
-      const warehouseBucket = byWarehouse.get(warehouseId) ?? { name: line.shipment.route.warehouse.name, amount: 0 };
+      const warehouseBucket = byWarehouse.get(warehouseId) ?? { name: line.shipment.route.warehouse.name, amount: 0, margin: 0 };
       warehouseBucket.amount += amount;
+      if (margin != null) warehouseBucket.margin += margin;
       byWarehouse.set(warehouseId, warehouseBucket);
 
       const stops = line.shipment.route.stops;
@@ -422,27 +444,40 @@ billingRouter.get(
 
       stops.forEach((stop, i) => {
         const share = allWeightsKnown ? (stopWeights[i]! / totalWeight) * amount : amount / stops.length;
+        const marginShare = margin == null ? null : allWeightsKnown ? (stopWeights[i]! / totalWeight) * margin : margin / stops.length;
 
         const customerId = stop.order.customerId;
-        const customerBucket = byCustomer.get(customerId) ?? { legalName: stop.order.customer.legalName, amount: 0 };
+        const customerBucket = byCustomer.get(customerId) ?? { legalName: stop.order.customer.legalName, amount: 0, margin: 0 };
         customerBucket.amount += share;
+        if (marginShare != null) customerBucket.margin += marginShare;
         byCustomer.set(customerId, customerBucket);
 
         const zoneId = stop.order.customer.deliveryZoneId ?? NO_ZONE_KEY;
         const zoneName = stop.order.customer.deliveryZone?.name ?? "Sin circuito";
-        const zoneBucket = byDeliveryZone.get(zoneId) ?? { name: zoneName, amount: 0 };
+        const zoneBucket = byDeliveryZone.get(zoneId) ?? { name: zoneName, amount: 0, margin: 0 };
         zoneBucket.amount += share;
+        if (marginShare != null) zoneBucket.margin += marginShare;
         byDeliveryZone.set(zoneId, zoneBucket);
       });
     }
 
-    const toSortedArray = <T extends { amount: number }>(map: Map<string, T>) =>
+    const toSortedArray = <T extends { amount: number; margin: number }>(map: Map<string, T>) =>
       Array.from(map.entries())
-        .map(([id, v]) => ({ id, ...v }))
+        .map(([id, v]) => ({ id, ...v, amount: Math.round(v.amount * 100) / 100, margin: Math.round(v.margin * 100) / 100 }))
         .sort((a, b) => b.amount - a.amount);
 
     res.json({
-      totals: { totalAmount, lineCount: lines.length, equalSplitLineCount },
+      totals: {
+        totalAmount,
+        // Fase 14: beneficio real de BigMat en el periodo (petición de Raúl
+        // -- "tiene que dar el parámetro de coste beneficio por ruta, y de
+        // ahí sacar las facturaciones segmentadas"). Suma solo las líneas
+        // con beneficio calculable, ver `marginUnknownLineCount`.
+        totalMargin: Math.round(totalMargin * 100) / 100,
+        lineCount: lines.length,
+        equalSplitLineCount,
+        marginUnknownLineCount,
+      },
       byCarrier: toSortedArray(byCarrier),
       byWarehouse: toSortedArray(byWarehouse),
       byDeliveryZone: toSortedArray(byDeliveryZone),
