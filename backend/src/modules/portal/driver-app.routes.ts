@@ -295,6 +295,37 @@ driverAppRouter.post(
       const nextStatus = data.returned ? "returned" : data.failed ? "failed" : "completed";
       await tx.routeStop.update({ where: { id: stop.id }, data: { status: nextStatus } });
 
+      // Fase 13: si esta era la última parada pendiente de la ruta, el envío
+      // se cierra solo -- hasta ahora nada marcaba nunca el shipment como
+      // "finished" al completar/fallar/devolver la última parada (la única
+      // vía para llegar a "finished" era un botón de la App Conductor que
+      // nunca llegó a existir en pantalla -- TodayRoutePage.tsx solo ofrece
+      // "He cargado el vehículo" y "Salgo de reparto", ver
+      // NEXT_SHIPMENT_STATUS más abajo). Consecuencia real reportada por
+      // Raúl: el envío se quedaba en "in_transit" para siempre aunque sus
+      // paradas ya constaran entregadas -- Seguimiento e Inicio lo seguían
+      // contando como ruta activa/en tránsito, y Facturación > Informe de
+      // gasto nunca generaba liquidación (exige `status: "finished"` +
+      // `finishedAt`, ver `billing.routes.ts`). Mismo criterio de "sin
+      // paradas pendientes" que ya usa el checkpoint manual equivalente
+      // (`POST /shipments/:id/status`, más abajo en este fichero).
+      const shipmentForRoute = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
+      if (shipmentForRoute && shipmentForRoute.status !== "finished") {
+        const pendingStops = await tx.routeStop.count({
+          where: { routeId: stop.routeId, status: { notIn: ["completed", "failed", "returned"] } },
+        });
+        if (pendingStops === 0) {
+          await tx.shipment.update({
+            where: { id: shipmentForRoute.id },
+            data: {
+              status: "finished",
+              departedAt: shipmentForRoute.departedAt ?? new Date(),
+              finishedAt: new Date(),
+            },
+          });
+        }
+      }
+
       if (data.returned) {
         const shipment = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
         if (shipment) {
@@ -376,6 +407,13 @@ driverAppRouter.post(
     const shipmentForStop = await prisma.shipment.findUnique({ where: { routeId: stop.routeId } });
     if (shipmentForStop) {
       await notifyShipmentChange(shipmentForStop.id, "stop_status_changed", { routeStopId: stop.id, status: updated?.status });
+      // Fase 13: si el cierre automático de arriba acabó de finalizar el
+      // envío, se avisa también de eso -- mismo evento que ya usa el
+      // checkpoint manual (`shipment_status_changed`), para que Seguimiento
+      // deje de mostrarlo como activo sin esperar al siguiente sondeo.
+      if (shipmentForStop.status === "finished") {
+        await notifyShipmentChange(shipmentForStop.id, "shipment_status_changed", { status: "finished" });
+      }
     }
     res.json(updated);
   })

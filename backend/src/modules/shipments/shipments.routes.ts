@@ -156,7 +156,11 @@ shipmentsRouter.patch(
     if (status === "in_transit" && !shipment.departedAt) data.departedAt = new Date();
     if (status === "finished") {
       data.finishedAt = new Date();
-      const pending = await prisma.routeStop.count({ where: { routeId: shipment.routeId, status: { notIn: ["completed", "failed"] } } });
+      // Fase 13: incluye "returned" -- una parada devuelta a almacén (App
+      // Conductor) también es terminal, no debía contar como pendiente aquí.
+      const pending = await prisma.routeStop.count({
+        where: { routeId: shipment.routeId, status: { notIn: ["completed", "failed", "returned"] } },
+      });
       if (pending > 0) throw HttpError.conflict("Hay paradas sin completar; no se puede finalizar el envío");
     }
 
@@ -227,6 +231,30 @@ shipmentsRouter.post(
     await prisma.$transaction(async (tx) => {
       await tx.routeStop.update({ where: { id: stop.id }, data: { status: data.failed ? "failed" : "completed" } });
 
+      // Fase 13: mismo cierre automático del envío que el equivalente de la
+      // App Conductor (`driver-app.routes.ts`, `/stops/:routeStopId/complete`)
+      // -- si esta era la última parada pendiente de la ruta, el envío pasa
+      // solo a "finished" en vez de quedarse en "in_transit" para siempre
+      // (rompía Seguimiento/Inicio, que lo seguían contando como activo, y
+      // Facturación > Informe de gasto, que exige `finished`+`finishedAt`
+      // para generar la liquidación).
+      const shipmentForRoute = await tx.shipment.findUnique({ where: { routeId: stop.routeId } });
+      if (shipmentForRoute && shipmentForRoute.status !== "finished") {
+        const pendingStops = await tx.routeStop.count({
+          where: { routeId: stop.routeId, status: { notIn: ["completed", "failed", "returned"] } },
+        });
+        if (pendingStops === 0) {
+          await tx.shipment.update({
+            where: { id: shipmentForRoute.id },
+            data: {
+              status: "finished",
+              departedAt: shipmentForRoute.departedAt ?? new Date(),
+              finishedAt: new Date(),
+            },
+          });
+        }
+      }
+
       if (!data.failed) {
         await tx.proofOfDelivery.upsert({
           where: { routeStopId: stop.id },
@@ -269,6 +297,9 @@ shipmentsRouter.post(
         routeStopId: stop.id,
         status: stopUpdated?.status,
       });
+      if (shipmentForStop.status === "finished") {
+        await notifyShipmentChange(shipmentForStop.id, "shipment_status_changed", { status: "finished" });
+      }
     }
     res.json(stopUpdated);
   })
