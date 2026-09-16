@@ -10,6 +10,7 @@ import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/m
 import { broadcastToWarehouse } from "@/realtime/ws.server";
 import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 import { summarizeOrderPallets, computeLinePallets } from "@/modules/orders/lib/line-pallets";
+import { resolveDeliveryZonesForPairs, zonePairKey } from "@/modules/customers/customer-zone-resolution";
 
 export const routesRouter = Router();
 
@@ -324,8 +325,20 @@ routesRouter.get(
       };
     };
 
+    // Fase 15: "ruta" (circuito de reparto) de cada pedido pendiente, resuelta
+    // por cliente+almacén -- petición explícita de Raúl para que la lista de
+    // Planificación distinga la ruta real de un cliente según desde qué
+    // almacén se le sirva en ese pedido concreto, en vez de un único circuito
+    // fijo por cliente (ver customer-zone-resolution.ts).
+    const pendingZoneMap = await resolveDeliveryZonesForPairs(
+      pendingOrders.map((o) => ({ customerId: o.customerId, warehouseId: o.warehouseId }))
+    );
+
     res.json({
-      pendingOrders: pendingOrders.map((o) => withOrderTotals(o)),
+      pendingOrders: pendingOrders.map((o) => ({
+        ...withOrderTotals(o),
+        deliveryZone: pendingZoneMap.get(zonePairKey(o.customerId, o.warehouseId)) ?? null,
+      })),
       routes: routesWithSuggestion.map((r) => ({
         ...r,
         stops: r.stops.map((s) => ({ ...s, order: withOrderTotals(s.order) })),

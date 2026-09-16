@@ -69,10 +69,10 @@ interface AssignmentRow {
   partnerIncomePerTon: string | null;
   scheduleNote: string | null;
   deliveryZone: { id: string; name: string; active: boolean; _count: { customers: number } };
-  carrier: {
-    id: string;
-    legalName: string;
-    taxId: string;
+  // Fase 15: datos base completos del transportista -- hacen falta para
+  // poder abrir NewCarrierModal en modo edición también desde esta tabla
+  // (ver comentario de cabecera y el "Editar" de cada fila, más abajo).
+  carrier: CarrierEditable & {
     active: boolean;
     vehicleTypeOfferings: { vehicleType: { id: string; name: string } }[];
   };
@@ -257,6 +257,18 @@ export default function TransportistasTab() {
                     className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3"
                   >
                     Ver ficha
+                  </button>
+                  {/* Fase 15: antes esta era la única lista de transportistas
+                      (los que ya tienen circuito) y no tenía "Editar" -- el
+                      botón solo existía para los de la tabla de abajo (sin
+                      circuito asignado todavía), así que un transportista
+                      real (con su circuito+tarifa) no tenía forma de editar
+                      sus datos base (nombre, CIF, teléfono, dirección). */}
+                  <button
+                    onClick={() => setEditingCarrier(a.carrier)}
+                    className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3"
+                  >
+                    Editar
                   </button>
                   <button
                     onClick={() => {

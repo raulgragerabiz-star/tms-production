@@ -22,6 +22,7 @@ import { HttpError } from "@/utils/http-error";
 import { resolveShipmentCost } from "@/modules/rates/rate-resolution.service";
 import { recalculateLoadPlan } from "./routes.routes";
 import { attemptAutoAssign } from "@/modules/intelligence/auto-optimization.orchestrator";
+import { resolveDeliveryZonesForPairs, zonePairKey } from "@/modules/customers/customer-zone-resolution";
 
 export const optimizationRouter = Router();
 
@@ -175,16 +176,31 @@ optimizationRouter.post(
     // Si todas las paradas comparten un único cliente, se propaga a la resolución para
     // que una eventual tarifa `by_customer` pueda ganar prioridad. Igual con la
     // provincia: si todas las paradas caen en la misma, se habilita `by_zone`.
-    const customerIds = new Set(route.stops.map((s) => s.order.customerId));
-    const singleCustomerId = customerIds.size === 1 ? [...customerIds][0] : undefined;
-    const provinces = new Set(route.stops.map((s) => s.order.deliveryPoint.province).filter(Boolean));
+    const customerIds = new Set(route.stops.map((s: any) => s.order.customerId as string));
+    const singleCustomerId: string | undefined = customerIds.size === 1 ? [...customerIds][0] : undefined;
+    const provinces = new Set(route.stops.map((s: any) => s.order.deliveryPoint.province).filter(Boolean));
     const singleProvince = provinces.size === 1 ? ([...provinces][0] as string) : undefined;
     // Fase 8T: igual criterio que singleCustomerId/singleProvince -- nada en
     // el modelo obliga a que una ruta tenga paradas de un solo circuito de
     // reparto, así que solo se propaga cuando de verdad coinciden todas (en
     // caso contrario, se degrada a undefined y ese nivel de tarifa se salta,
     // igual que ya hacen los otros dos).
-    const deliveryZoneIds = new Set(route.stops.map((s) => s.order.customer.deliveryZoneId).filter(Boolean));
+    //
+    // Fase 15: el circuito de cada parada ya NO se lee directamente de
+    // `customer.deliveryZoneId` -- un cliente puede tener un circuito
+    // distinto según el almacén desde el que se le sirva (ver
+    // CustomerDeliveryZone / customer-zone-resolution.ts), y esta ruta parte
+    // siempre de un único almacén (`route.warehouseId`). Se resuelve el
+    // circuito EFECTIVO de cada parada para ese almacén antes de comprobar si
+    // todas coinciden.
+    const stopZoneMap = await resolveDeliveryZonesForPairs(
+      route.stops.map((s: any) => ({ customerId: s.order.customerId as string, warehouseId: route.warehouseId }))
+    );
+    const deliveryZoneIds = new Set(
+      route.stops
+        .map((s: any) => stopZoneMap.get(zonePairKey(s.order.customerId, route.warehouseId))?.id)
+        .filter((id: string | undefined): id is string => !!id)
+    );
     const singleDeliveryZoneId = deliveryZoneIds.size === 1 ? ([...deliveryZoneIds][0] as string) : undefined;
 
     // Fase 14: nombres de los transportistas candidatos -- hace falta para

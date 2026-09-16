@@ -61,6 +61,12 @@ interface PendingOrder {
   totalWeightKg: number;
   customer: { businessCode: string; legalName: string };
   deliveryPoint: { address: string; city: string | null; lat: number | null; lng: number | null };
+  // Fase 15: circuito de reparto de ESTE pedido, ya resuelto por
+  // cliente+almacén en el backend (ver customer-zone-resolution.ts) --
+  // petición explícita de Raúl: si el mismo cliente tiene entregas desde más
+  // de un almacén con circuitos distintos, aquí sale el que corresponde al
+  // almacén de este pedido concreto, no un circuito fijo por cliente.
+  deliveryZone: { id: string; name: string } | null;
 }
 
 interface Props {
@@ -281,6 +287,10 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
                     corresponde cada pedido, no solo el rango completo. */}
                 <th className="text-left px-3 py-2">Fecha</th>
                 <th className="text-left px-3 py-2">Ventana</th>
+                {/* Fase 15: petición explícita de Raúl -- ver el circuito de
+                    cada pedido junto a tipología/fecha, resuelto según el
+                    almacén de salida seleccionado arriba. */}
+                <th className="text-left px-3 py-2">Ruta</th>
                 <th className="text-left px-3 py-2">Tipología</th>
                 <th className="text-left px-3 py-2">Prioridad</th>
                 <th className="text-right px-3 py-2">Peso</th>
@@ -289,14 +299,14 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
             <tbody className="divide-y divide-slate-100">
               {isLoading && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={10} className="px-3 py-6 text-center text-slate-400">
                     Cargando…
                   </td>
                 </tr>
               )}
               {!isLoading && pendingOrders.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={10} className="px-3 py-6 text-center text-slate-400">
                     No hay pedidos en ese estado para este almacén/rango de fechas.
                   </td>
                 </tr>
@@ -328,6 +338,9 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
                       {o.deliveryTimeWindowFrom || o.deliveryTimeWindowTo
                         ? `${o.deliveryTimeWindowFrom ?? "—"} - ${o.deliveryTimeWindowTo ?? "—"}`
                         : "—"}
+                    </td>
+                    <td className="px-3 py-2">
+                      {o.deliveryZone ? <Chip color="purple">{o.deliveryZone.name}</Chip> : <span className="text-slate-300 text-xs">Sin circuito</span>}
                     </td>
                     <td className="px-3 py-2">
                       <Chip color={o.serviceType ? serviceTypeColor[o.serviceType] ?? "slate" : "slate"}>

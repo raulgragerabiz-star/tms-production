@@ -130,6 +130,8 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
           </label>
         )}
 
+        {isEdit && <CustomerZoneOverrides customerId={customer!.id} onError={onError} />}
+
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">
             Cancelar
@@ -144,5 +146,75 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Fase 15: excepciones de circuito POR ALMACÉN -- petición explícita de Raúl
+// ("al seleccionar el almacén de salida, si cambiara el almacén pero en otro
+// también tiene entregas ese cliente, figurará otra ruta distinta"). El
+// "Circuito de reparto" de arriba sigue siendo el valor POR DEFECTO; aquí
+// solo se listan las excepciones -- almacenes concretos donde este cliente
+// usa un circuito distinto. Guardado inmediato por fila (como
+// ZoneAssignmentFichaModal), no forma parte del "Guardar cambios" de arriba,
+// para no mezclar dos ciclos de guardado distintos en un mismo botón.
+function CustomerZoneOverrides({ customerId, onError }: { customerId: string; onError: (message: string) => void }) {
+  const queryClient = useQueryClient();
+
+  const warehousesQuery = useQuery({
+    queryKey: ["warehouses"],
+    queryFn: async () => (await api.get("/warehouses")).data as { items: { id: string; name: string }[] },
+  });
+  const zonesQuery = useQuery({
+    queryKey: ["delivery-zones"],
+    queryFn: async () => (await api.get("/delivery-zones")).data as { items: { id: string; name: string }[] },
+  });
+  const overridesQuery = useQuery({
+    queryKey: ["customer-delivery-zones", customerId],
+    queryFn: async () =>
+      (await api.get(`/customers/${customerId}/delivery-zones`)).data as {
+        items: { warehouseId: string; deliveryZone: { id: string; name: string } }[];
+      },
+  });
+
+  const setOverrideMutation = useMutation({
+    mutationFn: async ({ warehouseId, deliveryZoneId }: { warehouseId: string; deliveryZoneId: string | null }) =>
+      api.put(`/customers/${customerId}/delivery-zones/${warehouseId}`, { deliveryZoneId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customer-delivery-zones", customerId] }),
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo guardar el circuito para ese almacén"),
+  });
+
+  const warehouses = warehousesQuery.data?.items ?? [];
+  const zones = zonesQuery.data?.items ?? [];
+  const overrideByWarehouse = new Map((overridesQuery.data?.items ?? []).map((o) => [o.warehouseId, o.deliveryZone.id]));
+
+  if (warehouses.length <= 1) return null; // No aporta nada con un único almacén.
+
+  return (
+    <div className="border-t border-slate-200 pt-4">
+      <p className="text-sm font-semibold text-slate-700 mb-1">Circuito por almacén (excepciones)</p>
+      <p className="text-xs text-slate-500 mb-3">
+        Si este cliente recibe entregas desde más de un almacén y en alguno usa un circuito distinto al de arriba,
+        indícalo aquí — al planificar desde ese almacén concreto saldrá esta ruta en vez de la de por defecto.
+      </p>
+      <div className="space-y-2">
+        {warehouses.map((w) => (
+          <label key={w.id} className="flex items-center justify-between gap-3 text-sm">
+            <span className="text-slate-600">{w.name}</span>
+            <select
+              className={inputCls + " max-w-[220px]"}
+              value={overrideByWarehouse.get(w.id) ?? ""}
+              onChange={(e) => setOverrideMutation.mutate({ warehouseId: w.id, deliveryZoneId: e.target.value || null })}
+            >
+              <option value="">Usar el circuito por defecto</option>
+              {zones.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }

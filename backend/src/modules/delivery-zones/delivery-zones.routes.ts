@@ -80,8 +80,8 @@ deliveryZonesRouter.get(
         },
       },
     });
-    const withSchedule = items.map((z) => {
-      const scheduleNotes = [...new Set(z.rates.map((r) => r.scheduleNote).filter((n): n is string => !!n?.trim()))];
+    const withSchedule = items.map((z: any) => {
+      const scheduleNotes = [...new Set(z.rates.map((r: any) => r.scheduleNote).filter((n: string | null): n is string => !!n?.trim()))];
       const { rates, ...rest } = z;
       return { ...rest, scheduleNotes };
     });
@@ -135,11 +135,33 @@ deliveryZonesRouter.get(
       orderBy: [{ deliveryZone: { name: "asc" } }, { carrier: { legalName: "asc" } }, { validFrom: "desc" }],
       include: {
         deliveryZone: { select: { id: true, name: true, active: true, _count: { select: { customers: true } } } },
+        // Fase 15: se añaden aquí los datos base del transportista (ciudad,
+        // provincia, dirección, CP, teléfono, tipo de servicio, flota propia,
+        // temperatura, notas y jornada máxima) -- petición explícita de Raúl
+        // ("necesito poder editar los transportistas para hacer cambios en
+        // sus datos base"). El bug real era que el botón "Editar" solo
+        // existía para transportistas SIN circuito asignado todavía
+        // (TransportistasTab.tsx, tabla de abajo); en cuanto un transportista
+        // ya tenía su circuito+tarifa -- el caso normal -- desaparecía de esa
+        // lista y se quedaba sin ningún punto desde el que editar sus datos
+        // base. Ahora cada fila de ESTA tabla (una por circuito↔transportista)
+        // trae todos los campos que exige CarrierEditable, así que también
+        // puede abrir el mismo modal de edición.
         carrier: {
           select: {
             id: true,
             legalName: true,
             taxId: true,
+            city: true,
+            province: true,
+            address: true,
+            postalCode: true,
+            phone: true,
+            serviceType: true,
+            ownsFleet: true,
+            temperatureCapability: true,
+            notes: true,
+            maxRouteDurationHours: true,
             active: true,
             vehicleTypeOfferings: { select: { vehicleType: { select: { id: true, name: true } } } },
           },
@@ -185,7 +207,7 @@ deliveryZonesRouter.post(
     const existing = await prisma.deliveryZoneRate.findMany({
       where: { deliveryZoneId: zone.id, carrierId: data.carrierId },
     });
-    const clash = existing.find((r) => rangesOverlap(data.validFrom, data.validTo ?? null, r.validFrom, r.validTo));
+    const clash = existing.find((r: any) => rangesOverlap(data.validFrom, data.validTo ?? null, r.validFrom, r.validTo));
     if (clash) throw HttpError.conflict("La vigencia se solapa con una tarifa ya registrada para ese transportista en este circuito");
 
     const rate = await prisma.deliveryZoneRate.create({
@@ -215,7 +237,7 @@ deliveryZonesRouter.patch(
       const existing = await prisma.deliveryZoneRate.findMany({
         where: { deliveryZoneId: rate.deliveryZoneId, carrierId: rate.carrierId, id: { not: rate.id } },
       });
-      const clash = existing.find((r) => rangesOverlap(validFrom, validTo ?? null, r.validFrom, r.validTo));
+      const clash = existing.find((r: any) => rangesOverlap(validFrom, validTo ?? null, r.validFrom, r.validTo));
       if (clash) throw HttpError.conflict("La vigencia se solapa con otra tarifa de ese transportista en este circuito");
     }
 

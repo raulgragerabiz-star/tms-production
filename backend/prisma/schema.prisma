@@ -143,6 +143,9 @@ model Warehouse {
   // Fase 8: circuitos de reparto que parten de este almacén (opcional --
   // un circuito puede no tener almacén asignado todavía).
   deliveryZones    DeliveryZone[]
+  // Fase 15: circuito específico que un cliente tiene asignado CUANDO se le
+  // sirve desde este almacén concreto (ver modelo CustomerDeliveryZone).
+  customerZoneOverrides CustomerDeliveryZone[]
 
   @@index([companyId, active])
   @@map("warehouse")
@@ -265,6 +268,16 @@ model Customer {
   deliveryPoints DeliveryPoint[]
   orders         Order[]
   returnItems    ReturnItem[]
+  // Fase 15: petición explícita de Raúl -- "al seleccionar el almacén de
+  // salida, si cambiara el almacén pero en otro también tiene entregas ese
+  // cliente, figurará otra ruta distinta". Hasta ahora deliveryZoneId de
+  // arriba era el ÚNICO circuito del cliente, sin importar desde qué almacén
+  // se le sirve. Esta relación es aditiva: un cliente sin ninguna fila aquí
+  // sigue resolviendo su circuito exactamente igual que siempre (con
+  // deliveryZoneId como valor por defecto) -- ver
+  // customer-zone-resolution.ts, usado tanto en el tablero de Planificación
+  // como en el motor de comparación de transportistas.
+  warehouseZoneOverrides CustomerDeliveryZone[]
 
   @@unique([companyId, businessCode])
   @@index([deliveryZoneId])
@@ -694,9 +707,45 @@ model DeliveryZone {
   warehouse   Warehouse?         @relation(fields: [warehouseId], references: [id])
   customers   Customer[]
   rates       DeliveryZoneRate[]
+  // Fase 15: clientes que tienen ESTE circuito asignado específicamente para
+  // un almacén concreto (ver CustomerDeliveryZone) -- distinto de
+  // `customers`, que son los que lo tienen como circuito único/por defecto.
+  customerOverrides CustomerDeliveryZone[]
 
   @@unique([companyId, name])
   @@map("delivery_zone")
+}
+
+// Fase 15: circuito de reparto que un cliente tiene asignado CUANDO se le
+// sirve desde un almacén concreto -- petición explícita de Raúl a partir del
+// selector de Planificación: "al seleccionar el almacén de salida, si
+// cambiara el almacén pero en otro también tiene entregas ese cliente,
+// figurará otra ruta distinta". Antes de esta fase, Customer.deliveryZoneId
+// era el único circuito posible para un cliente, sin importar desde qué
+// almacén se le sirviera -- un cliente con reparto real desde dos almacenes
+// distintos (cada uno con su propio circuito) no se podía representar.
+// Totalmente aditivo: un cliente sin ninguna fila aquí sigue resolviendo su
+// circuito exactamente igual que siempre, usando Customer.deliveryZoneId
+// como valor por defecto (ver resolveDeliveryZonesForPairs en
+// customer-zone-resolution.ts, que es la única fuente de verdad para "qué
+// circuito tiene este cliente en este almacén" -- usada tanto por el tablero
+// de Planificación como por el motor de comparación de transportistas al
+// calcular `singleDeliveryZoneId`).
+model CustomerDeliveryZone {
+  id             String       @id @default(uuid())
+  customerId     String       @map("customer_id")
+  warehouseId    String       @map("warehouse_id")
+  deliveryZoneId String       @map("delivery_zone_id")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  customer       Customer     @relation(fields: [customerId], references: [id])
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id])
+  deliveryZone   DeliveryZone @relation(fields: [deliveryZoneId], references: [id])
+
+  @@unique([customerId, warehouseId])
+  @@index([warehouseId])
+  @@index([deliveryZoneId])
+  @@map("customer_delivery_zone")
 }
 
 // Tarifa que un transportista concreto tiene pactada para un circuito

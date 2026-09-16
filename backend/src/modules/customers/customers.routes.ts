@@ -158,6 +158,77 @@ customersRouter.put(
   })
 );
 
+// Fase 15: circuito de reparto por almacén -- petición explícita de Raúl
+// ("al seleccionar el almacén de salida, si cambiara el almacén pero en otro
+// también tiene entregas ese cliente, figurará otra ruta distinta"). Ver el
+// comentario largo en el modelo CustomerDeliveryZone (schema.prisma) y en
+// customer-zone-resolution.ts. `deliveryZoneId` de la ficha del cliente
+// sigue siendo el circuito POR DEFECTO -- estas filas son solo las
+// excepciones "para el almacén X, este cliente usa este otro circuito".
+customersRouter.get(
+  "/:id/delivery-zones",
+  asyncHandler(async (req, res) => {
+    const customer = await prisma.customer.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId, deletedAt: null },
+    });
+    if (!customer) throw HttpError.notFound("Cliente no encontrado");
+
+    const items = await prisma.customerDeliveryZone.findMany({
+      where: { customerId: customer.id },
+      include: {
+        warehouse: { select: { id: true, name: true } },
+        deliveryZone: { select: { id: true, name: true } },
+      },
+      orderBy: { warehouse: { name: "asc" } },
+    });
+    res.json({ items });
+  })
+);
+
+const zoneOverrideSchema = z.object({ deliveryZoneId: z.string().uuid().nullable() });
+
+customersRouter.put(
+  "/:id/delivery-zones/:warehouseId",
+  asyncHandler(async (req, res) => {
+    const companyId = req.auth!.companyId;
+    const customer = await prisma.customer.findFirst({
+      where: { id: req.params.id, companyId, deletedAt: null },
+    });
+    if (!customer) throw HttpError.notFound("Cliente no encontrado");
+
+    const warehouse = await prisma.warehouse.findFirst({
+      where: { id: req.params.warehouseId, companyId },
+    });
+    if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+
+    const { deliveryZoneId } = zoneOverrideSchema.parse(req.body);
+
+    // deliveryZoneId = null -> se quita la excepción para este almacén: el
+    // cliente vuelve a usar su circuito por defecto ahí.
+    if (!deliveryZoneId) {
+      await prisma.customerDeliveryZone.deleteMany({
+        where: { customerId: customer.id, warehouseId: warehouse.id },
+      });
+      res.status(204).send();
+      return;
+    }
+
+    const zone = await prisma.deliveryZone.findFirst({ where: { id: deliveryZoneId, companyId } });
+    if (!zone) throw HttpError.notFound("Circuito no encontrado");
+
+    const saved = await prisma.customerDeliveryZone.upsert({
+      where: { customerId_warehouseId: { customerId: customer.id, warehouseId: warehouse.id } },
+      create: { customerId: customer.id, warehouseId: warehouse.id, deliveryZoneId: zone.id },
+      update: { deliveryZoneId: zone.id },
+      include: {
+        warehouse: { select: { id: true, name: true } },
+        deliveryZone: { select: { id: true, name: true } },
+      },
+    });
+    res.json(saved);
+  })
+);
+
 // Fase 11: petición explícita de Raúl -- "quiero poder borrar cualquier dato
 // desde el perfil de administrador, incluidos datos que contengan
 // histórico". Sustituye la baja lógica anterior por un borrado en cascada
