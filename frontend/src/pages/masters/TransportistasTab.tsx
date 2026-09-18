@@ -68,7 +68,10 @@ interface AssignmentRow {
   unloadFee: string | null;
   partnerIncomePerTon: string | null;
   scheduleNote: string | null;
-  deliveryZone: { id: string; name: string; active: boolean; _count: { customers: number } };
+  // Fase 15 (correcciones): almacén al que pertenece este circuito -- puede
+  // ser null si el circuito todavía no tiene almacén asignado (ver
+  // WarehouseRoutesEditor en NewWarehouseModal.tsx para asignárselo).
+  deliveryZone: { id: string; name: string; active: boolean; _count: { customers: number }; warehouse: { id: string; name: string } | null };
   // Fase 15: datos base completos del transportista -- hacen falta para
   // poder abrir NewCarrierModal en modo edición también desde esta tabla
   // (ver comentario de cabecera y el "Editar" de cada fila, más abajo).
@@ -227,7 +230,10 @@ export default function TransportistasTab() {
               <tr key={a.id} className="hover:bg-brand-50/60 align-top">
                 <td className="px-3 py-2">
                   <p className="font-medium text-slate-800">{a.deliveryZone.name}</p>
-                  <p className="text-xs text-slate-400">{a.deliveryZone._count.customers} clientes</p>
+                  <p className="text-xs text-slate-400">
+                    {a.deliveryZone._count.customers} clientes ·{" "}
+                    {a.deliveryZone.warehouse ? a.deliveryZone.warehouse.name : "sin almacén asignado"}
+                  </p>
                 </td>
                 <td className="px-3 py-2">
                   <p className="font-medium text-slate-800">{a.carrier.legalName}</p>

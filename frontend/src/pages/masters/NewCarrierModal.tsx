@@ -27,6 +27,13 @@ export interface CarrierEditable {
   // Fase 8k: jornada laboral máxima (horas) admitida para los conductores de
   // este transportista -- ver comentario en el modelo Carrier (schema.prisma).
   maxRouteDurationHours: number | null;
+  // Fase 15 (más tarde): tipos de vehículo que este transportista declara
+  // poder aportar (`CarrierVehicleType`) -- petición explícita de Raúl para
+  // que este checklist esté en el propio modal de editar/crear, no solo en
+  // la tabla de "sin circuito asignado" de TransportistasTab.tsx. Opcional:
+  // si quien llama no lo trae (p. ej. un `CarrierRow` más simple en el
+  // futuro), el modal simplemente arranca sin ninguno marcado.
+  vehicleTypeOfferings?: { vehicleType: { id: string; name: string } }[];
 }
 
 interface Props {
@@ -94,15 +101,32 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
   const [validFrom, setValidFrom] = useState(todayIso());
   const [vehicleRows, setVehicleRows] = useState<Record<string, VehicleTariffRow>>({});
 
+  // Fase 15 (correcciones): tipos de vehículo que este transportista declara
+  // poder aportar EN GENERAL (`CarrierVehicleType`), independiente de a qué
+  // circuito(s) esté asignado -- petición explícita de Raúl ("la edicion y
+  // creacion del transporte sigue indicando solo estas tipologias de
+  // servicio, no el listado de los vehiculos que se estipularon ni
+  // multiseleccion para elegirlos"). Antes esto solo se podía marcar desde la
+  // tabla "sin circuito asignado" de TransportistasTab.tsx -- ahora vive
+  // también aquí, visible tanto al crear como al editar.
+  const [vehicleTypeIds, setVehicleTypeIds] = useState<Set<string>>(new Set());
+
+  // Las dos queries hacían falta solo para el bloque "Circuito y tarifas"
+  // (solo al crear), pero el nuevo checklist de tipos de vehículo aportados
+  // hace falta también al editar -- así que ahora se piden siempre que el
+  // modal esté abierto.
   const { data: zonesData } = useQuery({
     queryKey: ["delivery-zones"],
-    queryFn: async () => (await api.get("/delivery-zones")).data as { items: { id: string; name: string }[] },
-    enabled: open && !isEdit,
+    queryFn: async () =>
+      (await api.get("/delivery-zones")).data as {
+        items: { id: string; name: string; warehouse: { id: string; name: string } | null }[];
+      },
+    enabled: open,
   });
   const { data: vehicleTypesData } = useQuery({
     queryKey: ["vehicle-types"],
     queryFn: async () => (await api.get("/vehicles/types")).data as { items: { id: string; name: string }[] },
-    enabled: open && !isEdit,
+    enabled: open,
   });
 
   useEffect(() => {
@@ -122,6 +146,7 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
     setZoneId("");
     setValidFrom(todayIso());
     setVehicleRows({});
+    setVehicleTypeIds(new Set((carrier?.vehicleTypeOfferings ?? []).map((o) => o.vehicleType.id)));
   }, [open, carrier]);
 
   function toggleVehicleRow(vehicleTypeId: string, enabled: boolean) {
@@ -129,6 +154,43 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
   }
   function updateVehicleRow(vehicleTypeId: string, field: keyof Omit<VehicleTariffRow, "enabled">, value: string) {
     setVehicleRows((prev) => ({ ...prev, [vehicleTypeId]: { ...(prev[vehicleTypeId] ?? emptyVehicleRow), [field]: value } }));
+  }
+
+  // Fase 15 (correcciones): al editar, cada checkbox se guarda al instante
+  // (mismo patrón que `toggleVehicleTypeMutation` en TransportistasTab.tsx)
+  // -- no hace falta pulsar "Guardar cambios" para que quede registrado. Al
+  // crear, todavía no hay `carrier.id`, así que solo se actualiza el estado
+  // local y se manda todo junto en `mutationFn` tras crear el transportista.
+  const toggleVehicleTypeMutation = useMutation({
+    mutationFn: async ({ vehicleTypeId, enabled }: { vehicleTypeId: string; enabled: boolean }) => {
+      if (enabled) return (await api.post(`/carriers/${carrier!.id}/vehicle-types/${vehicleTypeId}`)).data;
+      return (await api.delete(`/carriers/${carrier!.id}/vehicle-types/${vehicleTypeId}`)).data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["carriers"] });
+      queryClient.invalidateQueries({ queryKey: ["delivery-zone-assignments"] });
+    },
+    onError: (err: any, { vehicleTypeId, enabled }) => {
+      // Revertimos el checkbox local si la llamada falla, para no dejar la
+      // pantalla mintiendo sobre lo que hay guardado de verdad.
+      setVehicleTypeIds((prev) => {
+        const next = new Set(prev);
+        if (enabled) next.delete(vehicleTypeId);
+        else next.add(vehicleTypeId);
+        return next;
+      });
+      onError(err?.response?.data?.message ?? "No se pudo actualizar el tipo de vehículo");
+    },
+  });
+
+  function toggleVehicleTypeOffering(vehicleTypeId: string, enabled: boolean) {
+    setVehicleTypeIds((prev) => {
+      const next = new Set(prev);
+      if (enabled) next.add(vehicleTypeId);
+      else next.delete(vehicleTypeId);
+      return next;
+    });
+    if (isEdit) toggleVehicleTypeMutation.mutate({ vehicleTypeId, enabled });
   }
 
   const mutation = useMutation({
@@ -154,6 +216,28 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
 
       const created = (await api.post("/carriers", payload)).data;
       let partialWarning: string | null = null;
+      // Se acumula sobre `partialWarning` (con salto de línea) en vez de
+      // pisarlo, para no perder un aviso si fallan varias cosas a la vez.
+      const appendWarning = (msg: string) => {
+        partialWarning = partialWarning ? `${partialWarning}\n${msg}` : msg;
+      };
+
+      // Fase 15 (correcciones): tipos de vehículo aportados en general
+      // (independientes del circuito) -- se guardan tras crear, igual que el
+      // circuito+tarifas de más abajo. Un fallo aquí tampoco deshace el alta.
+      if (vehicleTypeIds.size > 0) {
+        const failedOfferings: string[] = [];
+        for (const vehicleTypeId of vehicleTypeIds) {
+          try {
+            await api.post(`/carriers/${created.id}/vehicle-types/${vehicleTypeId}`);
+          } catch {
+            failedOfferings.push(vehicleTypesData?.items.find((vt) => vt.id === vehicleTypeId)?.name ?? vehicleTypeId);
+          }
+        }
+        if (failedOfferings.length > 0) {
+          appendWarning(`No se pudieron guardar estos tipos de vehículo: ${failedOfferings.join(", ")}. Márcalos de nuevo desde "Editar".`);
+        }
+      }
 
       // Fase 15: circuito + tipos de vehículo + tarifas en el mismo alta,
       // solo si Raúl ha elegido un circuito. Si algo falla a partir de aquí
@@ -163,7 +247,7 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
       if (zoneId) {
         const enabledEntries = Object.entries(vehicleRows).filter(([, r]) => r.enabled);
         if (enabledEntries.length === 0) {
-          partialWarning = "Transportista creado, pero no se asignó ningún circuito: marca al menos un tipo de vehículo o hazlo después desde \"+ Añadir asignación\".";
+          appendWarning("No se asignó ningún circuito: marca al menos un tipo de vehículo o hazlo después desde \"+ Añadir asignación\".");
         } else {
           try {
             const rate = (
@@ -178,9 +262,9 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
               });
             }
           } catch (err: any) {
-            partialWarning = `Transportista creado, pero no se pudo guardar el circuito/tarifa (${
-              err?.response?.data?.message ?? "error desconocido"
-            }). Complétalo desde "Ver ficha".`;
+            appendWarning(
+              `No se pudo guardar el circuito/tarifa (${err?.response?.data?.message ?? "error desconocido"}). Complétalo desde "Ver ficha".`
+            );
           }
         }
       }
@@ -189,7 +273,13 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
     onSuccess: ({ partialWarning }) => {
       queryClient.invalidateQueries({ queryKey: ["carriers"] });
       queryClient.invalidateQueries({ queryKey: ["delivery-zone-assignments"] });
-      onSuccess(partialWarning ?? (isEdit ? "Transportista actualizado correctamente" : "Transportista creado correctamente, con su circuito y tarifas"));
+      onSuccess(
+        partialWarning
+          ? `Transportista creado, pero: ${partialWarning}`
+          : isEdit
+          ? "Transportista actualizado correctamente"
+          : "Transportista creado correctamente, con su circuito y tarifas"
+      );
       onClose();
     },
     onError: (err: any) =>
@@ -280,6 +370,37 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
           <textarea className={inputCls} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </Field>
 
+        {/* Fase 15 (correcciones): tipos de vehículo que este transportista
+            aporta EN GENERAL -- petición explícita de Raúl ("no [aparece] el
+            listado de los vehiculos que se estipularon ni multiseleccion
+            para elegirlos"). Visible tanto al crear como al editar; al
+            editar cada checkbox se guarda al instante (ver
+            toggleVehicleTypeMutation), al crear se manda todo junto con el
+            alta del transportista. */}
+        <div className="border-t border-slate-200 pt-4">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Tipos de vehículo que aporta</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Capacidad declarada de este transportista, independiente de a qué circuito(s) esté asignado.
+          </p>
+          {!vehicleTypesData?.items.length ? (
+            <p className="text-xs text-slate-400">No hay tipos de vehículo dados de alta todavía.</p>
+          ) : (
+            <div className="flex flex-wrap gap-x-4 gap-y-2">
+              {vehicleTypesData.items.map((vt: { id: string; name: string }) => (
+                <label key={vt.id} className="flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={vehicleTypeIds.has(vt.id)}
+                    onChange={(e) => toggleVehicleTypeOffering(vt.id, e.target.checked)}
+                    className="rounded border-slate-300"
+                  />
+                  {vt.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Fase 15: circuito + tipos de vehículo + tarifa, en el mismo alta --
             petición explícita de Raúl ("al crear uno poder asignarle ruta y
             tipologias de vehiculo... mas las tarifas. para hacer todo en un
@@ -294,12 +415,15 @@ export default function NewCarrierModal({ open, carrier, onClose, onSuccess, onE
               tarifa de cada uno — se crea todo junto al guardar. Si lo dejas sin elegir, podrás asignárselo más tarde
               desde "+ Añadir asignación".
             </p>
-            <Field label="Circuito de reparto">
+            <Field
+              label="Circuito de reparto"
+              hint="Entre paréntesis, el almacén al que pertenece cada circuito (Fase 15) -- ayuda a no confundir circuitos con el mismo nombre en almacenes distintos."
+            >
               <select className={inputCls} value={zoneId} onChange={(e) => setZoneId(e.target.value)}>
                 <option value="">Sin asignar todavía</option>
-                {zonesData?.items.map((z: { id: string; name: string }) => (
+                {zonesData?.items.map((z) => (
                   <option key={z.id} value={z.id}>
-                    {z.name}
+                    {z.name} {z.warehouse ? `(${z.warehouse.name})` : "(sin almacén)"}
                   </option>
                 ))}
               </select>

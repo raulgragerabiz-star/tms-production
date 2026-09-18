@@ -134,7 +134,20 @@ deliveryZonesRouter.get(
       where: { deliveryZone: { companyId: req.auth!.companyId } },
       orderBy: [{ deliveryZone: { name: "asc" } }, { carrier: { legalName: "asc" } }, { validFrom: "desc" }],
       include: {
-        deliveryZone: { select: { id: true, name: true, active: true, _count: { select: { customers: true } } } },
+        // Fase 15 (correcciones): se añade el almacén del circuito -- petición
+        // explícita de Raúl ("tampoco permite indicar a que almacen pertenece
+        // a parte de la ruta marcada"). `DeliveryZone.warehouseId` es opcional
+        // (Fase 8), así que puede venir `null` para un circuito todavía sin
+        // almacén asignado -- el frontend ya sabe pintar ese caso.
+        deliveryZone: {
+          select: {
+            id: true,
+            name: true,
+            active: true,
+            _count: { select: { customers: true } },
+            warehouse: { select: { id: true, name: true } },
+          },
+        },
         // Fase 15: se añaden aquí los datos base del transportista (ciudad,
         // provincia, dirección, CP, teléfono, tipo de servicio, flota propia,
         // temperatura, notas y jornada máxima) -- petición explícita de Raúl

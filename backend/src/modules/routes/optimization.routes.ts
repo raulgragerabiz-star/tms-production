@@ -176,7 +176,7 @@ optimizationRouter.post(
     // Si todas las paradas comparten un único cliente, se propaga a la resolución para
     // que una eventual tarifa `by_customer` pueda ganar prioridad. Igual con la
     // provincia: si todas las paradas caen en la misma, se habilita `by_zone`.
-    const customerIds = new Set(route.stops.map((s: any) => s.order.customerId as string));
+    const customerIds = new Set<string>(route.stops.map((s: any) => s.order.customerId as string));
     const singleCustomerId: string | undefined = customerIds.size === 1 ? [...customerIds][0] : undefined;
     const provinces = new Set(route.stops.map((s: any) => s.order.deliveryPoint.province).filter(Boolean));
     const singleProvince = provinces.size === 1 ? ([...provinces][0] as string) : undefined;
@@ -193,9 +193,20 @@ optimizationRouter.post(
     // siempre de un único almacén (`route.warehouseId`). Se resuelve el
     // circuito EFECTIVO de cada parada para ese almacén antes de comprobar si
     // todas coinciden.
-    const stopZoneMap = await resolveDeliveryZonesForPairs(
-      route.stops.map((s: any) => ({ customerId: s.order.customerId as string, warehouseId: route.warehouseId }))
-    );
+    // Envuelto en try/catch A PROPÓSITO, mismo criterio que en
+    // `/routes/planner-board`: un fallo resolviendo el circuito por
+    // cliente+almacén nunca debe impedir que el comparador devuelva sus
+    // candidatos -- se degrada a "sin circuito único" (mismo efecto que una
+    // ruta con paradas de más de un circuito) en vez de romper la respuesta
+    // entera.
+    let stopZoneMap = new Map<string, { id: string; name: string } | null>();
+    try {
+      stopZoneMap = await resolveDeliveryZonesForPairs(
+        route.stops.map((s: any) => ({ customerId: s.order.customerId as string, warehouseId: route.warehouseId }))
+      );
+    } catch (err) {
+      console.warn("optimization/simulate: no se pudo resolver el circuito por cliente+almacén", err);
+    }
     const deliveryZoneIds = new Set(
       route.stops
         .map((s: any) => stopZoneMap.get(zonePairKey(s.order.customerId, route.warehouseId))?.id)
@@ -207,13 +218,13 @@ optimizationRouter.post(
     // poder identificar en la respuesta a los que se quedan SIN tarifa
     // vigente (ver `unresolvedCandidates` más abajo), no solo a los que sí
     // consiguen un coste.
-    const candidateCarrierNames = new Map(
+    const candidateCarrierNames = new Map<string, string>(
       (
         await prisma.carrier.findMany({
           where: { id: { in: [...qualifyingByCarrier.keys()] } },
           select: { id: true, legalName: true },
         })
-      ).map((c: any) => [c.id, c.legalName])
+      ).map((c: any) => [c.id as string, c.legalName as string])
     );
 
     const results = [];

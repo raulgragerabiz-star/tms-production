@@ -202,6 +202,14 @@ routesRouter.get(
     // valor por defecto (el mismo de siempre -- nada cambia si no se manda),
     // para poder elegir otro estado ex profeso al hacer pruebas.
     const status = (req.query.status as string | undefined) ?? "validated";
+    // Fase 15 (más tarde): filtro por ruta/circuito -- petición explícita de
+    // Raúl ("no se ve que haya una opcion de seleccionar por ruta a parte de
+    // por almacen"). "sin-circuito" es el valor especial ya usado en
+    // Clientes/Pedidos para los que no tienen circuito resuelto todavía. Se
+    // aplica en memoria, DESPUÉS de resolver `pendingZoneMap` más abajo (la
+    // ruta de un pedido no es una columna de `Order`, se calcula por
+    // cliente+almacén).
+    const deliveryZoneFilter = req.query.deliveryZoneId as string | undefined;
 
     const pendingOrders = await prisma.order.findMany({
       where: {
@@ -330,15 +338,35 @@ routesRouter.get(
     // Planificación distinga la ruta real de un cliente según desde qué
     // almacén se le sirva en ese pedido concreto, en vez de un único circuito
     // fijo por cliente (ver customer-zone-resolution.ts).
-    const pendingZoneMap = await resolveDeliveryZonesForPairs(
-      pendingOrders.map((o) => ({ customerId: o.customerId, warehouseId: o.warehouseId }))
-    );
+    //
+    // Envuelto en try/catch A PROPÓSITO: esta columna es informativa y NUNCA
+    // debe poder tirar abajo la lista de pedidos pendientes de planificar,
+    // que es la función principal de esta pantalla. Si falla por lo que sea
+    // (p. ej. `npx prisma db push` de la Fase 15 todavía no aplicado en este
+    // entorno concreto), se degrada a "sin circuito" para todos en vez de
+    // dejar el tablero entero en blanco -- mismo criterio de "degradar con
+    // aviso, no bloquear" ya establecido en la Fase 14.
+    let pendingZoneMap = new Map<string, { id: string; name: string } | null>();
+    try {
+      pendingZoneMap = await resolveDeliveryZonesForPairs(
+        pendingOrders.map((o) => ({ customerId: o.customerId, warehouseId: o.warehouseId }))
+      );
+    } catch (err) {
+      console.warn("planner-board: no se pudo resolver el circuito por cliente+almacén (columna Ruta)", err);
+    }
+
+    let pendingWithZone = pendingOrders.map((o) => ({
+      ...withOrderTotals(o),
+      deliveryZone: pendingZoneMap.get(zonePairKey(o.customerId, o.warehouseId)) ?? null,
+    }));
+    if (deliveryZoneFilter) {
+      pendingWithZone = pendingWithZone.filter((o) =>
+        deliveryZoneFilter === "sin-circuito" ? !o.deliveryZone : o.deliveryZone?.id === deliveryZoneFilter
+      );
+    }
 
     res.json({
-      pendingOrders: pendingOrders.map((o) => ({
-        ...withOrderTotals(o),
-        deliveryZone: pendingZoneMap.get(zonePairKey(o.customerId, o.warehouseId)) ?? null,
-      })),
+      pendingOrders: pendingWithZone,
       routes: routesWithSuggestion.map((r) => ({
         ...r,
         stops: r.stops.map((s) => ({ ...s, order: withOrderTotals(s.order) })),

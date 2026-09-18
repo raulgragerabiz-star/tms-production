@@ -133,14 +133,28 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
   // al navegar fuera es razonable y más seguro que arrastrarla.
   const status = usePlannerFiltersStore((s) => s.orderStatus);
   const setStatus = usePlannerFiltersStore((s) => s.setOrderStatus);
+  // Fase 15 (más tarde): filtro por ruta -- petición explícita de Raúl.
+  const deliveryZoneId = usePlannerFiltersStore((s) => s.deliveryZoneId);
+  const setDeliveryZoneId = usePlannerFiltersStore((s) => s.setDeliveryZoneId);
 
-  const queryKey = ["planner-board", warehouseId, dateFrom, dateTo, status];
+  const zonesQuery = useQuery({
+    queryKey: ["delivery-zones"],
+    queryFn: async () => (await api.get("/delivery-zones")).data as { items: { id: string; name: string }[] },
+  });
+
+  const queryKey = ["planner-board", warehouseId, dateFrom, dateTo, status, deliveryZoneId];
   const { data, isLoading } = useQuery({
     queryKey,
     queryFn: async () =>
       (
         await api.get("/routes/planner-board", {
-          params: { warehouseId: warehouseId || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined, status },
+          params: {
+            warehouseId: warehouseId || undefined,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            status,
+            deliveryZoneId: deliveryZoneId || undefined,
+          },
         })
       ).data as { pendingOrders: PendingOrder[] },
   });
@@ -243,24 +257,47 @@ export default function PlanificacionTab({ warehouseId, dateFrom, dateTo, onPlan
         </p>
       )}
 
-      <div className="flex items-center justify-between mb-3 shrink-0">
-        <label className="flex items-center gap-2 text-xs text-slate-500">
-          Estado del pedido
-          <select
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setSelected(new Set());
-            }}
-            className="rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
-          >
-            {statusOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      <div className="flex items-center justify-between mb-3 shrink-0 flex-wrap gap-2">
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            Estado del pedido
+            <select
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setSelected(new Set());
+              }}
+              className="rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
+            >
+              {statusOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {/* Fase 15 (más tarde): filtro por ruta, a parte del de almacén --
+              petición explícita de Raúl. */}
+          <label className="flex items-center gap-2 text-xs text-slate-500">
+            Ruta
+            <select
+              value={deliveryZoneId}
+              onChange={(e) => {
+                setDeliveryZoneId(e.target.value);
+                setSelected(new Set());
+              }}
+              className="rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
+            >
+              <option value="">Todas las rutas</option>
+              <option value="sin-circuito">Sin circuito</option>
+              {zonesQuery.data?.items.map((z) => (
+                <option key={z.id} value={z.id}>
+                  {z.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         {status !== "validated" && (
           <p className="text-xs text-amber-600">Planificación de prueba: normalmente aquí solo se ve "Validado".</p>
         )}

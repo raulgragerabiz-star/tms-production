@@ -33,6 +33,13 @@ interface PlannerFiltersState {
   dateTo: string;
   view: PlannerView;
   orderStatus: string;
+  // Fase 15 (más tarde): filtro por ruta/circuito de reparto -- petición
+  // explícita de Raúl ("no se ve que haya una opcion de seleccionar por
+  // ruta a parte de por almacen"). "" = todas, "sin-circuito" = sin
+  // circuito resuelto para ese almacén. Vive aquí, no en useState local,
+  // por el mismo motivo que orderStatus (Fase 8j): no perderlo al cambiar
+  // de pestaña dentro del Planificador.
+  deliveryZoneId: string;
   setWarehouseId: (id: string) => void;
   setDateFrom: (date: string) => void;
   setDateTo: (date: string) => void;
@@ -40,6 +47,7 @@ interface PlannerFiltersState {
   setSingleDate: (date: string) => void;
   setView: (view: PlannerView) => void;
   setOrderStatus: (status: string) => void;
+  setDeliveryZoneId: (id: string) => void;
 }
 
 export const usePlannerFiltersStore = create<PlannerFiltersState>((set) => ({
@@ -48,10 +56,12 @@ export const usePlannerFiltersStore = create<PlannerFiltersState>((set) => ({
   dateTo: today,
   view: "planificacion",
   orderStatus: "validated",
+  deliveryZoneId: "",
   setWarehouseId: (warehouseId) => set({ warehouseId }),
   setDateFrom: (dateFrom) => set({ dateFrom }),
   setDateTo: (dateTo) => set({ dateTo }),
   setSingleDate: (date) => set({ dateFrom: date, dateTo: date }),
   setView: (view) => set({ view }),
   setOrderStatus: (orderStatus) => set({ orderStatus }),
+  setDeliveryZoneId: (deliveryZoneId) => set({ deliveryZoneId }),
 }));

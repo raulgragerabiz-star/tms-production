@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import Modal from "@/components/Modal";
 import Field from "@/components/Field";
@@ -141,6 +141,8 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
           />
         </Field>
 
+        {isEdit && <WarehouseRoutesEditor warehouseId={warehouse!.id} onError={onError} />}
+
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">
             Cancelar
@@ -155,5 +157,126 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
         </div>
       </form>
     </Modal>
+  );
+}
+
+// Fase 15 (más tarde): petición explícita de Raúl -- "en la parte almacenes,
+// la creacion y edicion deberia permitir asignarle las rutas que le
+// corresponde, de un listado que haya creado o añadir una nueva ruta en
+// caso de que no exista". `DeliveryZone.warehouseId` ya existía en el
+// schema desde la Fase 8 (opcional) pero no había ninguna pantalla desde la
+// que gestionarlo con este almacén como punto de partida -- solo se podía
+// tocar indirectamente al crear/editar el propio circuito. Solo al editar
+// (hace falta el id del almacén ya guardado).
+interface ZoneOption {
+  id: string;
+  name: string;
+  warehouse: { id: string; name: string } | null;
+}
+
+function WarehouseRoutesEditor({ warehouseId, onError }: { warehouseId: string; onError: (message: string) => void }) {
+  const queryClient = useQueryClient();
+  const [newZoneName, setNewZoneName] = useState("");
+
+  const zonesQuery = useQuery({
+    queryKey: ["delivery-zones"],
+    queryFn: async () => (await api.get("/delivery-zones")).data as { items: ZoneOption[] },
+  });
+  const zones = zonesQuery.data?.items ?? [];
+  const assigned = zones.filter((z) => z.warehouse?.id === warehouseId);
+  const others = zones.filter((z) => z.warehouse?.id !== warehouseId);
+  const [otherZoneId, setOtherZoneId] = useState("");
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["delivery-zones"] });
+
+  const assignMutation = useMutation({
+    mutationFn: async (zoneId: string) => api.patch(`/delivery-zones/${zoneId}`, { warehouseId }),
+    onSuccess: () => {
+      invalidate();
+      setOtherZoneId("");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo asignar la ruta a este almacén"),
+  });
+  const unassignMutation = useMutation({
+    mutationFn: async (zoneId: string) => api.patch(`/delivery-zones/${zoneId}`, { warehouseId: null }),
+    onSuccess: invalidate,
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo quitar la ruta de este almacén"),
+  });
+  const createMutation = useMutation({
+    mutationFn: async (name: string) => api.post("/delivery-zones", { name, warehouseId }),
+    onSuccess: () => {
+      invalidate();
+      setNewZoneName("");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo crear la ruta"),
+  });
+
+  return (
+    <div className="border-t border-slate-200 pt-4">
+      <p className="text-sm font-semibold text-slate-700 mb-1">Rutas de este almacén</p>
+      <p className="text-xs text-slate-500 mb-3">
+        Circuitos de reparto que salen de aquí -- asigna uno ya creado (estuviera libre o perteneciendo a otro almacén) o
+        crea uno nuevo directamente para este almacén.
+      </p>
+
+      {assigned.length === 0 ? (
+        <p className="text-xs text-slate-400 mb-3">Todavía no hay ninguna ruta asignada a este almacén.</p>
+      ) : (
+        <ul className="space-y-1 mb-3">
+          {assigned.map((z) => (
+            <li key={z.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
+              <span className="text-slate-700">{z.name}</span>
+              <button
+                type="button"
+                onClick={() => unassignMutation.mutate(z.id)}
+                className="text-xs text-red-500 hover:text-red-600 font-medium"
+              >
+                Quitar
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex items-center gap-2 mb-2">
+        <select
+          value={otherZoneId}
+          onChange={(e) => setOtherZoneId(e.target.value)}
+          className="flex-1 rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
+        >
+          <option value="">Asignar una ruta ya creada…</option>
+          {others.map((z) => (
+            <option key={z.id} value={z.id}>
+              {z.name} {z.warehouse ? `(actualmente: ${z.warehouse.name})` : "(sin almacén)"}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={!otherZoneId || assignMutation.isPending}
+          onClick={() => assignMutation.mutate(otherZoneId)}
+          className="text-sm px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+        >
+          Asignar
+        </button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          value={newZoneName}
+          onChange={(e) => setNewZoneName(e.target.value)}
+          placeholder="Nombre de la ruta nueva (p. ej. MAD1)"
+          className="flex-1 rounded-lg border border-slate-300 text-sm px-2.5 py-1.5"
+        />
+        <button
+          type="button"
+          disabled={!newZoneName.trim() || createMutation.isPending}
+          onClick={() => createMutation.mutate(newZoneName.trim())}
+          className="text-sm px-3 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+        >
+          + Nueva ruta
+        </button>
+      </div>
+    </div>
   );
 }
