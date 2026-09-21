@@ -54,8 +54,12 @@ export function computeDemandPercentiles(samples: WeeklySample[]): DemandPercent
   };
 }
 
-/** Percentil por interpolación lineal sobre un array YA ORDENADO ascendentemente. */
-function percentile(sortedValues: number[], p: number): number {
+/**
+ * Percentil por interpolación lineal sobre un array YA ORDENADO ascendentemente.
+ * Exportada (Fase 17) para reutilizarla en fleet-sizing.service.ts -- mismo
+ * cálculo de percentiles, sobre pesos por salida en vez de por semana.
+ */
+export function percentile(sortedValues: number[], p: number): number {
   if (sortedValues.length === 1) return sortedValues[0];
   const index = p * (sortedValues.length - 1);
   const lower = Math.floor(index);

@@ -158,22 +158,31 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
       const flatFee = Number(vehicleRate.flatFee ?? 0);
       const unloadFee = Number(vehicleRate.unloadFee ?? 0);
       const pricePerTon = Number(vehicleRate.pricePerTon ?? 0);
+      // Fase 17: petición explícita de Raúl -- "base, €/tn y €/km seran
+      // costes para bigmat". Mismo criterio que pricePerTon: si no hay km de
+      // la ruta disponibles (params.km), simplemente no aporta nada, igual
+      // que el resto de componentes opcionales de este nivel.
+      const pricePerKm = Number(vehicleRate.pricePerKm ?? 0);
       const partnerIncomePerTon = vehicleRate.partnerIncomePerTon != null ? Number(vehicleRate.partnerIncomePerTon) : 0;
       const tons = (params.weightKg ?? 0) / 1000;
       const stopsCount = params.stops ?? 0;
+      const km = params.km ?? 0;
       const pricePerTonAmount = pricePerTon * tons;
+      const pricePerKmAmount = pricePerKm * km;
       // Fase 14: petición explícita de Raúl (aclarando el diseño original de
       // la Fase 8T) -- "sumar tarifa base y €/tn como coste camión y
       // descarga + ingreso €/tn socios como beneficio empresa". Antes se
-      // sumaban los 4 campos como coste al transportista; ahora:
-      //   - coste camión (lo que paga BigMat al transportista): flatFee + €/TN.
+      // sumaban los 4 campos como coste al transportista; ahora, con el
+      // €/km añadido en Fase 17 ("base, €/tn y €/km seran costes para
+      // bigmat, y €/descarga y €/tn socio seran ingresos para bigmat"):
+      //   - coste camión (lo que paga BigMat al transportista): flatFee + €/TN + €/km.
       //   - beneficio empresa (lo que BigMat cobra de más al cliente por el
       //     envío, no pagado al transportista): Descarga × nº de paradas +
       //     Ingreso €/TN Socios × toneladas.
       const unloadFeeTotal = unloadFee * stopsCount;
       const partnerIncomeAmount = partnerIncomePerTon * tons;
       baseRateId = vehicleRate.id;
-      baseAmount = flatFee + pricePerTonAmount;
+      baseAmount = flatFee + pricePerTonAmount + pricePerKmAmount;
       baseMargin = unloadFeeTotal + partnerIncomeAmount;
       baseBreakdown = {
         source: "by_delivery_zone_vehicle",
@@ -183,6 +192,9 @@ export async function resolveShipmentCost(params: ResolveShipmentCostParams): Pr
         pricePerTon,
         weightKg: params.weightKg ?? 0,
         pricePerTonAmount,
+        pricePerKm,
+        km,
+        pricePerKmAmount,
         // Beneficio de BigMat (no forma parte de `estimatedCost`, ver
         // `estimatedMargin` más abajo) -- se deja también aquí, en el
         // desglose, para poder auditar de dónde sale cada céntimo.

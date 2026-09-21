@@ -24,6 +24,10 @@ export interface VehicleRateRow {
   vehicleTypeId: string;
   flatFee: string | null;
   pricePerTon: string | null;
+  // Fase 17: petición explícita de Raúl -- "tarifas acordadas (€/base, €/tn,
+  // €/km, €/descarga, €tn socio)". Coste para BigMat, igual que flatFee y
+  // pricePerTon (ver rate-resolution.service.ts).
+  pricePerKm: string | null;
   unloadFee: string | null;
   partnerIncomePerTon: string | null;
   vehicleType: { id: string; name: string };
@@ -53,17 +57,19 @@ const numCellCls =
 interface Draft {
   flatFee: string;
   pricePerTon: string;
+  pricePerKm: string;
   unloadFee: string;
   partnerIncomePerTon: string;
 }
 
-const emptyDraft: Draft = { flatFee: "", pricePerTon: "", unloadFee: "", partnerIncomePerTon: "" };
+const emptyDraft: Draft = { flatFee: "", pricePerTon: "", pricePerKm: "", unloadFee: "", partnerIncomePerTon: "" };
 
 function draftFromRate(rate: VehicleRateRow | undefined): Draft {
   if (!rate) return { ...emptyDraft };
   return {
     flatFee: rate.flatFee ?? "",
     pricePerTon: rate.pricePerTon ?? "",
+    pricePerKm: rate.pricePerKm ?? "",
     unloadFee: rate.unloadFee ?? "",
     partnerIncomePerTon: rate.partnerIncomePerTon ?? "",
   };
@@ -96,6 +102,7 @@ export default function ZoneAssignmentFichaModal({ open, assignment, vehicleType
       const payload = {
         flatFee: draft.flatFee === "" ? null : Number(draft.flatFee),
         pricePerTon: draft.pricePerTon === "" ? null : Number(draft.pricePerTon),
+        pricePerKm: draft.pricePerKm === "" ? null : Number(draft.pricePerKm),
         unloadFee: draft.unloadFee === "" ? null : Number(draft.unloadFee),
         partnerIncomePerTon: draft.partnerIncomePerTon === "" ? null : Number(draft.partnerIncomePerTon),
       };
@@ -154,9 +161,13 @@ export default function ZoneAssignmentFichaModal({ open, assignment, vehicleType
         {!assignment.carrier.active && <Chip color="slate">Baja</Chip>}
       </div>
 
-      <p className="text-xs text-slate-500 mb-3">
+      <p className="text-xs text-slate-500 mb-1">
         Marca los tipos de vehículo que este transportista aporta para este circuito y fija su tarifa. El motor de
         enrutado aplicará la tarifa del tipo de vehículo que finalmente se seleccione al asignar la ruta.
+      </p>
+      <p className="text-xs text-slate-400 mb-3">
+        Tarifa plana, €/Tn y €/km son coste para BigMat (lo que se paga al transportista); Descarga e Ingreso €/tn
+        socios son ingreso para BigMat (lo que se cobra de más al cliente).
       </p>
 
       {vehicleTypes.length === 0 ? (
@@ -168,10 +179,21 @@ export default function ZoneAssignmentFichaModal({ open, assignment, vehicleType
               <tr>
                 <th className="text-left px-3 py-2 w-8"></th>
                 <th className="text-left px-3 py-2">Tipo de vehículo</th>
-                <th className="text-right px-2 py-2">Tarifa plana €</th>
-                <th className="text-right px-2 py-2">€/Tn</th>
-                <th className="text-right px-2 py-2">Descarga €</th>
-                <th className="text-right px-2 py-2">Ingreso €/tn socios</th>
+                <th className="text-right px-2 py-2" title="Coste para BigMat">
+                  Tarifa plana €
+                </th>
+                <th className="text-right px-2 py-2" title="Coste para BigMat">
+                  €/Tn
+                </th>
+                <th className="text-right px-2 py-2" title="Coste para BigMat">
+                  €/km
+                </th>
+                <th className="text-right px-2 py-2" title="Ingreso para BigMat">
+                  Descarga €
+                </th>
+                <th className="text-right px-2 py-2" title="Ingreso para BigMat">
+                  Ingreso €/tn socios
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -209,6 +231,18 @@ export default function ZoneAssignmentFichaModal({ open, assignment, vehicleType
                         disabled={!enabled}
                         value={draft.pricePerTon}
                         onChange={(e) => updateDraftField(vt.id, "pricePerTon", e.target.value)}
+                        onBlur={() => handleFieldBlur(vt.id)}
+                        className={numCellCls}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        disabled={!enabled}
+                        value={draft.pricePerKm}
+                        onChange={(e) => updateDraftField(vt.id, "pricePerKm", e.target.value)}
                         onBlur={() => handleFieldBlur(vt.id)}
                         className={numCellCls}
                       />

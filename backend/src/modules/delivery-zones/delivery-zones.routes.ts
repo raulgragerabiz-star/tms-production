@@ -286,9 +286,12 @@ deliveryZonesRouter.delete(
 );
 
 // Fase 8T: tarifa por tipo de vehículo dentro de una ficha (DeliveryZoneRate).
+// Fase 17: + pricePerKm ("€/km", coste para BigMat -- petición explícita de
+// Raúl, ver comentario en schema.prisma y rate-resolution.service.ts).
 const vehicleRateSchema = z.object({
   flatFee: z.number().nonnegative().optional().nullable(),
   pricePerTon: z.number().nonnegative().optional().nullable(),
+  pricePerKm: z.number().nonnegative().optional().nullable(),
   unloadFee: z.number().nonnegative().optional().nullable(),
   partnerIncomePerTon: z.number().nonnegative().optional().nullable(),
 });

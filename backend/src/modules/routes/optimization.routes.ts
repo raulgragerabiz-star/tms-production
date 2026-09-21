@@ -263,6 +263,12 @@ optimizationRouter.post(
         deliveryZoneId: singleDeliveryZoneId,
         vehicleTypeId,
         weightKg: totalWeightKg,
+        // Fase 17: distancia de la ruta -- necesaria para aplicar el nuevo
+        // componente €/km de la tarifa por circuito+vehículo (antes no se
+        // pasaba, así que ese componente nunca se calculaba aquí aunque
+        // estuviera configurado). Viene del load plan recién recalculado
+        // arriba (routeDistanceKm); 0 si todavía no hay distancia estimada.
+        km: routeDistanceKm,
       });
       if (!resolved) {
         unresolvedCandidates.push({

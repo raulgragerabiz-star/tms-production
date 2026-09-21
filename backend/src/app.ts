@@ -31,6 +31,7 @@ import erpclaudRouter from "@/modules/integrations/erpclaud/erpclaud.routes";
 import { trackingRouter } from "@/modules/tracking/tracking.routes";
 import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
 import { demandForecastRouter } from "@/modules/intelligence/demand-forecast.routes";
+import { fleetSizingRouter } from "@/modules/fleet-sizing/fleet-sizing.routes";
 import { companySettingsRouter } from "@/modules/company/company-settings.routes";
 import { publicDocumentsRouter } from "@/modules/documents/public-documents.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
@@ -135,6 +136,9 @@ export function createApp() {
   // Motor de inteligencia (2/3): pronóstico de demanda -- ver
   // demand-forecast.service.ts.
   app.use("/api/intelligence/demand-forecast", requireAuth, demandForecastRouter);
+  // Fase 17: "Zonas / Vehículos" (Flota y Transportistas) -- ver
+  // fleet-sizing.service.ts.
+  app.use("/api/fleet-sizing", requireAuth, fleetSizingRouter);
   // Motor de inteligencia (3/3): auto-optimización de rutas -- la
   // evaluación en sí ocurre dentro de POST /optimization/:routeId/simulate
   // (ver auto-optimization.orchestrator.ts); esto es solo el interruptor de

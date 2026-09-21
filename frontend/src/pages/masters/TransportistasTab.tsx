@@ -81,7 +81,7 @@ interface AssignmentRow {
   };
   // Fase 8T: tarifa real, una fila por cada tipo de vehículo que este
   // transportista tiene marcado para este circuito -- ver ZoneAssignmentFichaModal.tsx.
-  vehicleRates: { id: string; vehicleTypeId: string; flatFee: string | null; pricePerTon: string | null; unloadFee: string | null; partnerIncomePerTon: string | null; vehicleType: { id: string; name: string } }[];
+  vehicleRates: { id: string; vehicleTypeId: string; flatFee: string | null; pricePerTon: string | null; pricePerKm: string | null; unloadFee: string | null; partnerIncomePerTon: string | null; vehicleType: { id: string; name: string } }[];
 }
 
 export default function TransportistasTab() {

@@ -808,6 +808,12 @@ model DeliveryZoneRateVehicleType {
   vehicleTypeId       String           @map("vehicle_type_id")
   flatFee             Decimal?         @map("flat_fee") @db.Decimal(12, 4)
   pricePerTon         Decimal?         @map("price_per_ton") @db.Decimal(12, 4)
+  // Fase 17: petición explícita de Raúl -- "tarifas acordadas (€/base, €/tn,
+  // €/km, €/descarga, €tn socio) donde base, €/tn y €/km seran costes para
+  // bigmat". Hasta ahora la tarifa por circuito+vehículo no tenía ningún
+  // componente por distancia -- se añade como coste (igual que flatFee y
+  // pricePerTon), nunca como ingreso. Ver rate-resolution.service.ts.
+  pricePerKm          Decimal?         @map("price_per_km") @db.Decimal(12, 4)
   unloadFee           Decimal?         @map("unload_fee") @db.Decimal(12, 4)
   partnerIncomePerTon Decimal?         @map("partner_income_per_ton") @db.Decimal(12, 4)
   createdAt           DateTime         @default(now()) @map("created_at")

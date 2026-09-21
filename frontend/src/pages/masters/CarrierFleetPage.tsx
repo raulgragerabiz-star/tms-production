@@ -2,6 +2,7 @@ import { useState } from "react";
 import TransportistasTab from "@/pages/masters/TransportistasTab";
 import VehiclesPage from "@/pages/masters/VehiclesPage";
 import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
+import FleetSizingTab from "@/pages/masters/FleetSizingTab";
 
 // Fase 8: petición explícita de Raúl -- reducir esto de 5 pestañas
 // (Empresa/Tarifas/Vehículos/Conductores/Tipo de vehículo) a menos,
@@ -14,31 +15,31 @@ import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 // vehículo" con "Zonas de influencia" (que antes era un acceso de menú
 // aparte) en una sola sub-pestaña.
 //
-// "Conductores" no cambia -- sigue siendo la misma pantalla de siempre
-// (VehiclesPage en modo embedded), solo que ahora es la segunda pestaña en
-// vez de la cuarta.
-//
-// 2026-09-10: al reducir de 5 pestañas a 3 en la Fase 8 se dejó de montar
-// VehiclesPage con activeTab="vehicles" -- esa era la única pestaña con la
-// columna y el botón "Ver / generar QR". Se probó a reponerla como pestaña
-// "Vehículos" propia, pero Raúl pidió quitarla otra vez: "en transportistas
-// ya figuran los vehículos de cada agencia" (los checkboxes de tipo de
-// vehículo de TransportistasTab) y el QR debe verse directamente desde la
-// ficha del conductor, no en una pantalla aparte. El QR y la matrícula
-// concreta del vehículo ahora se gestionan desde la propia pestaña
-// "Conductores" (columna "Vehículo", ver VehiclesPage.tsx) -- el código de
-// la pestaña "vehicles" de VehiclesPage sigue intacto por si hiciera falta
-// en el futuro, simplemente no se monta desde aquí.
-type Tab = "transportistas" | "conductores" | "tipos-zonas";
+// Fase 17: petición explícita de Raúl -- "necesito eliminar la pestaña
+// conductores. es un variable diario que no da estabilidad como para
+// generar un listado estandar". Se quita "Conductores" (VehiclesPage en
+// modo embedded con activeTab="drivers" deja de montarse aquí -- el código
+// de esa pestaña sigue intacto en VehiclesPage.tsx por si hiciera falta en
+// el futuro, mismo criterio que ya se aplicó con "vehicles" en 2026-09-10).
+// El panel pasa a tener DOS secciones, tal y como pidió Raúl:
+//   - "Rutas / Transportistas": la tabla de circuito↔transportista de
+//     siempre (TransportistasTab), solo renombrada -- ya mostraba
+//     exactamente esto (cada ruta, el transportista que la cubre, el tipo
+//     de vehículo que aporta y su tarifa acordada).
+//   - "Zonas / Vehículos" (nueva, FleetSizingTab.tsx): analítica acumulada
+//     por circuito -- salidas, mediana/P85/máximo en kg y vehículo
+//     recomendado según esa carga, más el resumen de flota dedicada vs.
+//     compartida por día de la semana.
+type Tab = "rutas-transportistas" | "zonas-vehiculos" | "tipos-zonas";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "transportistas", label: "Transportistas" },
-  { id: "conductores", label: "Conductores" },
+  { id: "rutas-transportistas", label: "Rutas / Transportistas" },
+  { id: "zonas-vehiculos", label: "Zonas / Vehículos" },
   { id: "tipos-zonas", label: "Tipo de vehículo y zonas" },
 ];
 
 export default function CarrierFleetPage() {
-  const [tab, setTab] = useState<Tab>("transportistas");
+  const [tab, setTab] = useState<Tab>("rutas-transportistas");
 
   return (
     <div>
@@ -46,9 +47,9 @@ export default function CarrierFleetPage() {
         <h1 className="text-xl font-semibold text-slate-900">Flota y Transportistas</h1>
       </div>
       <p className="text-sm text-slate-500 mb-4">
-        Los circuitos de reparto y los transportistas que colaboran en cada uno, con su tarifa y el
-        tipo de vehículo que aportan; sus conductores; y los tipos de vehículo y zonas de influencia
-        que usa el planificador automático.
+        Los circuitos de reparto y los transportistas que colaboran en cada uno, con su tarifa y el tipo de vehículo
+        que aportan; la analítica acumulada de carga y vehículo recomendado por circuito; y los tipos de vehículo y
+        zonas de influencia que usa el planificador automático.
       </p>
 
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -65,8 +66,8 @@ export default function CarrierFleetPage() {
         ))}
       </div>
 
-      {tab === "transportistas" && <TransportistasTab />}
-      {tab === "conductores" && <VehiclesPage embedded activeTab="drivers" />}
+      {tab === "rutas-transportistas" && <TransportistasTab />}
+      {tab === "zonas-vehiculos" && <FleetSizingTab />}
       {tab === "tipos-zonas" && (
         <div className="space-y-6">
           <div>

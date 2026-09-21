@@ -32,13 +32,17 @@ async function computeShipmentAmount(shipmentId: string) {
   });
   if (!shipment.finishedAt) throw HttpError.badRequest("El envío todavía no está finalizado");
 
-  const customerIds = new Set(shipment.route.stops.map((s) => s.order.customerId));
-  const singleCustomerId = customerIds.size === 1 ? [...customerIds][0] : undefined;
-  const provinces = new Set(shipment.route.stops.map((s) => s.order.deliveryPoint.province).filter(Boolean));
+  // (x: any) explícito en los 3 callbacks: mismo quirk de inferencia en
+  // cascada de Prisma ya documentado en el resto del proyecto -- añadir
+  // código nuevo cerca (el `km` de Fase 17, más abajo) le hace perder el
+  // tipo a variables sin relación real con el cambio.
+  const customerIds = new Set<string>(shipment.route.stops.map((s: any) => s.order.customerId as string));
+  const singleCustomerId: string | undefined = customerIds.size === 1 ? [...customerIds][0] : undefined;
+  const provinces = new Set(shipment.route.stops.map((s: any) => s.order.deliveryPoint.province).filter(Boolean));
   const singleProvince = provinces.size === 1 ? ([...provinces][0] as string) : undefined;
   // Fase 8T: mismo criterio de "solo se propaga si todas las paradas
   // coinciden" que singleCustomerId/singleProvince arriba.
-  const deliveryZoneIds = new Set(shipment.route.stops.map((s) => s.order.customer.deliveryZoneId).filter(Boolean));
+  const deliveryZoneIds = new Set(shipment.route.stops.map((s: any) => s.order.customer.deliveryZoneId).filter(Boolean));
   const singleDeliveryZoneId = deliveryZoneIds.size === 1 ? ([...deliveryZoneIds][0] as string) : undefined;
 
   const resolved = await resolveShipmentCost({
@@ -58,6 +62,10 @@ async function computeShipmentAmount(shipmentId: string) {
     deliveryZoneId: singleDeliveryZoneId,
     vehicleTypeId: shipment.vehicle.vehicleTypeId,
     weightKg: shipment.route.loadPlan?.totalWeightKg != null ? Number(shipment.route.loadPlan.totalWeightKg) : undefined,
+    // Fase 17: mismo motivo que en optimization.routes.ts -- sin esto, el
+    // componente €/km de la tarifa por circuito+vehículo nunca se aplicaba
+    // al liquidar, aunque sí se hubiera mostrado en el comparador.
+    km: shipment.route.loadPlan?.distanceKm != null ? Number(shipment.route.loadPlan.distanceKm) : undefined,
   });
 
   if (!resolved) return null; // excepción: queda para revisión manual (sin tarifa vigente)
