@@ -998,11 +998,34 @@ dashboardRouter.get(
   asyncHandler(async (req, res) => {
     const companyId = req.auth!.companyId;
 
-    const [warehouses, customers, orderWarehouseCounts, orderCustomerStats] = await Promise.all([
+    // Fase 16 (depuración): pasos secuenciales y etiquetados en vez de un
+    // único Promise.all -- si alguno falla, el `console.error` del servidor
+    // dice EXACTAMENTE cuál (antes, el error genérico de errorHandler.ts no
+    // decía qué consulta lo había provocado, solo "Error interno del
+    // servidor" en el navegador). Quitar esta etiqueta cuando se confirme
+    // que las 4 consultas funcionan de forma estable contra datos reales.
+    async function step<T>(label: string, fn: () => Promise<T>): Promise<T> {
+      try {
+        return await fn();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`[dashboard/clients-map] fallo en "${label}":`, err);
+        // Se relanza como HttpError (en vez del error original) para que el
+        // mensaje concreto llegue también al frontend -- ahora mismo
+        // muestra "Error interno del servidor" sin más detalle, y sin poder
+        // ver la consola del backend no hay forma de saber qué consulta ha
+        // fallado. Temporal mientras se depura esta pantalla.
+        throw new HttpError(500, `Fallo en "${label}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    const warehouses = await step<any>("warehouses", () =>
       prisma.warehouse.findMany({
         where: { companyId, active: true },
         select: { id: true, name: true, lat: true, lng: true },
-      }),
+      })
+    );
+    const customers = await step<any>("customers", () =>
       prisma.customer.findMany({
         where: { companyId, active: true, deletedAt: null },
         select: {
@@ -1014,16 +1037,20 @@ dashboardRouter.get(
             take: 1,
           },
         },
-      }),
-      prisma.order.groupBy({ by: ["customerId", "warehouseId"], where: { companyId }, _count: { _all: true } }),
+      })
+    );
+    const orderWarehouseCounts = await step<any>("orderWarehouseCounts", () =>
+      prisma.order.groupBy({ by: ["customerId", "warehouseId"], where: { companyId }, _count: { _all: true } })
+    );
+    const orderCustomerStats = await step<any>("orderCustomerStats", () =>
       prisma.order.groupBy({
         by: ["customerId"],
         where: { companyId },
         _count: { _all: true },
         _min: { createdAt: true },
         _max: { createdAt: true },
-      }),
-    ]);
+      })
+    );
 
     const warehouseById = new Map<string, (typeof warehouses)[number]>(warehouses.map((w: any) => [w.id, w]));
 
@@ -1046,7 +1073,7 @@ dashboardRouter.get(
       customerId,
       warehouseId: w.warehouseId,
     }));
-    const zoneByPair = await resolveDeliveryZonesForPairs(zonePairs);
+    const zoneByPair = await step("resolveDeliveryZonesForPairs", () => resolveDeliveryZonesForPairs(zonePairs));
 
     let skippedNoOrders = 0;
     let skippedNoCoordinates = 0;
