@@ -22,6 +22,15 @@ export interface CustomerEditable {
   // explícita de Raúl. CustomersPage lo rellena a partir de `deliveryZone.id`
   // al abrir la edición (el listado trae el objeto anidado, no el id suelto).
   deliveryZoneId: string | null;
+  // Fase 16: dirección de entrega por defecto -- petición explícita de Raúl
+  // ("debe dar opcion a direccion y cp, para que extraiga las coordenadas de
+  // cara al mapa de ubicacion. tanto en la edicion como en la creacion").
+  // Hasta ahora solo se podían cargar importando el maestro de clientes en
+  // Excel -- ver customer-default-address.service.ts en el backend.
+  defaultAddress?: string | null;
+  defaultCity?: string | null;
+  defaultProvince?: string | null;
+  defaultPostalCode?: string | null;
 }
 
 interface Props {
@@ -45,6 +54,14 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
   const [active, setActive] = useState(true);
   // "" = sin circuito asignado.
   const [deliveryZoneId, setDeliveryZoneId] = useState("");
+  // Fase 16: dirección de entrega por defecto -- se usa para geolocalizar al
+  // cliente de cara al mapa de Inicio (se geocodifica automáticamente al
+  // guardar) y como dirección de pedido por defecto si un pedido no trae la
+  // suya propia.
+  const [defaultAddress, setDefaultAddress] = useState("");
+  const [defaultCity, setDefaultCity] = useState("");
+  const [defaultProvince, setDefaultProvince] = useState("");
+  const [defaultPostalCode, setDefaultPostalCode] = useState("");
 
   const { data: zonesData } = useQuery({
     queryKey: ["delivery-zones", "options"],
@@ -64,6 +81,10 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
     setTaxId(customer?.taxId ?? "");
     setActive(customer?.active ?? true);
     setDeliveryZoneId(customer?.deliveryZoneId ?? "");
+    setDefaultAddress(customer?.defaultAddress ?? "");
+    setDefaultCity(customer?.defaultCity ?? "");
+    setDefaultProvince(customer?.defaultProvince ?? "");
+    setDefaultPostalCode(customer?.defaultPostalCode ?? "");
   }, [open, customer]);
 
   const mutation = useMutation({
@@ -75,6 +96,14 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
         taxId: taxId.trim() || undefined,
         active,
         deliveryZoneId: deliveryZoneId || null,
+        // Los 4 campos siempre se mandan juntos (aunque estén vacíos) para
+        // que el backend sepa que este envío SÍ trae información de
+        // dirección -- ver customers.routes.ts, que solo toca el punto de
+        // entrega del cliente cuando defaultAddress viene en el payload.
+        defaultAddress: defaultAddress.trim(),
+        defaultCity: defaultCity.trim(),
+        defaultProvince: defaultProvince.trim(),
+        defaultPostalCode: defaultPostalCode.trim(),
       };
       if (isEdit) return (await api.put(`/customers/${customer!.id}`, payload)).data;
       return (await api.post("/customers", payload)).data;
@@ -123,6 +152,41 @@ export default function NewCustomerModal({ open, customer, onClose, onSuccess, o
             ))}
           </select>
         </Field>
+
+        {/* Fase 16: dirección de entrega por defecto -- petición explícita de
+            Raúl para poder indicarla a mano (hasta ahora solo se podía
+            cargar importando el maestro de clientes en Excel). Se
+            geocodifica automáticamente al guardar para situar al cliente en
+            el mapa de "Inicio" (Indicadores acumulados). */}
+        <div className="border-t border-slate-200 pt-4">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Dirección de entrega</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Se usa para situar al cliente en el mapa de Inicio (se calculan las coordenadas automáticamente al guardar) y como
+            dirección de pedido por defecto cuando un pedido no trae la suya propia.
+          </p>
+          <div className="space-y-4">
+            <Field label="Dirección">
+              <input
+                className={inputCls}
+                value={defaultAddress}
+                onChange={(e) => setDefaultAddress(e.target.value)}
+                placeholder="Calle, número..."
+              />
+            </Field>
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="Código postal">
+                <input className={inputCls} value={defaultPostalCode} onChange={(e) => setDefaultPostalCode(e.target.value)} />
+              </Field>
+              <Field label="Ciudad">
+                <input className={inputCls} value={defaultCity} onChange={(e) => setDefaultCity(e.target.value)} />
+              </Field>
+              <Field label="Provincia">
+                <input className={inputCls} value={defaultProvince} onChange={(e) => setDefaultProvince(e.target.value)} />
+              </Field>
+            </div>
+          </div>
+        </div>
+
         {isEdit && (
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="rounded border-slate-300" />

@@ -1034,6 +1034,11 @@ dashboardRouter.get(
           deliveryPoints: {
             where: { active: true, deletedAt: null, lat: { not: null }, lng: { not: null } },
             select: { lat: true, lng: true },
+            // Mismo criterio de "punto de entrega principal" (el más
+            // antiguo activo) que usa customer-default-address.service.ts al
+            // editar la ficha del cliente -- determinista, en vez de confiar
+            // en el orden por defecto de Prisma.
+            orderBy: { createdAt: "asc" },
             take: 1,
           },
           // Circuito por defecto del cliente y almacén al que pertenece --

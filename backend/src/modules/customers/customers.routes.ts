@@ -6,6 +6,7 @@ import { HttpError } from "@/utils/http-error";
 import { requireRole } from "@/middleware/auth";
 import { buildCustomerMasterTemplate, runCustomerMasterImport } from "./customer-master-import.service";
 import { deleteCustomerCascade } from "./customer-delete.service";
+import { upsertDefaultDeliveryPoint } from "./customer-default-address.service";
 
 export const customersRouter = Router();
 
@@ -18,6 +19,16 @@ const customerSchema = z.object({
   // Fase 8: circuito de reparto (ver DeliveryZone) -- opcional, se puede
   // reasignar en cualquier momento sin afectar a nada más de la ficha.
   deliveryZoneId: z.string().uuid().optional().nullable(),
+  // Fase 16: dirección de entrega por defecto -- petición explícita de Raúl
+  // para poder indicarla a mano desde el alta/edición manual (hasta ahora
+  // solo se podía cargar importando el maestro de clientes en Excel). Se usa
+  // para geolocalizar al cliente de cara al mapa de Inicio (ver
+  // customer-default-address.service.ts) y como dirección de pedido por
+  // defecto cuando un pedido no trae la suya propia.
+  defaultAddress: z.string().optional(),
+  defaultCity: z.string().optional(),
+  defaultProvince: z.string().optional(),
+  defaultPostalCode: z.string().optional(),
 });
 
 // Carga del maestro de clientes/socios (Código, Nombre, Dirección completa)
@@ -140,6 +151,19 @@ customersRouter.post(
     const customer = await prisma.customer.create({
       data: { ...data, companyId: req.auth!.companyId },
     });
+
+    // Fase 16: si se ha indicado dirección desde el propio alta manual, se
+    // crea (y se geocodifica en el momento, best-effort) su punto de entrega
+    // por defecto -- sin esto, un cliente dado de alta a mano nunca aparecía
+    // en el mapa de Inicio aunque se le hubiera puesto dirección y CP.
+    if (data.defaultAddress) {
+      await upsertDefaultDeliveryPoint(customer.id, {
+        address: data.defaultAddress,
+        postalCode: data.defaultPostalCode,
+        city: data.defaultCity,
+        province: data.defaultProvince,
+      });
+    }
     res.status(201).json(customer);
   })
 );
@@ -154,6 +178,19 @@ customersRouter.put(
     if (!customer) throw HttpError.notFound("Cliente no encontrado");
 
     const updated = await prisma.customer.update({ where: { id: customer.id }, data });
+
+    // Fase 16: mismo criterio que en el alta -- si el formulario de edición
+    // manda dirección (el modal siempre manda los 4 campos juntos, aunque no
+    // se hayan tocado), se actualiza/crea y se geocodifica el punto de
+    // entrega por defecto del cliente.
+    if (data.defaultAddress !== undefined) {
+      await upsertDefaultDeliveryPoint(customer.id, {
+        address: data.defaultAddress,
+        postalCode: data.defaultPostalCode,
+        city: data.defaultCity,
+        province: data.defaultProvince,
+      });
+    }
     res.json(updated);
   })
 );

@@ -18,6 +18,7 @@ interface CustomerRow {
   active: boolean;
   defaultAddress: string | null;
   defaultCity: string | null;
+  defaultProvince: string | null;
   defaultPostalCode: string | null;
   _count: { deliveryPoints: number };
   // Mejora (2026-09-14): circuito de reparto (MAD1, Portu 4...) -- petición
