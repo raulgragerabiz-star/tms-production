@@ -66,6 +66,7 @@ interface ClientsMapResponse {
   clients: ClientMapPoint[];
   skippedNoOrders: number;
   skippedNoCoordinates: number;
+  totalActiveCustomers: number;
 }
 
 function formatEuros(n: number) {
@@ -168,12 +169,31 @@ export default function DashboardPage() {
       ) : (
         <Panel description={`${clientsMap.clients.length} cliente(s) geolocalizados sobre el total`}>
           <ClientDistanceMap warehouses={clientsMap.warehouses} clients={clientsMap.clients} distanceTiers={clientsMap.distanceTiers} />
-          {(clientsMap.skippedNoCoordinates > 0 || clientsMap.skippedNoOrders > 0) && (
-            <p className="text-xs text-slate-400 mt-3">
-              {clientsMap.skippedNoCoordinates > 0 && `${clientsMap.skippedNoCoordinates} cliente(s) sin dirección geolocalizada. `}
-              {clientsMap.skippedNoOrders > 0 && `${clientsMap.skippedNoOrders} cliente(s) sin pedidos registrados todavía.`}
+          {/* Fase 16: desglose siempre visible (no solo cuando algo "sobra")
+              para que se pueda comprobar de un vistazo por qué el mapa
+              muestra menos clientes que el total de la pantalla Clientes --
+              petición de Raúl tras ver 18 puntos frente a 104 clientes
+              registrados. Un cliente solo aparece en el mapa si tiene (a) al
+              menos un pedido registrado y (b) una dirección de entrega con
+              coordenadas geolocalizadas; el total de la pantalla Clientes
+              cuenta además los clientes inactivos, que aquí no se evalúan. */}
+          <div className="mt-3 text-xs text-slate-500 border-t border-slate-100 pt-2.5">
+            <p>
+              <span className="font-semibold text-slate-700">{clientsMap.totalActiveCustomers}</span> cliente(s) activo(s) evaluados
+              → <span className="font-semibold text-slate-700">{clientsMap.clients.length}</span> en el mapa
+              {clientsMap.skippedNoOrders > 0 && (
+                <> · <span className="font-semibold text-slate-700">{clientsMap.skippedNoOrders}</span> sin pedidos registrados todavía</>
+              )}
+              {clientsMap.skippedNoCoordinates > 0 && (
+                <> · <span className="font-semibold text-slate-700">{clientsMap.skippedNoCoordinates}</span> sin dirección geolocalizada (sin lat/lng)</>
+              )}
+              .
             </p>
-          )}
+            <p className="mt-1 text-slate-400">
+              El total de la pantalla Clientes cuenta también los clientes inactivos, que este mapa no evalúa -- por eso puede no coincidir con
+              el número de arriba.
+            </p>
+          </div>
         </Panel>
       )}
     </div>

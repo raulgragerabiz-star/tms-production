@@ -13,15 +13,22 @@ import "leaflet/dist/leaflet.css";
 //
 // Los anillos y el color de cada cliente son la clasificación por franja de
 // distancia que calcula el backend (GET /dashboard/clients-map, ver
-// DISTANCE_TIERS en dashboard.routes.ts) -- es una lectura de magnitud
-// (más lejos = más oscuro), así que la paleta es secuencial de un solo tono
-// (azul de marca, claro -> oscuro), no categórica.
+// DISTANCE_TIERS en dashboard.routes.ts). Petición explícita de Raúl: colores
+// bien diferenciados por zona, no tonalidades de un mismo azul -- paleta
+// categórica (5 de los 8 tonos fijos del skill de dataviz, mismo orden
+// relativo que la paleta completa, nunca reordenados) en vez de la rampa
+// secuencial original. Validado con validate_palette.js en modo claro con
+// --pairs all (los puntos del mapa pueden quedar vecinos en cualquier
+// combinación): sin FAIL. Dos zonas rozan el aviso de contraste sobre el
+// fondo del mapa -- por eso cada punto lleva además un borde blanco/oscuro y
+// nunca depende solo del color (leyenda con etiqueta de texto + tooltip al
+// pasar el ratón + ficha de detalle con el nombre de la zona al hacer clic).
 const TIER_COLORS: Record<string, string> = {
-  metropolitana: "#bcd4ee",
-  regional_cercana: "#7fa8d9",
-  regional_extendida: "#4a7dc0",
-  larga_distancia: "#1f57a0",
-  internacional: "#03418c",
+  metropolitana: "#2a78d6", // azul
+  regional_cercana: "#1baf7a", // aguamarina
+  regional_extendida: "#eda100", // amarillo
+  larga_distancia: "#e87ba4", // magenta
+  internacional: "#4a3aa7", // violeta
 };
 const RING_STROKE = "#94a3b8";
 

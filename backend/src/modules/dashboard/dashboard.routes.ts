@@ -1135,6 +1135,14 @@ dashboardRouter.get(
       clients,
       skippedNoOrders,
       skippedNoCoordinates,
+      // Fase 16 (aclaración pedida por Raúl: "marca solo 18 clientes frente a
+      // los 104 registrados en sistema"): total de clientes activos evaluados
+      // por este endpoint, para que el desglose cuadre en el frontend
+      // (totalActiveCustomers === clients.length + skippedNoOrders +
+      // skippedNoCoordinates siempre). Puede no coincidir con el "104" de la
+      // pantalla Clientes: esa pantalla cuenta TODOS los clientes no
+      // eliminados (activos e inactivos); este mapa solo evalúa los activos.
+      totalActiveCustomers: customers.length,
     });
   })
 );
