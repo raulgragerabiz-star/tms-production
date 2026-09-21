@@ -6,6 +6,7 @@ import Panel from "@/components/Panel";
 import SectionTitle from "@/components/SectionTitle";
 import StatusBadge from "@/components/StatusBadge";
 import PlannerMap, { MapPoint, ROUTE_COLORS, WAREHOUSE_COLOR } from "@/pages/planner/PlannerMap";
+import ClientDistanceMap, { ClientMapPoint, MapWarehouse, DistanceTierDef } from "@/pages/dashboard/ClientDistanceMap";
 
 // Fase 8S: rediseño de "Inicio" como panel general de operaciones (petición
 // de Raúl: "según accedes a la aplicación, [que] aparezca un resumen global
@@ -96,6 +97,51 @@ interface LiveShipment {
   lastPosition: { lat: number; lng: number; occurredAt: string } | null;
 }
 
+// Fase 16: rediseño de "Inicio" con los indicadores acumulados que pidió
+// Raúl (toneladas movidas + kg/mes, pedidos registrados + reparto por día de
+// la semana, rutas operativas + top rutas por volumen, OTD/OTS/OTIF
+// acumulados, coste vs. beneficio acumulado) y el mapa interactivo de
+// clientes por radio de distancia -- ver GET /dashboard/accumulated y GET
+// /dashboard/clients-map (dashboard.routes.ts). Aditivo: no toca ninguno de
+// los tipos/gráficos de arriba, que siguen alimentando "Indicadores
+// globales"/"Visibilidad operativa" con los datos de hoy/7 días de siempre.
+interface MonthKg {
+  month: string;
+  kg: number;
+}
+interface WeekdayReparto {
+  day: number;
+  label: string;
+  weightKg: number;
+}
+interface TopRoute {
+  name: string;
+  weightKg: number;
+}
+interface Accumulated {
+  toneladas: { totalKg: number; totalTn: number; porMes: MonthKg[] };
+  pedidos: { total: number };
+  reparto: { porDiaSemana: WeekdayReparto[] };
+  rutas: { operativas: number; topPorVolumen: TopRoute[] };
+  kpi: {
+    otdPct: number | null;
+    otdEligible: number;
+    otsPct: number | null;
+    otsEligible: number;
+    otifPct: number;
+    stopsTotal: number;
+    stopsCompleted: number;
+  };
+  finanzas: { costeAcumulado: number; margenAcumulado: number; marginUnknownLines: number };
+}
+interface ClientsMapResponse {
+  warehouses: MapWarehouse[];
+  distanceTiers: DistanceTierDef[];
+  clients: ClientMapPoint[];
+  skippedNoOrders: number;
+  skippedNoCoordinates: number;
+}
+
 const GETAFE_CENTER = { lat: 40.3058, lng: -3.7327 };
 
 const DELIVERY_STATUS_COLOR: Record<string, string> = {
@@ -132,6 +178,24 @@ export default function DashboardPage() {
     queryFn: async () => (await api.get("/shipments")).data as { items: LiveShipment[]; total: number },
     refetchInterval: 30000,
   });
+
+  // Fase 16: indicadores acumulados (todo el histórico, sin ventana de
+  // fecha) + el mapa de clientes -- se cargan aparte de /dashboard/home para
+  // no penalizar el refresco cada 30s del resto de la pantalla con una
+  // consulta bastante más pesada; con refetch cada 5 min es de sobra para
+  // datos que, por definición, cambian poco a poco.
+  const accumulatedQuery = useQuery<Accumulated>({
+    queryKey: ["dashboard-accumulated"],
+    queryFn: async () => (await api.get("/dashboard/accumulated")).data,
+    refetchInterval: 300000,
+  });
+  const clientsMapQuery = useQuery<ClientsMapResponse>({
+    queryKey: ["dashboard-clients-map"],
+    queryFn: async () => (await api.get("/dashboard/clients-map")).data,
+    refetchInterval: 300000,
+  });
+  const accumulated = accumulatedQuery.data;
+  const clientsMap = clientsMapQuery.data;
 
   const activeShipments = useMemo(
     () => (liveQuery.data?.items ?? []).filter((s) => s.status === "loaded" || s.status === "in_transit"),
@@ -189,6 +253,80 @@ export default function DashboardPage() {
             sub="OTIF de hoy"
           />
         </div>
+      )}
+
+      <SectionTitle>Indicadores acumulados</SectionTitle>
+      <p className="text-xs text-slate-400 -mt-2 mb-3">Todo el histórico registrado en el sistema, sin ventana de fecha</p>
+      {accumulatedQuery.isLoading || !accumulated ? (
+        <p className="text-sm text-slate-400">Cargando…</p>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <KpiCard label="Toneladas movidas" value={`${accumulated.toneladas.totalTn.toLocaleString("es-ES")} Tn`} sub="acumulado total" />
+            <KpiCard label="Pedidos registrados" value={accumulated.pedidos.total.toLocaleString("es-ES")} sub="acumulado total" />
+            <KpiCard label="Rutas operativas" value={accumulated.rutas.operativas} sub="circuitos de reparto activos" />
+            <KpiCard
+              label="OTD"
+              value={accumulated.kpi.otdPct != null ? `${accumulated.kpi.otdPct}%` : "s/d"}
+              tone={accumulated.kpi.otdPct == null ? "default" : accumulated.kpi.otdPct >= 90 ? "success" : "warning"}
+              sub="entrega a tiempo"
+            />
+            <KpiCard
+              label="OTS"
+              value={accumulated.kpi.otsPct != null ? `${accumulated.kpi.otsPct}%` : "s/d"}
+              tone={accumulated.kpi.otsPct == null ? "default" : accumulated.kpi.otsPct >= 90 ? "success" : "warning"}
+              sub="salida a tiempo"
+            />
+            <KpiCard
+              label="OTIF"
+              value={`${accumulated.kpi.otifPct}%`}
+              tone={accumulated.kpi.otifPct >= 90 ? "success" : "warning"}
+              sub={`${accumulated.kpi.stopsCompleted}/${accumulated.kpi.stopsTotal} paradas`}
+            />
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <ChartCard title="Toneladas movidas por mes" subtitle="Kg acumulados, histórico completo">
+              <MonthlyKgChart points={accumulated.toneladas.porMes} />
+            </ChartCard>
+            <ChartCard title="Reparto acumulado por día de la semana" subtitle="Kg movidos, histórico completo">
+              <WeekdayRepartoChart rows={accumulated.reparto.porDiaSemana} />
+            </ChartCard>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4 mt-4">
+            <ChartCard title="Top rutas por volumen" subtitle="Circuito de reparto, kg acumulados">
+              <TopRoutesChart rows={accumulated.rutas.topPorVolumen} />
+            </ChartCard>
+            <ChartCard title="Coste acumulado vs. beneficio acumulado" subtitle="Liquidaciones históricas (Fase 14)">
+              <CostVsMarginChart costeAcumulado={accumulated.finanzas.costeAcumulado} margenAcumulado={accumulated.finanzas.margenAcumulado} />
+              {accumulated.finanzas.marginUnknownLines > 0 && (
+                <p className="text-xs text-slate-400 mt-2">
+                  {accumulated.finanzas.marginUnknownLines} línea(s) de liquidación sin beneficio calculable, no incluidas.
+                </p>
+              )}
+            </ChartCard>
+          </div>
+        </>
+      )}
+
+      <SectionTitle>Mapa de clientes por distancia</SectionTitle>
+      {clientsMapQuery.isLoading || !clientsMap ? (
+        <p className="text-sm text-slate-400">Cargando…</p>
+      ) : clientsMap.warehouses.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          Ningún almacén tiene coordenadas configuradas todavía, así que no se puede calcular el radio de distancia.
+        </p>
+      ) : (
+        <Panel description={`${clientsMap.clients.length} cliente(s) geolocalizados sobre el total`}>
+          <ClientDistanceMap warehouses={clientsMap.warehouses} clients={clientsMap.clients} distanceTiers={clientsMap.distanceTiers} />
+          {(clientsMap.skippedNoCoordinates > 0 || clientsMap.skippedNoOrders > 0) && (
+            <p className="text-xs text-slate-400 mt-3">
+              {clientsMap.skippedNoCoordinates > 0 && `${clientsMap.skippedNoCoordinates} cliente(s) sin dirección geolocalizada. `}
+              {clientsMap.skippedNoOrders > 0 && `${clientsMap.skippedNoOrders} cliente(s) sin pedidos registrados todavía.`}
+            </p>
+          )}
+        </Panel>
       )}
 
       <SectionTitle>Visibilidad operativa</SectionTitle>
@@ -489,6 +627,161 @@ function FleetUtilizationBars({ fleet }: { fleet: FleetUtilization }) {
         <p className="text-xs text-slate-500 mt-1">
           {fleet.driversOnShift} de servicio · {fleet.driversAvailable} disponibles · {fleet.driversTotal} en total
         </p>
+      </div>
+    </div>
+  );
+}
+
+// Fase 16: "kg por mes" -- misma anatomía de barra que WeeklyVolumeChart
+// (extremo redondeado, hueco de 2px, rejilla recesiva), aplicada a la serie
+// mensual acumulada en vez de a los 7 días de la semana.
+function formatMonthLabel(monthKey: string) {
+  return new Date(`${monthKey}-15`).toLocaleDateString("es-ES", { month: "short", year: "2-digit" }).replace(".", "");
+}
+function formatKg(kg: number) {
+  return kg >= 1000 ? `${(kg / 1000).toLocaleString("es-ES", { maximumFractionDigits: 1 })} Tn` : `${kg.toLocaleString("es-ES")} kg`;
+}
+
+function MonthlyKgChart({ points }: { points: MonthKg[] }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const width = 420;
+  const height = 200;
+  const padL = 8;
+  const padR = 8;
+  const padT = 12;
+  const padB = 24;
+  const plotW = width - padL - padR;
+  const plotH = height - padT - padB;
+
+  if (points.length === 0) {
+    return <p className="text-sm text-slate-400 text-center py-6">Sin movimientos registrados todavía.</p>;
+  }
+
+  const max = Math.max(1, ...points.map((p) => p.kg));
+  const gap = 4;
+  const slot = plotW / points.length;
+  const barWidth = Math.max(4, Math.min(28, slot - gap));
+
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto" onMouseLeave={() => setHoverIdx(null)}>
+        {[0, 0.5, 1].map((f) => (
+          <line key={f} x1={padL} x2={width - padR} y1={padT + plotH * (1 - f)} y2={padT + plotH * (1 - f)} stroke={PALETTE.gridline} strokeWidth={1} />
+        ))}
+        {points.map((p, i) => {
+          const barH = (p.kg / max) * plotH;
+          const cx = padL + i * slot + (slot - barWidth) / 2;
+          const cy = padT + plotH - barH;
+          return (
+            <g key={p.month}>
+              <rect
+                x={cx}
+                y={cy}
+                width={barWidth}
+                height={Math.max(1, barH)}
+                rx={4}
+                fill={PALETTE.brand}
+                opacity={hoverIdx === null || hoverIdx === i ? 1 : 0.45}
+                onMouseEnter={() => setHoverIdx(i)}
+              />
+              {(i % Math.ceil(points.length / 8) === 0 || i === points.length - 1) && (
+                <text x={cx + barWidth / 2} y={height - 6} fontSize={9} fill={PALETTE.muted} textAnchor="middle">
+                  {formatMonthLabel(p.month)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {hoverIdx != null && (
+        <div
+          className="absolute top-0 bg-white border border-slate-200 rounded-lg shadow-md px-2.5 py-1.5 text-xs pointer-events-none"
+          style={{ left: `${((padL + hoverIdx * slot + slot / 2) / width) * 100}%`, transform: "translateX(-50%)" }}
+        >
+          <p className="font-medium text-slate-700">{formatMonthLabel(points[hoverIdx].month)}</p>
+          <p className="text-slate-500">{formatKg(points[hoverIdx].kg)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Fase 16: "reparto acumulado por día de la semana" -- 7 barras fijas
+// (L-D), mismo patrón de barras horizontales con etiqueta+valor siempre
+// visibles que DeliveryStatusChart (nunca solo color).
+function WeekdayRepartoChart({ rows }: { rows: WeekdayReparto[] }) {
+  const max = Math.max(1, ...rows.map((r) => r.weightKg));
+  const total = rows.reduce((acc, r) => acc + r.weightKg, 0);
+
+  if (total === 0) {
+    return <p className="text-sm text-slate-400 text-center py-6">Sin movimientos registrados todavía.</p>;
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {rows.map((r) => (
+        <div key={r.day} className="flex items-center gap-3">
+          <span className="w-20 shrink-0 text-xs font-medium text-slate-600">{r.label}</span>
+          <div className="flex-1 h-4 bg-slate-100 rounded-sm overflow-hidden">
+            <div className="h-full rounded-r" style={{ width: `${(r.weightKg / max) * 100}%`, backgroundColor: PALETTE.brand }} />
+          </div>
+          <span className="w-16 shrink-0 text-right text-xs font-mono font-semibold text-slate-700">{formatKg(r.weightKg)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Fase 16: "top rutas por volumen" -- ranking por magnitud (no identidad de
+// categorías distintas), así que un único tono en vez de una paleta
+// categórica -- mismo criterio que la guía de dataviz para gráficos de
+// ranking de una sola métrica.
+function TopRoutesChart({ rows }: { rows: TopRoute[] }) {
+  const max = Math.max(1, ...rows.map((r) => r.weightKg));
+
+  if (rows.length === 0) {
+    return <p className="text-sm text-slate-400 text-center py-6">Todavía no hay circuitos con movimientos registrados.</p>;
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {rows.map((r) => (
+        <div key={r.name} className="flex items-center gap-3">
+          <span className="w-24 shrink-0 text-xs font-medium text-slate-600 truncate" title={r.name}>
+            {r.name}
+          </span>
+          <div className="flex-1 h-4 bg-slate-100 rounded-sm overflow-hidden">
+            <div className="h-full rounded-r" style={{ width: `${(r.weightKg / max) * 100}%`, backgroundColor: PALETTE.brand }} />
+          </div>
+          <span className="w-16 shrink-0 text-right text-xs font-mono font-semibold text-slate-700">{formatKg(r.weightKg)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Fase 16: "coste acumulado vs. beneficio acumulado" -- comparación de solo
+// 2 categorías con significado semántico propio (coste = azul de marca,
+// beneficio = verde, mismo color que ya usa "success" en el resto de
+// Inicio), en vez de la paleta categórica de rutas/transportistas.
+function CostVsMarginChart({ costeAcumulado, margenAcumulado }: { costeAcumulado: number; margenAcumulado: number }) {
+  const max = Math.max(1, costeAcumulado, margenAcumulado);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <span className="w-24 shrink-0 text-xs font-medium text-slate-600">Coste</span>
+        <div className="flex-1 h-5 bg-slate-100 rounded-sm overflow-hidden">
+          <div className="h-full rounded-r" style={{ width: `${(costeAcumulado / max) * 100}%`, backgroundColor: PALETTE.brand }} />
+        </div>
+        <span className="w-24 shrink-0 text-right text-sm font-mono font-semibold text-slate-700">{formatEuros(costeAcumulado)}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="w-24 shrink-0 text-xs font-medium text-slate-600">Beneficio</span>
+        <div className="flex-1 h-5 bg-slate-100 rounded-sm overflow-hidden">
+          <div className="h-full rounded-r" style={{ width: `${(margenAcumulado / max) * 100}%`, backgroundColor: PALETTE.good }} />
+        </div>
+        <span className="w-24 shrink-0 text-right text-sm font-mono font-semibold text-slate-700">{formatEuros(margenAcumulado)}</span>
       </div>
     </div>
   );

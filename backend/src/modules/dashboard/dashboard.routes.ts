@@ -3,6 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { resolveDeliveryZonesForPairs } from "@/modules/customers/customer-zone-resolution";
+import { haversineKm, RoutePoint } from "@/modules/routing/routing.service";
 
 export const dashboardRouter = Router();
 
@@ -784,6 +786,328 @@ dashboardRouter.get(
       },
       costByCarrier,
       criticalAlerts,
+    });
+  })
+);
+
+// Fase 16: rediseño de "Inicio" -- petición explícita de Raúl con el listado
+// concreto de indicadores que quiere ver en esa pantalla ("toneladas movidas
+// total acumulado + kg por mes, pedidos registrados total acumulado +
+// reparto acumulado por día, rutas operativas + top rutas por volumen,
+// porcentajes actualizados de OTD/OTS/OTIF, coste acumulado vs ingresos
+// acumulados"). A diferencia de /home (acotado a hoy/7 días) y de /history
+// (acotado al rango de fechas que pida el llamante), este endpoint es
+// deliberadamente SIN filtro de fecha -- "acumulado" se resolvió con Raúl
+// como todo el histórico real, no una ventana móvil.
+//
+// "Ingresos acumulados": se resolvió con Raúl que, a falta de un importe de
+// facturación al cliente independiente en el schema, "ingresos" se muestra
+// aquí como el beneficio ya calculado en Fase 14 (marginReal / liquidaciones
+// con `marginAmount`), frente al coste real acumulado -- no un total
+// facturado nuevo.
+//
+// "Rutas operativas" / "top rutas por volumen": el schema no tiene un código
+// de ruta propio como el "NOR1"/"MAD 02" del panel de referencia de Raúl --
+// lo más parecido que existe es el circuito de reparto (DeliveryZone, ver
+// comentario en el modelo). "Operativas" = circuitos activos de la empresa;
+// el ranking por volumen sí necesita resolver, parada a parada, A QUÉ
+// circuito pertenece cada cliente+almacén -- se reutiliza
+// resolveDeliveryZonesForPairs (Fase 15) para responder exactamente lo mismo
+// que ya usan Planificación y el comparador de transportistas.
+//
+// Mismo criterio que /history (ver comentario de cabecera del archivo): todo
+// en memoria con Prisma normal, sin SQL a medida ni vista materializada --
+// coherente con el resto de este módulo aunque no tenga filtro de fecha.
+const WEEKDAY_LABELS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+dashboardRouter.get(
+  "/accumulated",
+  asyncHandler(async (req, res) => {
+    const companyId = req.auth!.companyId;
+    const OTD_TOLERANCE_MS = 15 * 60 * 1000;
+
+    const [stops, shipments, totalOrders, rutasOperativas] = await Promise.all([
+      prisma.routeStop.findMany({
+        where: { route: { companyId } },
+        select: {
+          status: true,
+          eta: true,
+          route: { select: { routeDate: true } },
+          order: {
+            select: {
+              customerId: true,
+              warehouseId: true,
+              lines: { select: { lineWeightKg: true } },
+            },
+          },
+          pod: { select: { deliveredAt: true } },
+        },
+      }),
+      prisma.shipment.findMany({
+        where: { route: { companyId } },
+        select: {
+          departedAt: true,
+          route: { select: { routeDate: true } },
+          settlementLines: { select: { amount: true, marginAmount: true } },
+        },
+      }),
+      prisma.order.count({ where: { companyId } }),
+      prisma.deliveryZone.count({ where: { companyId, active: true } }),
+    ]);
+
+    // Circuito efectivo de cada combinación cliente+almacén que aparece en
+    // alguna parada -- una sola resolución en lote (no una consulta por
+    // parada) para poder rankear "top rutas por volumen".
+    const pairsMap = new Map<string, { customerId: string; warehouseId: string }>();
+    for (const s of stops) {
+      const key = `${s.order.customerId}::${s.order.warehouseId}`;
+      if (!pairsMap.has(key)) pairsMap.set(key, { customerId: s.order.customerId, warehouseId: s.order.warehouseId });
+    }
+    const zoneByPair = await resolveDeliveryZonesForPairs([...pairsMap.values()]);
+
+    let totalKg = 0;
+    const monthKg = new Map<string, number>();
+    const weekdayKg = new Map<number, number>();
+    const zoneWeight = new Map<string, number>();
+    let stopsTotal = 0;
+    let stopsCompleted = 0;
+    let otdEligible = 0;
+    let otdOnTime = 0;
+
+    for (const s of stops) {
+      const weightKg = s.order.lines.reduce((acc, l) => acc + Number(l.lineWeightKg ?? 0), 0);
+      totalKg += weightKg;
+
+      const routeDate = s.route.routeDate;
+      const monthKey = routeDate.toISOString().slice(0, 7);
+      monthKg.set(monthKey, (monthKg.get(monthKey) ?? 0) + weightKg);
+      const weekday = (routeDate.getUTCDay() + 6) % 7; // 0 = lunes
+      weekdayKg.set(weekday, (weekdayKg.get(weekday) ?? 0) + weightKg);
+
+      const zoneKey = `${s.order.customerId}::${s.order.warehouseId}`;
+      const zoneName = zoneByPair.get(zoneKey)?.name ?? "Sin circuito asignado";
+      zoneWeight.set(zoneName, (zoneWeight.get(zoneName) ?? 0) + weightKg);
+
+      stopsTotal += 1;
+      if (s.status === "completed") stopsCompleted += 1;
+      // OTD: ver comentario detallado junto al mismo cálculo en /history.
+      if (s.status === "completed" && s.eta && s.pod?.deliveredAt) {
+        otdEligible += 1;
+        if (s.pod.deliveredAt.getTime() <= s.eta.getTime() + OTD_TOLERANCE_MS) otdOnTime += 1;
+      }
+    }
+
+    let otsEligible = 0;
+    let otsOnTime = 0;
+    let costeAcumulado = 0;
+    let margenAcumulado = 0;
+    let marginUnknownLines = 0;
+    for (const sh of shipments) {
+      // OTS: ver comentario detallado junto al mismo cálculo en /history.
+      if (sh.departedAt) {
+        otsEligible += 1;
+        const departedDay = sh.departedAt.toISOString().slice(0, 10);
+        const plannedDay = sh.route.routeDate.toISOString().slice(0, 10);
+        if (departedDay <= plannedDay) otsOnTime += 1;
+      }
+      for (const l of sh.settlementLines) {
+        costeAcumulado += Number(l.amount);
+        if (l.marginAmount != null) margenAcumulado += Number(l.marginAmount);
+        else marginUnknownLines += 1;
+      }
+    }
+
+    const porMes = [...monthKg.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, kg]) => ({ month, kg: Math.round(kg) }));
+
+    const porDiaSemana = WEEKDAY_LABELS.map((label, idx) => ({
+      day: idx,
+      label,
+      weightKg: Math.round(weekdayKg.get(idx) ?? 0),
+    }));
+
+    const topPorVolumen = [...zoneWeight.entries()]
+      .map(([name, weightKg]) => ({ name, weightKg: Math.round(weightKg) }))
+      .sort((a, b) => b.weightKg - a.weightKg)
+      .slice(0, 10);
+
+    res.json({
+      toneladas: {
+        totalKg: Math.round(totalKg),
+        totalTn: Math.round((totalKg / 1000) * 10) / 10,
+        porMes,
+      },
+      pedidos: { total: totalOrders },
+      reparto: { porDiaSemana },
+      rutas: { operativas: rutasOperativas, topPorVolumen },
+      kpi: {
+        otdPct: pctOrNull(otdOnTime, otdEligible),
+        otdEligible,
+        otsPct: pctOrNull(otsOnTime, otsEligible),
+        otsEligible,
+        otifPct: pct(stopsCompleted, stopsTotal),
+        stopsTotal,
+        stopsCompleted,
+      },
+      finanzas: {
+        costeAcumulado: Math.round(costeAcumulado * 100) / 100,
+        margenAcumulado: Math.round(margenAcumulado * 100) / 100,
+        marginUnknownLines,
+      },
+    });
+  })
+);
+
+// Fase 16: umbrales de la "zona de influencia" por radio de distancia que
+// pidió Raúl para el mapa interactivo de clientes de Inicio -- mismos cortes
+// que su panel de referencia (0-40 / 40-120 / 120-250 / 250-450 / >450 km).
+// Distinto de InfluenceZone (Objetivo 2, configurable por almacén y pensado
+// para asignar vehículo): aquí es solo una clasificación visual fija para
+// colorear el mapa y sugerir una "zona de reparto recomendada" en la ficha
+// de cada cliente.
+const DISTANCE_TIERS: { tier: string; label: string; maxKm: number }[] = [
+  { tier: "metropolitana", label: "Metropolitana (0-40 km)", maxKm: 40 },
+  { tier: "regional_cercana", label: "Regional cercana (40-120 km)", maxKm: 120 },
+  { tier: "regional_extendida", label: "Regional extendida (120-250 km)", maxKm: 250 },
+  { tier: "larga_distancia", label: "Larga distancia (250-450 km)", maxKm: 450 },
+  { tier: "internacional", label: "Internacional (>450 km)", maxKm: Infinity },
+];
+function classifyDistanceKm(km: number): { tier: string; label: string } {
+  const found = DISTANCE_TIERS.find((t) => km <= t.maxKm)!;
+  return { tier: found.tier, label: found.label };
+}
+
+// Frecuencia de envío sugerida: a falta de un campo de frecuencia pactada
+// con el cliente, se estima a partir de su ritmo real de pedidos (nº de
+// pedidos / meses transcurridos entre el primero y el último) -- un dato
+// real del cliente, no solo una suposición por su distancia al almacén.
+function suggestedFrequencyLabel(totalOrders: number, firstOrder: Date, lastOrder: Date): string {
+  if (totalOrders < 2) return "Sin histórico suficiente";
+  const spanDays = Math.max(1, (lastOrder.getTime() - firstOrder.getTime()) / (1000 * 60 * 60 * 24));
+  const ordersPerMonth = totalOrders / Math.max(1, spanDays / 30);
+  if (ordersPerMonth >= 20) return "Diaria";
+  if (ordersPerMonth >= 8) return "2-3 veces por semana";
+  if (ordersPerMonth >= 4) return "Semanal";
+  if (ordersPerMonth >= 2) return "Quincenal";
+  return "Mensual o menor";
+}
+
+dashboardRouter.get(
+  "/clients-map",
+  asyncHandler(async (req, res) => {
+    const companyId = req.auth!.companyId;
+
+    const [warehouses, customers, orderWarehouseCounts, orderCustomerStats] = await Promise.all([
+      prisma.warehouse.findMany({
+        where: { companyId, active: true },
+        select: { id: true, name: true, lat: true, lng: true },
+      }),
+      prisma.customer.findMany({
+        where: { companyId, active: true, deletedAt: null },
+        select: {
+          id: true,
+          legalName: true,
+          deliveryPoints: {
+            where: { active: true, deletedAt: null, lat: { not: null }, lng: { not: null } },
+            select: { lat: true, lng: true },
+            take: 1,
+          },
+        },
+      }),
+      prisma.order.groupBy({ by: ["customerId", "warehouseId"], where: { companyId }, _count: { _all: true } }),
+      prisma.order.groupBy({
+        by: ["customerId"],
+        where: { companyId },
+        _count: { _all: true },
+        _min: { createdAt: true },
+        _max: { createdAt: true },
+      }),
+    ]);
+
+    const warehouseById = new Map<string, (typeof warehouses)[number]>(warehouses.map((w: any) => [w.id, w]));
+
+    // Almacén "de origen" de cada cliente = desde el que más pedidos se le
+    // han servido -- ver comentario de cabecera del endpoint sobre por qué
+    // no existe un único almacén fijo por cliente en el schema.
+    const primaryWarehouseByCustomer = new Map<string, { warehouseId: string; count: number }>();
+    for (const row of orderWarehouseCounts) {
+      const current = primaryWarehouseByCustomer.get(row.customerId);
+      const count = row._count._all;
+      if (!current || count > current.count) {
+        primaryWarehouseByCustomer.set(row.customerId, { warehouseId: row.warehouseId, count });
+      }
+    }
+    const orderStatsByCustomer = new Map<string, (typeof orderCustomerStats)[number]>(
+      orderCustomerStats.map((r: any) => [r.customerId, r])
+    );
+
+    const zonePairs = [...primaryWarehouseByCustomer.entries()].map(([customerId, w]) => ({
+      customerId,
+      warehouseId: w.warehouseId,
+    }));
+    const zoneByPair = await resolveDeliveryZonesForPairs(zonePairs);
+
+    let skippedNoOrders = 0;
+    let skippedNoCoordinates = 0;
+    const clients: Array<{
+      id: string;
+      legalName: string;
+      lat: number;
+      lng: number;
+      warehouseId: string;
+      warehouseName: string;
+      distanceKm: number;
+      zoneTier: string;
+      zoneTierLabel: string;
+      routeName: string;
+      suggestedFrequency: string;
+      ordersCount: number;
+    }> = [];
+
+    for (const c of customers) {
+      const primary = primaryWarehouseByCustomer.get(c.id);
+      if (!primary) {
+        skippedNoOrders += 1;
+        continue;
+      }
+      const warehouse = warehouseById.get(primary.warehouseId);
+      const point = c.deliveryPoints[0];
+      if (!warehouse || warehouse.lat == null || warehouse.lng == null || !point) {
+        skippedNoCoordinates += 1;
+        continue;
+      }
+      const origin: RoutePoint = { lat: warehouse.lat, lng: warehouse.lng };
+      const destination: RoutePoint = { lat: point.lat!, lng: point.lng! };
+      const distanceKm = Math.round(haversineKm(origin, destination) * 10) / 10;
+      const { tier, label } = classifyDistanceKm(distanceKm);
+      const zone = zoneByPair.get(`${c.id}::${primary.warehouseId}`);
+      const stats = orderStatsByCustomer.get(c.id);
+
+      clients.push({
+        id: c.id,
+        legalName: c.legalName,
+        lat: point.lat!,
+        lng: point.lng!,
+        warehouseId: warehouse.id,
+        warehouseName: warehouse.name,
+        distanceKm,
+        zoneTier: tier,
+        zoneTierLabel: label,
+        routeName: zone?.name ?? "Sin circuito asignado",
+        suggestedFrequency: stats
+          ? suggestedFrequencyLabel(stats._count._all, stats._min.createdAt!, stats._max.createdAt!)
+          : "Sin histórico suficiente",
+        ordersCount: stats?._count._all ?? 0,
+      });
+    }
+
+    res.json({
+      warehouses: warehouses.filter((w: any) => w.lat != null && w.lng != null),
+      distanceTiers: DISTANCE_TIERS.map((t) => ({ tier: t.tier, label: t.label, maxKm: Number.isFinite(t.maxKm) ? t.maxKm : null })),
+      clients,
+      skippedNoOrders,
+      skippedNoCoordinates,
     });
   })
 );
