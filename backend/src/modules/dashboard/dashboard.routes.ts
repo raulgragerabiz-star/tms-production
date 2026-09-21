@@ -1036,11 +1036,11 @@ dashboardRouter.get(
             select: { lat: true, lng: true },
             take: 1,
           },
+          // Circuito por defecto del cliente y almacén al que pertenece --
+          // ver resolución de almacén de referencia más abajo.
+          deliveryZone: { select: { warehouseId: true } },
         },
       })
-    );
-    const orderWarehouseCounts = await step<any>("orderWarehouseCounts", () =>
-      prisma.order.groupBy({ by: ["customerId", "warehouseId"], where: { companyId }, _count: { _all: true } })
     );
     const orderCustomerStats = await step<any>("orderCustomerStats", () =>
       prisma.order.groupBy({
@@ -1053,30 +1053,66 @@ dashboardRouter.get(
     );
 
     const warehouseById = new Map<string, (typeof warehouses)[number]>(warehouses.map((w: any) => [w.id, w]));
-
-    // Almacén "de origen" de cada cliente = desde el que más pedidos se le
-    // han servido -- ver comentario de cabecera del endpoint sobre por qué
-    // no existe un único almacén fijo por cliente en el schema.
-    const primaryWarehouseByCustomer = new Map<string, { warehouseId: string; count: number }>();
-    for (const row of orderWarehouseCounts) {
-      const current = primaryWarehouseByCustomer.get(row.customerId);
-      const count = row._count._all;
-      if (!current || count > current.count) {
-        primaryWarehouseByCustomer.set(row.customerId, { warehouseId: row.warehouseId, count });
-      }
-    }
+    const geolocatedWarehouses = warehouses.filter((w: any) => w.lat != null && w.lng != null);
     const orderStatsByCustomer = new Map<string, (typeof orderCustomerStats)[number]>(
       orderCustomerStats.map((r: any) => [r.customerId, r])
     );
 
-    const zonePairs = [...primaryWarehouseByCustomer.entries()].map(([customerId, w]) => ({
-      customerId,
-      warehouseId: w.warehouseId,
-    }));
+    // Fase 16 (corrección explícita de Raúl: "los puntos en el mapa no deben
+    // depender de los envios realizados, si no de las direcciones de los
+    // clientes... una vez todos posicionados, los datos que ofrezca el
+    // resumen al clickar en el cliente si que daran datos de entregas si las
+    // ha habido"). El almacén "de referencia" de cada cliente para situarlo
+    // en el mapa YA NO se calcula por historial de pedidos -- se resuelve
+    // solo a partir de su dirección y de su maestro de datos:
+    //   1) el almacén del circuito de reparto por defecto del cliente
+    //      (Customer.deliveryZoneId -> DeliveryZone.warehouseId), si existe
+    //      y está geolocalizado -- es la asignación real del maestro de
+    //      clientes, tenga o no pedidos todavía.
+    //   2) si solo hay un almacén geolocalizado en la empresa, ese.
+    //   3) en cualquier otro caso (varios almacenes y cliente sin circuito
+    //      asignado), el almacén geolocalizado más cercano en línea recta a
+    //      su dirección de entrega -- sigue siendo una posición determinada
+    //      por su dirección, nunca por si ha habido envíos o no.
+    function resolveAnchorWarehouseId(point: RoutePoint, zoneWarehouseId: string | null | undefined): string | null {
+      if (zoneWarehouseId) {
+        const zw = warehouseById.get(zoneWarehouseId);
+        if (zw && zw.lat != null && zw.lng != null) return zw.id;
+      }
+      if (geolocatedWarehouses.length === 1) return geolocatedWarehouses[0].id;
+      if (geolocatedWarehouses.length === 0) return null;
+      let nearest: { id: string; km: number } | null = null;
+      for (const w of geolocatedWarehouses) {
+        const km = haversineKm(point, { lat: w.lat, lng: w.lng });
+        if (!nearest || km < nearest.km) nearest = { id: w.id, km };
+      }
+      return nearest?.id ?? null;
+    }
+
+    let skippedNoCoordinates = 0;
+    const anchorByCustomer = new Map<string, string>();
+    const zonePairs: Array<{ customerId: string; warehouseId: string }> = [];
+
+    for (const c of customers) {
+      const point = c.deliveryPoints[0];
+      if (!point) {
+        skippedNoCoordinates += 1;
+        continue;
+      }
+      const anchorId = resolveAnchorWarehouseId({ lat: point.lat!, lng: point.lng! }, c.deliveryZone?.warehouseId ?? null);
+      if (!anchorId) {
+        // Solo puede pasar si ningún almacén activo tiene coordenadas -- caso
+        // ya cubierto en el frontend (aviso "Ningún almacén tiene
+        // coordenadas configuradas todavía").
+        skippedNoCoordinates += 1;
+        continue;
+      }
+      anchorByCustomer.set(c.id, anchorId);
+      zonePairs.push({ customerId: c.id, warehouseId: anchorId });
+    }
+
     const zoneByPair = await step("resolveDeliveryZonesForPairs", () => resolveDeliveryZonesForPairs(zonePairs));
 
-    let skippedNoOrders = 0;
-    let skippedNoCoordinates = 0;
     const clients: Array<{
       id: string;
       legalName: string;
@@ -1093,22 +1129,15 @@ dashboardRouter.get(
     }> = [];
 
     for (const c of customers) {
-      const primary = primaryWarehouseByCustomer.get(c.id);
-      if (!primary) {
-        skippedNoOrders += 1;
-        continue;
-      }
-      const warehouse = warehouseById.get(primary.warehouseId);
+      const anchorId = anchorByCustomer.get(c.id);
+      if (!anchorId) continue; // ya contado en skippedNoCoordinates
       const point = c.deliveryPoints[0];
-      if (!warehouse || warehouse.lat == null || warehouse.lng == null || !point) {
-        skippedNoCoordinates += 1;
-        continue;
-      }
+      const warehouse = warehouseById.get(anchorId)!;
       const origin: RoutePoint = { lat: warehouse.lat, lng: warehouse.lng };
       const destination: RoutePoint = { lat: point.lat!, lng: point.lng! };
       const distanceKm = Math.round(haversineKm(origin, destination) * 10) / 10;
       const { tier, label } = classifyDistanceKm(distanceKm);
-      const zone = zoneByPair.get(`${c.id}::${primary.warehouseId}`);
+      const zone = zoneByPair.get(`${c.id}::${anchorId}`);
       const stats = orderStatsByCustomer.get(c.id);
 
       clients.push({
@@ -1122,26 +1151,28 @@ dashboardRouter.get(
         zoneTier: tier,
         zoneTierLabel: label,
         routeName: zone?.name ?? "Sin circuito asignado",
+        // Estos dos campos sí reflejan el histórico real de pedidos -- solo
+        // afectan a la ficha de detalle al clicar el cliente, nunca a si el
+        // cliente aparece o no en el mapa (ver comentario arriba).
         suggestedFrequency: stats
           ? suggestedFrequencyLabel(stats._count._all, stats._min.createdAt!, stats._max.createdAt!)
-          : "Sin histórico suficiente",
+          : "Sin pedidos registrados todavía",
         ordersCount: stats?._count._all ?? 0,
       });
     }
 
     res.json({
-      warehouses: warehouses.filter((w: any) => w.lat != null && w.lng != null),
+      warehouses: geolocatedWarehouses,
       distanceTiers: DISTANCE_TIERS.map((t) => ({ tier: t.tier, label: t.label, maxKm: Number.isFinite(t.maxKm) ? t.maxKm : null })),
       clients,
-      skippedNoOrders,
       skippedNoCoordinates,
       // Fase 16 (aclaración pedida por Raúl: "marca solo 18 clientes frente a
       // los 104 registrados en sistema"): total de clientes activos evaluados
       // por este endpoint, para que el desglose cuadre en el frontend
-      // (totalActiveCustomers === clients.length + skippedNoOrders +
-      // skippedNoCoordinates siempre). Puede no coincidir con el "104" de la
-      // pantalla Clientes: esa pantalla cuenta TODOS los clientes no
-      // eliminados (activos e inactivos); este mapa solo evalúa los activos.
+      // (totalActiveCustomers === clients.length + skippedNoCoordinates
+      // siempre). Puede no coincidir con el "104" de la pantalla Clientes:
+      // esa pantalla cuenta TODOS los clientes no eliminados (activos e
+      // inactivos); este mapa solo evalúa los activos.
       totalActiveCustomers: customers.length,
     });
   })
