@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { login, loginWithVehicleQrToken } from "./auth.service";
+import { login, loginWithVehicleQrToken, loginWithRouteQrToken } from "./auth.service";
 import { asyncHandler } from "@/utils/async-handler";
 import { requireAuth } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
@@ -32,6 +32,31 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const { token } = qrLoginSchema.parse(req.body);
     const result = await loginWithVehicleQrToken(token);
+    res.json(result);
+  })
+);
+
+// Fase 25 ("usuarios app" sub-fase 3): login solo-con-QR de RUTA (centro +
+// circuito + transportista) -- sustituye a /driver-qr-login como puerta de
+// entrada a la App Conductor (ver comentario en loginWithRouteQrToken,
+// auth.service.ts). Deliberadamente público, igual que /driver-qr-login:
+// quien escanea no tiene todavía ningún JWT que mandar. driverPhone y
+// trailerPlate son opcionales -- el resto del formulario (nombre, DNI,
+// matrícula) es obligatorio.
+const routeQrLoginSchema = z.object({
+  token: z.string().min(10),
+  driverName: z.string().min(1),
+  driverDni: z.string().min(1),
+  driverPhone: z.string().optional(),
+  vehiclePlate: z.string().min(1),
+  trailerPlate: z.string().optional(),
+});
+
+authRouter.post(
+  "/route-qr-login",
+  asyncHandler(async (req, res) => {
+    const { token, ...form } = routeQrLoginSchema.parse(req.body);
+    const result = await loginWithRouteQrToken(token, form);
     res.json(result);
   })
 );

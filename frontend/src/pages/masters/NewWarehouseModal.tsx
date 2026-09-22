@@ -292,15 +292,20 @@ function WarehouseRoutesEditor({ warehouseId, onError }: { warehouseId: string; 
       ) : (
         <ul className="space-y-1 mb-3">
           {assigned.map((z) => (
-            <li key={z.id} className="flex items-center justify-between text-sm bg-slate-50 rounded-lg px-3 py-1.5">
-              <span className="text-slate-700">{z.name}</span>
-              <button
-                type="button"
-                onClick={() => unassignMutation.mutate(z.id)}
-                className="text-xs text-red-500 hover:text-red-600 font-medium"
-              >
-                Quitar
-              </button>
+            <li key={z.id} className="bg-slate-50 rounded-lg px-3 py-1.5">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-700">{z.name}</span>
+                <button
+                  type="button"
+                  onClick={() => unassignMutation.mutate(z.id)}
+                  className="text-xs text-red-500 hover:text-red-600 font-medium"
+                >
+                  Quitar
+                </button>
+              </div>
+              {/* Fase 25: QR de ruta (centro + este circuito + transportista)
+                  -- ver comentario en RouteQrRow más abajo. */}
+              <RouteQrRow warehouseId={warehouseId} deliveryZoneId={z.id} onError={onError} />
             </li>
           ))}
         </ul>
@@ -344,6 +349,149 @@ function WarehouseRoutesEditor({ warehouseId, onError }: { warehouseId: string; 
         >
           + Nueva ruta
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Fase 25 ("usuarios app" sub-fase 3): QR de ruta -- un único QR fijo por
+// combinación centro + circuito + transportista, que sustituye al QR por
+// vehículo/conductor como puerta de entrada a la App Conductor (ver
+// comentario en RouteQrToken, schema.prisma). Se elige el transportista para
+// ESTE circuito y se genera/consulta su QR -- un mismo circuito puede tener
+// varios transportistas distintos, cada uno con el suyo propio (igual que ya
+// pasa con las tarifas por circuito+transportista).
+interface CarrierOption {
+  id: string;
+  legalName: string;
+}
+
+function RouteQrRow({
+  warehouseId,
+  deliveryZoneId,
+  onError,
+}: {
+  warehouseId: string;
+  deliveryZoneId: string;
+  onError: (message: string) => void;
+}) {
+  const [carrierId, setCarrierId] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const carriersQuery = useQuery({
+    queryKey: ["carriers"],
+    queryFn: async () => (await api.get("/carriers")).data as { items: CarrierOption[] },
+  });
+  const carrierName = carriersQuery.data?.items.find((c) => c.id === carrierId)?.legalName ?? "";
+
+  return (
+    <div className="flex items-center gap-2 mt-1.5">
+      <select
+        value={carrierId}
+        onChange={(e) => setCarrierId(e.target.value)}
+        className="flex-1 rounded-lg border border-slate-300 text-xs px-2 py-1.5"
+      >
+        <option value="">QR de ruta para transportista…</option>
+        {carriersQuery.data?.items.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.legalName}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={!carrierId}
+        onClick={() => setModalOpen(true)}
+        className="text-xs px-2.5 py-1.5 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 whitespace-nowrap"
+      >
+        Ver QR
+      </button>
+      {modalOpen && carrierId && (
+        <RouteQrModal
+          warehouseId={warehouseId}
+          deliveryZoneId={deliveryZoneId}
+          carrierId={carrierId}
+          carrierName={carrierName}
+          onClose={() => setModalOpen(false)}
+          onError={onError}
+        />
+      )}
+    </div>
+  );
+}
+
+// Mismo patrón (y mismo servicio gratuito de generación de imagen QR,
+// api.qrserver.com) que VehicleQrModal en VehiclesPage.tsx.
+function RouteQrModal({
+  warehouseId,
+  deliveryZoneId,
+  carrierId,
+  carrierName,
+  onClose,
+  onError,
+}: {
+  warehouseId: string;
+  deliveryZoneId: string;
+  carrierId: string;
+  carrierName: string;
+  onClose: () => void;
+  onError: (message: string) => void;
+}) {
+  const scopeParams = { warehouseId, deliveryZoneId, carrierId };
+
+  const tokenQuery = useQuery({
+    queryKey: ["route-qr-token", warehouseId, deliveryZoneId, carrierId],
+    queryFn: async () => (await api.get("/route-qr", { params: scopeParams })).data as { token: string | null },
+  });
+
+  const issueMutation = useMutation({
+    mutationFn: async () => (await api.post("/route-qr", scopeParams)).data as { token: string },
+    onSuccess: () => tokenQuery.refetch(),
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo generar el QR"),
+  });
+
+  const token = issueMutation.data?.token ?? tokenQuery.data?.token ?? null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">QR de ruta — {carrierName}</h3>
+        <p className="text-xs text-slate-500 mb-4">
+          El conductor lo escanea desde la App Conductor para identificarse (nombre, DNI, teléfono, matrícula) y
+          ver/operar la ruta de este circuito, cualquier día que este transportista tenga una asignada.
+        </p>
+
+        {tokenQuery.isLoading && <p className="text-sm text-slate-400 py-8">Cargando…</p>}
+
+        {!tokenQuery.isLoading && token && (
+          <>
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(token)}`}
+              alt={`Código QR de ruta para ${carrierName}`}
+              className="mx-auto rounded-lg border border-slate-200"
+              width={220}
+              height={220}
+            />
+            <p className="text-[10px] font-mono text-slate-400 mt-3 break-all">{token}</p>
+          </>
+        )}
+
+        {!tokenQuery.isLoading && !token && (
+          <p className="text-sm text-slate-400 py-6">Todavía no se ha generado un QR para este transportista en este circuito.</p>
+        )}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            onClick={() => issueMutation.mutate()}
+            disabled={issueMutation.isPending}
+            className="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+          >
+            {token ? "Generar nuevo (invalida el anterior)" : "Generar QR"}
+          </button>
+          <button onClick={onClose} className="text-sm text-slate-500 px-4 py-2">
+            Cerrar
+          </button>
+        </div>
       </div>
     </div>
   );

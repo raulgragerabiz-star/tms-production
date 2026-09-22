@@ -61,6 +61,9 @@ model Company {
   // Fase 8: circuitos de reparto (agrupación de clientes por zona de
   // destino) -- ver modelo DeliveryZone más abajo.
   deliveryZones           DeliveryZone[]
+  // Fase 25: QR de ruta (centro + circuito + transportista) -- ver modelo
+  // RouteQrToken más abajo.
+  routeQrTokens           RouteQrToken[]
   // Motor de inteligencia (3/3): auto-asignación de transportista cuando la
   // confianza del modelo de puntuación supera este umbral. Opt-in real --
   // `false` por defecto, nunca se activa sola; se gestiona desde la nueva
@@ -167,6 +170,8 @@ model Warehouse {
   // Fase 15: circuito específico que un cliente tiene asignado CUANDO se le
   // sirve desde este almacén concreto (ver modelo CustomerDeliveryZone).
   customerZoneOverrides CustomerDeliveryZone[]
+  // Fase 25: QR de ruta emitidos para este centro -- ver RouteQrToken.
+  routeQrTokens    RouteQrToken[]
 
   @@index([companyId, active])
   @@map("warehouse")
@@ -492,6 +497,8 @@ model Carrier {
   // palletRates/vehicles, que siguen funcionando igual.
   deliveryZoneRates     DeliveryZoneRate[]
   vehicleTypeOfferings  CarrierVehicleType[]
+  // Fase 25: QR de ruta emitidos para este transportista -- ver RouteQrToken.
+  routeQrTokens         RouteQrToken[]
 
   @@map("carrier")
 }
@@ -608,6 +615,42 @@ model VehicleQrToken {
 
   @@index([vehicleId])
   @@map("vehicle_qr_token")
+}
+
+// Fase 25 ("usuarios app" sub-fase 3): QR de RUTA -- sustituye por completo
+// al flujo anterior (QR por vehículo + cuenta de conductor con usuario/
+// contraseña, ver VehicleQrToken arriba y loginWithVehicleQrToken en
+// auth.service.ts) como puerta de entrada a la App Conductor. Petición
+// explícita de Raúl: un único QR fijo por combinación centro + circuito de
+// reparto (DeliveryZone) + transportista -- se genera una vez desde
+// Maestros > Almacenes ("Rutas de este almacén") y sirve para cualquier día
+// en que ese transportista tenga ruta real en ese circuito, sin necesidad de
+// que exista una cuenta de conductor dada de alta de antemano. Quien lo
+// escanea se identifica con un formulario libre (nombre/DNI/teléfono/
+// matrícula/remolque opcional, ver loginWithRouteQrToken) en vez de con
+// usuario/contraseña -- esos datos NO crean ni vinculan ningún Driver/
+// Vehicle, quedan solo como registro de trazabilidad de esa sesión (JWT de
+// corta duración, ver auth.service.ts).
+//
+// `token` es el valor codificado en el QR físico; se revoca (no se borra) al
+// regenerar, mismo criterio que VehicleQrToken.
+model RouteQrToken {
+  id             String       @id @default(uuid())
+  companyId      String       @map("company_id")
+  warehouseId    String       @map("warehouse_id")
+  deliveryZoneId String       @map("delivery_zone_id")
+  carrierId      String       @map("carrier_id")
+  token          String       @unique
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  revokedAt      DateTime?    @map("revoked_at")
+  company        Company      @relation(fields: [companyId], references: [id])
+  warehouse      Warehouse    @relation(fields: [warehouseId], references: [id])
+  deliveryZone   DeliveryZone @relation(fields: [deliveryZoneId], references: [id])
+  carrier        Carrier      @relation(fields: [carrierId], references: [id])
+
+  @@index([warehouseId, deliveryZoneId, carrierId])
+  @@map("route_qr_token")
 }
 
 // Jornada del conductor (inicio/fin de turno), independiente de la fecha de
@@ -746,6 +789,8 @@ model DeliveryZone {
   // un almacén concreto (ver CustomerDeliveryZone) -- distinto de
   // `customers`, que son los que lo tienen como circuito único/por defecto.
   customerOverrides CustomerDeliveryZone[]
+  // Fase 25: QR de ruta emitidos para este circuito -- ver RouteQrToken.
+  routeQrTokens     RouteQrToken[]
 
   @@unique([companyId, name])
   @@map("delivery_zone")

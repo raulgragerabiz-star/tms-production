@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { env } from "@/config/env";
 import { HttpError } from "@/utils/http-error";
 import { resolveVehicleFromQrToken, bindVehicleToDriverToday } from "@/modules/vehicles/vehicle-qr.service";
+import { resolveRouteQrToken } from "@/modules/route-qr/route-qr.service";
 
 export interface JwtPayload {
   sub: string;
@@ -19,6 +20,24 @@ export interface JwtPayload {
   // sentido para Administrador -- ver warehouse-scope.ts, ahí se interpreta
   // como acceso a todos los centros).
   warehouseId?: string | null;
+  // Fase 25: sesión de la App Conductor abierta por QR de RUTA (centro +
+  // circuito + transportista) en vez de por una cuenta de conductor real --
+  // ver loginWithRouteQrToken más abajo. Presente SOLO en este tipo de
+  // sesión; el resto de sesiones (login normal, QR de vehículo) no lo llevan.
+  // `sub` en este caso no es un AppUser real (no existe ninguno) sino un
+  // identificador sintético del propio RouteQrToken -- cualquier código que
+  // necesite la identidad de quien escaneó debe leerla de aquí, nunca de
+  // `sub`.
+  routeQr?: {
+    warehouseId: string;
+    deliveryZoneId: string;
+    carrierId: string;
+    driverName: string;
+    driverDni: string;
+    driverPhone: string | null;
+    vehiclePlate: string;
+    trailerPlate: string | null;
+  };
 }
 
 export async function login(email: string, password: string) {
@@ -140,6 +159,68 @@ export async function loginWithVehicleQrToken(token: string) {
       warehouseId: user.warehouseId,
     },
     vehicle: { plate: vehicle.plate, vehicleType: vehicle.vehicleType?.name, carrier: vehicle.carrier?.legalName },
+  };
+}
+
+// Fase 25 ("usuarios app" sub-fase 3): datos del formulario que rellena
+// quien escanea el QR de ruta -- ver comentario en RouteQrToken
+// (schema.prisma). Deliberadamente sueltos (no ligados a ningún Driver ni
+// Vehicle dado de alta, decisión explícita de Raúl): quedan solo como
+// identidad de esa sesión concreta, para trazabilidad de quién hizo el
+// reparto.
+export interface RouteQrFormInput {
+  driverName: string;
+  driverDni: string;
+  driverPhone?: string | null;
+  vehiclePlate: string;
+  trailerPlate?: string | null;
+}
+
+// Fase 25: sustituye a loginWithVehicleQrToken como puerta de entrada a la
+// App Conductor -- petición explícita de Raúl ("un QR por centro + ruta +
+// transportista, con formulario del conductor" en vez de un QR por
+// vehículo/conductor). No requiere ninguna cuenta de conductor: la posesión
+// del QR físico (pegado donde corresponda para ese circuito/transportista)
+// más los datos que la persona rellena en el momento son la credencial.
+// Sesión corta (16h, cubre un turno largo) en vez de heredar
+// env.jwtExpiresIn -- no tiene sentido que dure semanas como una sesión de
+// Backoffice.
+export async function loginWithRouteQrToken(token: string, form: RouteQrFormInput) {
+  const record = await resolveRouteQrToken(token);
+
+  const routeQr: JwtPayload["routeQr"] = {
+    warehouseId: record.warehouseId,
+    deliveryZoneId: record.deliveryZoneId,
+    carrierId: record.carrierId,
+    driverName: form.driverName,
+    driverDni: form.driverDni,
+    driverPhone: form.driverPhone ?? null,
+    vehiclePlate: form.vehiclePlate,
+    trailerPlate: form.trailerPlate ?? null,
+  };
+
+  const payload: JwtPayload = {
+    // No hay AppUser real detrás de esta sesión -- identificador sintético
+    // del propio token de ruta, único por diseño (RouteQrToken.token es
+    // @unique). Nada debe usar este valor para buscar en app_user.
+    sub: `route-qr:${record.id}`,
+    companyId: record.companyId,
+    email: "",
+    userType: "driver_app",
+    roles: [],
+    driverId: null,
+    warehouseId: record.warehouseId,
+    routeQr,
+  };
+
+  const jwtToken = jwt.sign(payload, env.jwtSecret, { expiresIn: "16h" });
+
+  return {
+    token: jwtToken,
+    routeQr,
+    warehouse: { id: record.warehouse.id, name: record.warehouse.name },
+    deliveryZone: { id: record.deliveryZone.id, name: record.deliveryZone.name },
+    carrier: { id: record.carrier.id, legalName: record.carrier.legalName },
   };
 }
 

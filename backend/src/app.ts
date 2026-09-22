@@ -20,6 +20,7 @@ import { returnsRouter } from "@/modules/returns/returns.routes";
 import { billingRouter } from "@/modules/billing/billing.routes";
 import { dashboardRouter } from "@/modules/dashboard/dashboard.routes";
 import { warehousesRouter } from "@/modules/warehouses/warehouses.routes";
+import { routeQrRouter } from "@/modules/route-qr/route-qr.routes";
 import { zonesRouter } from "@/modules/zones/zones.routes";
 import { deliveryZonesRouter } from "@/modules/delivery-zones/delivery-zones.routes";
 import { carrierPortalRouter } from "@/modules/portal/carrier-portal.routes";
@@ -135,6 +136,11 @@ export function createApp() {
   app.use("/api/billing", requireAuth, billingRouter);
   app.use("/api/dashboard", requireAuth, dashboardRouter);
   app.use("/api/warehouses", requireAuth, warehousesRouter);
+  // Fase 25: QR de ruta (centro + circuito + transportista) -- gestión desde
+  // Backoffice (Maestros > Almacenes). El login público que RESUELVE un QR
+  // ya escaneado va en /api/auth/route-qr-login (sin requireAuth, ver
+  // auth.routes.ts), no aquí.
+  app.use("/api/route-qr", requireAuth, routeQrRouter);
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/delivery-zones", requireAuth, deliveryZonesRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa"), usersRouter);
