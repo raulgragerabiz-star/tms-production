@@ -67,8 +67,48 @@ carriersRouter.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = carrierSchema.parse(req.body);
-    const carrier = await prisma.carrier.create({ data: { ...data, companyId: req.auth!.companyId } });
-    res.status(201).json(carrier);
+    // Fase 18 (corrección): `taxId` es único en toda la base de datos
+    // (`@unique` en schema.prisma), pero hasta ahora no se comprobaba antes
+    // de crear -- un NIF repetido (typo, o un alta anterior que sí llegó a
+    // completarse) reventaba con un error de restricción de Prisma sin
+    // capturar (P2002), que el usuario solo veía como "Error interno del
+    // servidor" sin ninguna pista de qué había pasado. Mismo criterio que ya
+    // se usa en delivery-zones.routes.ts para el nombre de circuito
+    // duplicado: comprobarlo antes y devolver un 409 con mensaje claro.
+    //
+    // Fase 18 (corrección 2): la comprobación (y el propio índice único de
+    // la BD) no distinguía transportistas dados de baja bajo la lógica
+    // antigua (Fase 7b: deletedAt+active:false, anterior a la Fase 11, que
+    // pasó a borrado físico en cascada). Un transportista así queda invisible
+    // en el listado (que sí filtra deletedAt: null) pero seguía bloqueando el
+    // alta de cualquier NIF que ya hubiera usado -- de ahí el caso real:
+    // "no hay ningún Diego Hernández que borrar" y aun así "ya existe". Se
+    // excluyen aquí los ya dados de baja; el NIF de un transportista borrado
+    // no debe impedir crear uno nuevo con ese mismo NIF.
+    const existing = await prisma.carrier.findFirst({ where: { taxId: data.taxId, deletedAt: null } });
+    if (existing) {
+      throw HttpError.conflict(
+        existing.companyId === req.auth!.companyId
+          ? `Ya existe un transportista con el NIF/CIF "${data.taxId}" (${existing.legalName}). Edítalo en vez de crear uno nuevo, o revisa si es un error de escritura.`
+          : `Ya existe un transportista con el NIF/CIF "${data.taxId}" en el sistema.`
+      );
+    }
+    // Fase 18 (corrección 2, red de seguridad): además de la comprobación de
+    // arriba, se captura aquí un P2002 que se escape igualmente (p.ej. un
+    // transportista dado de baja bajo la lógica antigua que aún ocupe ese
+    // NIF a nivel de base de datos, o una condición de carrera) para no
+    // volver a mostrar "Error interno del servidor" sin explicación.
+    try {
+      const carrier = await prisma.carrier.create({ data: { ...data, companyId: req.auth!.companyId } });
+      res.status(201).json(carrier);
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        throw HttpError.conflict(
+          `Ya existe un transportista con el NIF/CIF "${data.taxId}" en el sistema (puede estar dado de baja). Contacta con soporte si crees que es un error.`
+        );
+      }
+      throw err;
+    }
   })
 );
 
@@ -80,8 +120,27 @@ carriersRouter.put(
       where: { id: req.params.id, companyId: req.auth!.companyId },
     });
     if (!carrier) throw HttpError.notFound("Transportista no encontrado");
-    const updated = await prisma.carrier.update({ where: { id: carrier.id }, data });
-    res.json(updated);
+    // Fase 18 (corrección): mismo caso que en el alta -- si se edita el NIF
+    // y choca con el de otro transportista ya existente, dar un mensaje
+    // claro en vez de un 500 genérico. Fase 18 (corrección 2): igual que en
+    // el POST, se excluyen los ya dados de baja (ver comentario allí).
+    if (data.taxId && data.taxId !== carrier.taxId) {
+      const clash = await prisma.carrier.findFirst({
+        where: { taxId: data.taxId, id: { not: carrier.id }, deletedAt: null },
+      });
+      if (clash) throw HttpError.conflict(`Ya existe otro transportista con el NIF/CIF "${data.taxId}" (${clash.legalName}).`);
+    }
+    try {
+      const updated = await prisma.carrier.update({ where: { id: carrier.id }, data });
+      res.json(updated);
+    } catch (err) {
+      if ((err as { code?: string })?.code === "P2002") {
+        throw HttpError.conflict(
+          `Ya existe otro transportista con el NIF/CIF "${data.taxId}" en el sistema (puede estar dado de baja).`
+        );
+      }
+      throw err;
+    }
   })
 );
 
