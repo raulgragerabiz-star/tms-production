@@ -1,5 +1,6 @@
-// Fase 25 ("usuarios app" sub-fase 3): gestión desde Backoffice (Maestros >
-// Almacenes, "Rutas de este almacén") del QR de ruta -- ver comentario en
+// Fase 25 ("usuarios app" sub-fase 3): gestión desde Backoffice (Flota y
+// Transportistas > Rutas / Transportistas, dentro de cada fila
+// circuito↔transportista) del QR de ruta -- ver comentario en
 // route-qr.service.ts y en el modelo RouteQrToken (schema.prisma). Mismo
 // criterio de alcance que el resto de escritura por centro (Fase 23): un
 // Planificador solo puede generar el QR de circuitos de SU propio centro; un

@@ -100,6 +100,11 @@ export default function TransportistasTab() {
   // la ficha abierta siempre lee los datos frescos de `assignments` en vez
   // de quedarse con la foto del momento en que se abrió.
   const [fichaAssignmentId, setFichaAssignmentId] = useState<string | null>(null);
+  // Fase 25 ("usuarios app" sub-fase 3): QR de ruta (centro + circuito +
+  // transportista) para esta asignación -- ver comentario en RouteQrModal
+  // más abajo. Se guarda solo el id de la asignación, igual que
+  // fichaAssignmentId, para leer siempre los datos frescos tras un refetch.
+  const [qrAssignmentId, setQrAssignmentId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; error: boolean } | null>(null);
   // Fase 20: "" = Todos los centros (no filtra nada).
   const [warehouseFilter, setWarehouseFilter] = useState<string>("");
@@ -144,6 +149,7 @@ export default function TransportistasTab() {
   const carriers = carriersQuery.data?.items ?? [];
   const warehouses = warehousesQuery.data?.items ?? [];
   const fichaAssignment = assignments.find((a) => a.id === fichaAssignmentId) ?? null;
+  const qrAssignment = assignments.find((a) => a.id === qrAssignmentId) ?? null;
 
   // Una entrada por circuito (todos, incluso sin transportistas todavía) con
   // sus asignaciones dentro -- es la agrupación "ruta primero" que pidió
@@ -407,6 +413,20 @@ export default function TransportistasTab() {
                         >
                           Ver ficha
                         </button>
+                        {/* Fase 25: QR de ruta (centro + este circuito + este
+                            transportista) -- ver comentario en RouteQrModal
+                            más abajo. Necesita un almacén concreto para el
+                            centro del QR, así que se deshabilita si el
+                            circuito todavía no tiene uno asignado (Editar
+                            circuito). */}
+                        <button
+                          onClick={() => setQrAssignmentId(a.id)}
+                          disabled={!zone.warehouse}
+                          title={zone.warehouse ? undefined : "Este circuito todavía no tiene un almacén asignado (Editar circuito)"}
+                          className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-brand-600"
+                        >
+                          Ver QR
+                        </button>
                         <button
                           onClick={() => setEditingCarrier(a.carrier)}
                           className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3"
@@ -508,6 +528,17 @@ export default function TransportistasTab() {
         onClose={() => setFichaAssignmentId(null)}
         onError={notifyError}
       />
+      {qrAssignment && qrAssignment.deliveryZone.warehouse && (
+        <RouteQrModal
+          warehouseId={qrAssignment.deliveryZone.warehouse.id}
+          deliveryZoneId={qrAssignment.deliveryZone.id}
+          carrierId={qrAssignment.carrier.id}
+          carrierName={qrAssignment.carrier.legalName}
+          zoneName={qrAssignment.deliveryZone.name}
+          onClose={() => setQrAssignmentId(null)}
+          onError={notifyError}
+        />
+      )}
 
       {toastMsg && (
         <div
@@ -517,6 +548,96 @@ export default function TransportistasTab() {
           {toastMsg.text}
         </div>
       )}
+    </div>
+  );
+}
+
+// Fase 25 ("usuarios app" sub-fase 3): QR de ruta -- un único QR fijo por
+// combinación centro + circuito + transportista, que sustituye al QR por
+// vehículo/conductor como puerta de entrada a la App Conductor (ver
+// comentario en RouteQrToken, schema.prisma). Corrección explícita de Raúl:
+// vive aquí (Flota y Transportistas > Rutas / Transportistas), dentro de
+// cada fila de asignación circuito↔transportista -- no en Maestros >
+// Almacenes, que debe quedar exclusivamente con los datos propios de cada
+// centro. El transportista y el circuito ya están fijados por la fila desde
+// la que se abre, así que no hace falta elegirlos aquí (a diferencia del
+// primer borrador de esta pantalla). Mismo patrón (y mismo servicio
+// gratuito de generación de imagen QR, api.qrserver.com) que VehicleQrModal
+// en VehiclesPage.tsx.
+function RouteQrModal({
+  warehouseId,
+  deliveryZoneId,
+  carrierId,
+  carrierName,
+  zoneName,
+  onClose,
+  onError,
+}: {
+  warehouseId: string;
+  deliveryZoneId: string;
+  carrierId: string;
+  carrierName: string;
+  zoneName: string;
+  onClose: () => void;
+  onError: (message: string) => void;
+}) {
+  const scopeParams = { warehouseId, deliveryZoneId, carrierId };
+
+  const tokenQuery = useQuery({
+    queryKey: ["route-qr-token", warehouseId, deliveryZoneId, carrierId],
+    queryFn: async () => (await api.get("/route-qr", { params: scopeParams })).data as { token: string | null },
+  });
+
+  const issueMutation = useMutation({
+    mutationFn: async () => (await api.post("/route-qr", scopeParams)).data as { token: string },
+    onSuccess: () => tokenQuery.refetch(),
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo generar el QR"),
+  });
+
+  const token = issueMutation.data?.token ?? tokenQuery.data?.token ?? null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-slate-900 mb-1">QR de ruta — {carrierName}</h3>
+        <p className="text-xs text-slate-400 mb-3">Circuito: {zoneName}</p>
+        <p className="text-xs text-slate-500 mb-4">
+          El conductor lo escanea desde la App Conductor para identificarse (nombre, DNI, teléfono, matrícula) y
+          ver/operar la ruta de este circuito, cualquier día que este transportista tenga una asignada.
+        </p>
+
+        {tokenQuery.isLoading && <p className="text-sm text-slate-400 py-8">Cargando…</p>}
+
+        {!tokenQuery.isLoading && token && (
+          <>
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(token)}`}
+              alt={`Código QR de ruta para ${carrierName}`}
+              className="mx-auto rounded-lg border border-slate-200"
+              width={220}
+              height={220}
+            />
+            <p className="text-[10px] font-mono text-slate-400 mt-3 break-all">{token}</p>
+          </>
+        )}
+
+        {!tokenQuery.isLoading && !token && (
+          <p className="text-sm text-slate-400 py-6">Todavía no se ha generado un QR para este transportista en este circuito.</p>
+        )}
+
+        <div className="flex gap-2 mt-5">
+          <button
+            onClick={() => issueMutation.mutate()}
+            disabled={issueMutation.isPending}
+            className="flex-1 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+          >
+            {token ? "Generar nuevo (invalida el anterior)" : "Generar QR"}
+          </button>
+          <button onClick={onClose} className="text-sm text-slate-500 px-4 py-2">
+            Cerrar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

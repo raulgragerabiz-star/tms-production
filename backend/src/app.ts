@@ -137,7 +137,8 @@ export function createApp() {
   app.use("/api/dashboard", requireAuth, dashboardRouter);
   app.use("/api/warehouses", requireAuth, warehousesRouter);
   // Fase 25: QR de ruta (centro + circuito + transportista) -- gestión desde
-  // Backoffice (Maestros > Almacenes). El login público que RESUELVE un QR
+  // Backoffice (Flota y Transportistas > Rutas / Transportistas, dentro de
+  // cada fila circuito↔transportista). El login público que RESUELVE un QR
   // ya escaneado va en /api/auth/route-qr-login (sin requireAuth, ver
   // auth.routes.ts), no aquí.
   app.use("/api/route-qr", requireAuth, routeQrRouter);

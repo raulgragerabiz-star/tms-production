@@ -2,8 +2,8 @@
 // combinación centro + circuito de reparto (DeliveryZone) + transportista,
 // en vez de uno por vehículo/conductor (ver vehicle-qr.service.ts, que sigue
 // existiendo tal cual mientras se completa la sub-fase 4 de la App
-// Conductor). Se genera desde Maestros > Almacenes ("Rutas de este
-// almacén") y sirve para cualquier día en que ese transportista tenga ruta
+// Conductor). Se genera desde Flota y Transportistas > Rutas / Transportistas
+// (dentro de cada fila circuito↔transportista) y sirve para cualquier día en que ese transportista tenga ruta
 // real en ese circuito -- no depende de ninguna cuenta de conductor dada de
 // alta. Mismo criterio de revocar-no-borrar que el QR de vehículo, para no
 // romper un QR ya impreso hasta que se sepa que el nuevo se ha repartido.
