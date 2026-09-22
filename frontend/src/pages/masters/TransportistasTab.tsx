@@ -27,8 +27,24 @@ import { useAuthStore } from "@/store/auth-store";
 // DeliveryZoneRate independiente, así que un mismo transportista puede tener
 // una fila -- y una tarifa -- distinta en cada circuito); lo que cambiaba
 // era solo la forma de presentarlo y de darlo de alta.
+//
+// Fase 20 -- petición explícita de Raúl: "deberia tener un deplegable
+// inicial para seleccionar el centro de origen, y en base a cual se
+// seleccione, mostrar las rutas que pertenecen a ese centro y los
+// transportistas por cada ruta". Se añade un selector de almacén (mismo
+// GET /warehouses que ya usa InfluenceZonesPage.tsx) que filtra las
+// tarjetas de circuito por `DeliveryZone.warehouseId` -- puramente de
+// presentación en el frontend, no cambia ninguna consulta ni el modelo de
+// datos. Empieza en "Todos los centros" (no oculta nada hasta que Raúl
+// elige uno) porque hay circuitos sin almacén asignado todavía que de otro
+// modo desaparecerían nada más entrar en la pantalla.
 
 interface VehicleTypeOption {
+  id: string;
+  name: string;
+}
+
+interface WarehouseOption {
   id: string;
   name: string;
 }
@@ -85,6 +101,8 @@ export default function TransportistasTab() {
   // de quedarse con la foto del momento en que se abrió.
   const [fichaAssignmentId, setFichaAssignmentId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; error: boolean } | null>(null);
+  // Fase 20: "" = Todos los centros (no filtra nada).
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("");
 
   function notifySuccess(text: string) {
     setToastMsg({ text, error: false });
@@ -113,10 +131,18 @@ export default function TransportistasTab() {
     queryFn: async () => (await api.get("/vehicles/types")).data as { items: VehicleTypeOption[] },
   });
 
+  // Fase 20: mismo endpoint que ya usa InfluenceZonesPage.tsx en la otra
+  // sub-sección de "Zonas / Vehículos".
+  const warehousesQuery = useQuery({
+    queryKey: ["warehouses"],
+    queryFn: async () => (await api.get("/warehouses")).data as { items: WarehouseOption[] },
+  });
+
   const assignments = assignmentsQuery.data?.items ?? [];
   const zones = zonesQuery.data?.items ?? [];
   const vehicleTypes = vehicleTypesQuery.data?.items ?? [];
   const carriers = carriersQuery.data?.items ?? [];
+  const warehouses = warehousesQuery.data?.items ?? [];
   const fichaAssignment = assignments.find((a) => a.id === fichaAssignmentId) ?? null;
 
   // Una entrada por circuito (todos, incluso sin transportistas todavía) con
@@ -143,6 +169,15 @@ export default function TransportistasTab() {
     }
     return groups;
   }, [zones, assignments]);
+
+  // Fase 20: filtrado por centro de origen -- puramente de presentación,
+  // sobre los grupos ya calculados arriba. "Todos los centros" (valor "")
+  // no filtra nada; un circuito sin almacén asignado solo se ve ahí, nunca
+  // bajo un centro concreto.
+  const visibleZoneGroups = useMemo(() => {
+    if (!warehouseFilter) return zoneGroups;
+    return zoneGroups.filter((g) => g.zone.warehouse?.id === warehouseFilter);
+  }, [zoneGroups, warehouseFilter]);
 
   const carriersWithoutAssignment = useMemo(() => {
     const assignedCarrierIds = new Set(assignments.map((a) => a.carrier.id));
@@ -232,11 +267,14 @@ export default function TransportistasTab() {
     }
   }
 
+  const visibleAssignmentsCount = visibleZoneGroups.reduce((acc, g) => acc + g.assignments.length, 0);
+
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-slate-500">
-          {zones.length} circuitos · {assignments.length} asignaciones · {carriers.length} transportistas
+          {visibleZoneGroups.length} circuitos · {visibleAssignmentsCount} asignaciones · {carriers.length} transportistas
+          {warehouseFilter && zoneGroups.length !== visibleZoneGroups.length ? ` (de ${zoneGroups.length} circuitos en total)` : ""}
         </p>
         <div className="flex gap-2">
           <button
@@ -254,6 +292,25 @@ export default function TransportistasTab() {
         </div>
       </div>
 
+      {/* Fase 20: desplegable de centro de origen -- petición explícita de
+          Raúl. Filtra las tarjetas de circuito de abajo por el almacén del
+          circuito (DeliveryZone.warehouseId); no cambia ninguna consulta. */}
+      <div className="mb-4">
+        <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Centro de origen</label>
+        <select
+          value={warehouseFilter}
+          onChange={(e) => setWarehouseFilter(e.target.value)}
+          className="rounded-lg border border-slate-300 text-sm px-3 py-2 min-w-[240px]"
+        >
+          <option value="">Todos los centros</option>
+          {warehouses.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {zonesQuery.isLoading && <p className="text-sm text-slate-400 py-6 text-center">Cargando circuitos…</p>}
 
       {!zonesQuery.isLoading && zoneGroups.length === 0 && (
@@ -262,8 +319,14 @@ export default function TransportistasTab() {
         </div>
       )}
 
+      {!zonesQuery.isLoading && zoneGroups.length > 0 && visibleZoneGroups.length === 0 && (
+        <div className="bg-white rounded-xl border border-slate-200 px-3 py-6 text-center text-slate-400 text-sm">
+          Ningún circuito tiene este centro como almacén asignado todavía.
+        </div>
+      )}
+
       <div className="space-y-4">
-        {zoneGroups.map(({ zone, assignments: zoneAssignments }) => (
+        {visibleZoneGroups.map(({ zone, assignments: zoneAssignments }) => (
           <div key={zone.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
               <div>
