@@ -20,6 +20,14 @@ interface WarehouseRow {
   active: boolean;
   // Fase 8k: ver comentario en NewWarehouseModal.tsx / schema.prisma.
   maxRouteDurationHours: number | null;
+  // Fase 24: datos fiscales del emisor de documentos -- ver comentario en
+  // NewWarehouseModal.tsx. Se llevan aquí (aunque no se muestren en la
+  // tabla) para que el modal de edición pueda precargarlos.
+  fiscalName?: string | null;
+  taxId?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  mercantileRegistryText?: string | null;
 }
 
 export default function WarehousesPage() {

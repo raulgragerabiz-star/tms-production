@@ -20,13 +20,17 @@ model Company {
   id                      String                    @id @default(uuid())
   name                    String
   taxId                   String                    @unique @map("tax_id")
-  // Datos fiscales/de contacto del emisor, para poder imprimirlos en la
-  // cabecera de los documentos legales generados por el TMS (albarán de
-  // entrega y carta de porte -- petición de Raúl, "documentación real
-  // asociada a los pedidos"). Se tomaron como referencia sus propios
+  // Fase 8Q2: datos fiscales/de contacto del emisor, para poder imprimirlos
+  // en la cabecera de los documentos legales generados por el TMS (albarán
+  // de entrega y carta de porte). Se tomaron como referencia sus propios
   // documentos reales (pedido de venta / factura de BigMat Logística).
-  // Todo opcional: sin rellenar, la cabecera simplemente omite esa línea en
-  // vez de romper la generación del documento.
+  //
+  // Fase 24 ("usuarios app" sub-fase 2): DEPRECADOS -- estos campos ya NO
+  // se usan para generar documentos (ver Warehouse.fiscalName/taxId/phone/
+  // email/mercantileRegistryText más abajo, y document-pdf.service.ts). Se
+  // mantienen sin borrar solo para no perder el histórico ya guardado y por
+  // si algún día hiciera falta un dato de empresa a nivel global; no tienen
+  // pantalla propia desde la Fase 24 (se quitó de "TMS Configuración").
   address                 String?
   postalCode              String?                   @map("postal_code")
   city                    String?
@@ -127,6 +131,23 @@ model Warehouse {
   // transportista si lo tiene -- ver Carrier.maxRouteDurationHours y la
   // validación en routes.routes.ts, PATCH /:id/status).
   maxRouteDurationHours Decimal? @map("max_route_duration_hours") @db.Decimal(4, 2)
+  // Fase 24 ("usuarios app" sub-fase 2): datos fiscales/de contacto del
+  // EMISOR de los documentos legales generados por el TMS (albarán de
+  // entrega y carta de porte/DeCA -- ver document-pdf.service.ts),
+  // trasladados aquí desde Company -- petición explícita de Raúl. Antes
+  // estos datos eran únicos por empresa (un solo emisor para todo el TMS,
+  // fijados incluso a mano en el DeCA con la constante BIGMAT_CARGADOR);
+  // ahora cada centro puede tener su propia razón social/CIF fiscal (p. ej.
+  // delegaciones que facturan como sociedades distintas), sin depender de
+  // que Company esté bien rellenado. Reutiliza address/postalCode/city/
+  // province (ya existían arriba) como dirección fiscal -- solo hacían
+  // falta estos 5 campos nuevos. Todo opcional: sin rellenar, el documento
+  // omite esa línea, igual que antes con Company.
+  fiscalName             String?  @map("fiscal_name")
+  taxId                  String?  @map("tax_id")
+  phone                  String?
+  email                  String?
+  mercantileRegistryText String?  @map("mercantile_registry_text")
   active           Boolean  @default(true)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")

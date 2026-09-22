@@ -45,7 +45,6 @@ publicDocumentsRouter.get(
     });
     if (!order) throw HttpError.notFound("Documento no encontrado");
 
-    const company = await prisma.company.findUniqueOrThrow({ where: { id: order.companyId } });
     const pod = order.routeStops.find((s) => s.pod)?.pod ?? null;
     // El QR ya está impreso en el documento con esta misma URL -- se reutiliza
     // tal cual (no hace falta volver a firmar nada) para que el enlace de
@@ -53,9 +52,10 @@ publicDocumentsRouter.get(
     // de escanear.
     const verifyUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
 
+    // Fase 24: ya no hace falta consultar `Company` -- el emisor del albarán
+    // se lee de `order.warehouse` (datos fiscales del centro de origen).
     const pdf = await renderDeliveryNotePdf(
       { ...order, pod: pod ? { signatureUrl: pod.signatureUrl, receivedByName: pod.receivedByName, deliveredAt: pod.deliveredAt } : null },
-      company,
       verifyUrl
     );
 
@@ -95,10 +95,12 @@ publicDocumentsRouter.get(
     });
     if (!route) throw HttpError.notFound("Documento no encontrado");
 
-    const company = await prisma.company.findUniqueOrThrow({ where: { id: route.companyId } });
     const verifyUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
 
-    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, company, verifyUrl);
+    // Fase 24: ya no hace falta consultar `Company` -- el cargador
+    // contractual del DeCA se lee de `route.warehouse` (datos fiscales del
+    // centro de origen).
+    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, verifyUrl);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`);

@@ -96,7 +96,9 @@ function formatAddressLine(parts: (string | null | undefined)[]): string {
 
 interface CompanyProfile {
   name: string;
-  taxId: string;
+  // Fase 24: pasa a ser opcional/nullable -- ahora puede venir directamente
+  // de un almacén (Warehouse.taxId) sin datos fiscales rellenados todavía.
+  taxId: string | null;
   address?: string | null;
   postalCode?: string | null;
   city?: string | null;
@@ -161,6 +163,13 @@ function drawCompanyBlock(doc: PDFKit.PDFDocument, x: number, y: number, width: 
   doc.fontSize(10).font("Helvetica-Bold").text(company.name, x, y, { width });
   doc.font("Helvetica").fontSize(8.5).fillColor("#334155");
   let cy = y + 13;
+  // Fase 24: el CIF ahora es un dato real por centro (antes este bloque
+  // solo mostraba nombre/dirección/contacto, nunca el CIF) -- se muestra
+  // solo si está relleno, igual que el resto de líneas opcionales de aquí.
+  if (company.taxId) {
+    doc.text(`CIF: ${company.taxId}`, x, cy, { width });
+    cy += 11;
+  }
   if (company.address) {
     doc.text(company.address, x, cy, { width });
     cy += 11;
@@ -336,12 +345,32 @@ export interface DeliveryNoteOrder {
   notes: string | null;
   customer: { legalName: string; taxId: string | null };
   deliveryPoint: { label: string | null; address: string; postalCode: string | null; city: string | null; province: string | null; contactPhone: string | null };
-  warehouse: { name: string; address: string | null; postalCode: string | null; city: string | null; province: string | null };
+  // Fase 24: se añaden los datos fiscales del centro (ver Warehouse en
+  // schema.prisma) -- el emisor del albarán ya no se lee de Company, sino
+  // del propio almacén de origen del pedido.
+  warehouse: {
+    name: string;
+    address: string | null;
+    postalCode: string | null;
+    city: string | null;
+    province: string | null;
+    fiscalName: string | null;
+    taxId: string | null;
+    phone: string | null;
+    email: string | null;
+    mercantileRegistryText: string | null;
+  };
   lines: { quantity: any; unit: string; lineWeightKg: any; product: { sku: string; description: string; ean: string | null } }[];
   pod: { signatureUrl: string | null; receivedByName: string | null; deliveredAt: Date } | null;
 }
 
-export async function renderDeliveryNotePdf(order: DeliveryNoteOrder, company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
+// Fase 24: se elimina el parámetro `company` (Company) -- el emisor del
+// albarán se construye ahora a partir de `order.warehouse` (datos fiscales
+// del centro de origen), no de la empresa. Petición explícita de Raúl:
+// mismo criterio ya aplicado al DeCA en la Fase 10 (ver más abajo), pero
+// esta vez leyendo un dato real y editable por centro en vez de una
+// constante fija.
+export async function renderDeliveryNotePdf(order: DeliveryNoteOrder, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);
   const qrPng = await QRCode.toBuffer(verifyUrl, { margin: 1, width: 180 });
@@ -357,10 +386,27 @@ export async function renderDeliveryNotePdf(order: DeliveryNoteOrder, company: C
   );
   y += 10;
 
+  // Fase 24: emisor del documento = datos fiscales del almacén de origen
+  // (con "Origen: <nombre del centro>" como línea extra, ya que el nombre
+  // fiscal/razón social puede no coincidir con el nombre operativo del
+  // centro). Si el centro todavía no tiene datos fiscales rellenados, cae
+  // en su propio nombre como razón social y el resto de líneas simplemente
+  // se omiten -- mismo comportamiento que antes con Company sin rellenar.
+  const issuer: CompanyProfile = {
+    name: order.warehouse.fiscalName || order.warehouse.name,
+    taxId: order.warehouse.taxId,
+    address: order.warehouse.address,
+    postalCode: order.warehouse.postalCode,
+    city: order.warehouse.city,
+    province: order.warehouse.province,
+    phone: order.warehouse.phone,
+    email: order.warehouse.email,
+    mercantileRegistryText: order.warehouse.mercantileRegistryText,
+  };
+
   const colWidth = (doc.page.width - PAGE_MARGIN * 2 - 20) / 2;
-  const leftBottom = drawCompanyBlock(doc, PAGE_MARGIN, y, colWidth, company, [
-    `Origen: ${order.warehouse.name}${order.warehouse.address ? ` - ${order.warehouse.address}` : ""}`,
-    formatAddressLine([order.warehouse.postalCode, order.warehouse.city, order.warehouse.province]),
+  const leftBottom = drawCompanyBlock(doc, PAGE_MARGIN, y, colWidth, issuer, [
+    `Origen: ${order.warehouse.name}`,
   ]);
 
   const rightX = PAGE_MARGIN + colWidth + 20;
@@ -462,7 +508,7 @@ export async function renderDeliveryNotePdf(order: DeliveryNoteOrder, company: C
     { width: doc.page.width - PAGE_MARGIN * 2 }
   );
   doc.fillColor("#000000");
-  drawFooter(doc, company, `ALB-${order.orderNumber}`);
+  drawFooter(doc, issuer, `ALB-${order.orderNumber}`);
 
   doc.end();
   return bufferPromise;
@@ -475,7 +521,22 @@ export async function renderDeliveryNotePdf(order: DeliveryNoteOrder, company: C
 export interface CarriageNoteRoute {
   id: string;
   routeDate: Date;
-  warehouse: { name: string; address: string | null; postalCode: string | null; city: string | null; province: string | null };
+  // Fase 24: se añaden los datos fiscales del centro (ver Warehouse en
+  // schema.prisma) -- el "Cargador contractual" del DeCA ya no se lee de
+  // una constante fija (BIGMAT_CARGADOR, ver comentario de la Fase 10 más
+  // abajo, ahora eliminada), sino del propio almacén de origen de la ruta.
+  warehouse: {
+    name: string;
+    address: string | null;
+    postalCode: string | null;
+    city: string | null;
+    province: string | null;
+    fiscalName: string | null;
+    taxId: string | null;
+    phone: string | null;
+    email: string | null;
+    mercantileRegistryText: string | null;
+  };
   carrier: {
     legalName: string;
     taxId: string;
@@ -549,15 +610,22 @@ export interface CarriageNoteRoute {
 //    mantiene como ayuda opcional en "Gestionar ruta"), esos datos se usan
 //    solo como VALOR INICIAL del campo -- el campo sigue siendo editable
 //    dentro del PDF por quien lo abra, nunca de solo lectura.
-// Fase 10: "cargador contractual" del DeCA -- corrección explícita de Raúl:
-// este TMS es de una única empresa (BigMat), así que este bloque NUNCA debe
-// depender de lo que tenga (o no) rellenado el registro `Company` de cada
-// entorno -- se fija con los datos fiscales reales que aportó él mismo, para
-// que el documento sea siempre correcto sin importar el estado de esa tabla.
-// El parámetro `company` de la función se conserva (mismo tipo/firma que
-// `renderDeliveryNotePdf`, que sí sigue leyendo de `Company` con normalidad)
-// pero deja de usarse dentro de esta función -- el DeCA ya no lo necesita.
-const BIGMAT_CARGADOR: CompanyProfile = {
+// Fase 10 (superada por la Fase 24, ver justo debajo): "cargador
+// contractual" del DeCA fijado con una constante, porque en su momento este
+// TMS era de una única empresa y `Company` no siempre estaba bien
+// rellenado.
+//
+// Fase 24 ("usuarios app" sub-fase 2): el cargador contractual deja de
+// venir fijo y pasa a leerse del almacén de origen de la ruta
+// (route.warehouse.fiscalName/taxId/... -- ver Warehouse en schema.prisma),
+// igual que ya hace el albarán (ver renderDeliveryNotePdf) -- petición
+// explícita de Raúl para poder tener centros que facturan como sociedades
+// distintas. Se conserva como FALLBACK (no como valor fijo) los datos
+// reales que aportó él en su día, usados solo si el almacén de origen
+// todavía no tiene datos fiscales propios rellenados en Maestros >
+// Almacenes -- así ningún DeCA sale con el cargador en blanco mientras se
+// termina de rellenar cada centro.
+const BIGMAT_CARGADOR_FALLBACK: CompanyProfile = {
   name: "BIGMAT IBERIA S.A.",
   taxId: "A81759813",
   address: "Avenida de los Pirineos, 7, 1ª planta",
@@ -568,7 +636,7 @@ const BIGMAT_CARGADOR: CompanyProfile = {
   mercantileRegistryText: "Inscrita en el Registro Mercantil de Madrid",
 };
 
-export async function renderCarriageNotePdf(route: CarriageNoteRoute, _company: CompanyProfile, verifyUrl: string): Promise<Buffer> {
+export async function renderCarriageNotePdf(route: CarriageNoteRoute, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);
   // Fase 10: fecha/hora de generación del documento -- la norma exige que el
@@ -642,13 +710,29 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, _company: 
   const gap = 14;
   const colWidth = (doc.page.width - PAGE_MARGIN * 2 - gap) / 2;
 
-  // Fase 10: datos fijos de BigMat (ver `BIGMAT_CARGADOR` arriba) -- ya no se
-  // leen de `company` (parámetro de la función, ahora sin usar en el DeCA).
-  const cargadorLines: InfoBoxLine[] = [{ text: BIGMAT_CARGADOR.name, bold: true }, { text: `CIF: ${BIGMAT_CARGADOR.taxId}` }];
-  if (BIGMAT_CARGADOR.address) cargadorLines.push({ text: BIGMAT_CARGADOR.address });
-  const companyCityLine = formatAddressLine([BIGMAT_CARGADOR.postalCode, BIGMAT_CARGADOR.city, BIGMAT_CARGADOR.province]);
+  // Fase 24: cargador contractual = datos fiscales del almacén de origen de
+  // la ruta: si el centro todavía no los tiene rellenados (Maestros >
+  // Almacenes), cae en `BIGMAT_CARGADOR_FALLBACK` en vez de salir en blanco.
+  const cargador: CompanyProfile =
+    route.warehouse.fiscalName || route.warehouse.taxId
+      ? {
+          name: route.warehouse.fiscalName || route.warehouse.name,
+          taxId: route.warehouse.taxId,
+          address: route.warehouse.address,
+          postalCode: route.warehouse.postalCode,
+          city: route.warehouse.city,
+          province: route.warehouse.province,
+          phone: route.warehouse.phone,
+          email: route.warehouse.email,
+          mercantileRegistryText: route.warehouse.mercantileRegistryText,
+        }
+      : BIGMAT_CARGADOR_FALLBACK;
+  const cargadorLines: InfoBoxLine[] = [{ text: cargador.name, bold: true }];
+  if (cargador.taxId) cargadorLines.push({ text: `CIF: ${cargador.taxId}` });
+  if (cargador.address) cargadorLines.push({ text: cargador.address });
+  const companyCityLine = formatAddressLine([cargador.postalCode, cargador.city, cargador.province]);
   if (companyCityLine) cargadorLines.push({ text: companyCityLine });
-  if (BIGMAT_CARGADOR.phone) cargadorLines.push({ text: `Tel: ${BIGMAT_CARGADOR.phone}` });
+  if (cargador.phone) cargadorLines.push({ text: `Tel: ${cargador.phone}` });
 
   // "Transportista contratado" -- siempre el Carrier asignado a la ruta en el
   // Planificador (antes se llamaba "Transportista efectivo" y era sustituido
@@ -958,7 +1042,7 @@ export async function renderCarriageNotePdf(route: CarriageNoteRoute, _company: 
     { width: doc.page.width - PAGE_MARGIN * 2 }
   );
   doc.fillColor("#000000");
-  drawFooter(doc, BIGMAT_CARGADOR, decaNumber);
+  drawFooter(doc, cargador, decaNumber);
 
   doc.end();
   const pdfkitBytes = await bufferPromise;

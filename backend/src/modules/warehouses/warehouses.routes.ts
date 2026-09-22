@@ -52,6 +52,16 @@ const warehouseSchema = z.object({
   // Fase 8k: jornada laboral máxima (horas) admitida para una ruta que sale
   // de este almacén -- ver comentario en el modelo Warehouse (schema.prisma).
   maxRouteDurationHours: z.number().positive().max(24).optional(),
+  // Fase 24 ("usuarios app" sub-fase 2): datos fiscales del emisor de los
+  // documentos legales (albarán/DeCA) que salen de este centro -- ver
+  // comentario en el modelo Warehouse (schema.prisma) y en
+  // document-pdf.service.ts. Reutiliza address/postalCode/city/province, ya
+  // definidos arriba, como dirección fiscal.
+  fiscalName: z.string().optional(),
+  taxId: z.string().optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  mercantileRegistryText: z.string().optional(),
 });
 
 warehousesRouter.get(

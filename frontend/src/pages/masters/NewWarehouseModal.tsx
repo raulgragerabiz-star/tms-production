@@ -20,6 +20,14 @@ export interface WarehouseEditable {
   // Fase 8k: jornada laboral máxima (horas) admitida para una ruta que sale
   // de este almacén -- ver comentario en el modelo Warehouse (schema.prisma).
   maxRouteDurationHours: number | null;
+  // Fase 24 ("usuarios app" sub-fase 2): datos fiscales del emisor de los
+  // documentos legales (albarán/DeCA) que salen de este centro -- antes
+  // vivían en "TMS Configuración" (Company), ahora son por almacén.
+  fiscalName?: string | null;
+  taxId?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  mercantileRegistryText?: string | null;
 }
 
 interface Props {
@@ -45,6 +53,13 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
   const [lng, setLng] = useState("");
   const [externalCode, setExternalCode] = useState("");
   const [maxRouteDurationHours, setMaxRouteDurationHours] = useState("");
+  // Fase 24: datos fiscales del emisor de documentos (albarán/DeCA) -- ver
+  // comentario en WarehouseEditable arriba.
+  const [fiscalName, setFiscalName] = useState("");
+  const [taxId, setTaxId] = useState("");
+  const [fiscalPhone, setFiscalPhone] = useState("");
+  const [fiscalEmail, setFiscalEmail] = useState("");
+  const [mercantileRegistryText, setMercantileRegistryText] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -57,6 +72,11 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
     setLng(warehouse?.lng != null ? String(warehouse.lng) : "");
     setExternalCode(warehouse?.externalCode ?? "");
     setMaxRouteDurationHours(warehouse?.maxRouteDurationHours != null ? String(warehouse.maxRouteDurationHours) : "");
+    setFiscalName(warehouse?.fiscalName ?? "");
+    setTaxId(warehouse?.taxId ?? "");
+    setFiscalPhone(warehouse?.phone ?? "");
+    setFiscalEmail(warehouse?.email ?? "");
+    setMercantileRegistryText(warehouse?.mercantileRegistryText ?? "");
   }, [open, warehouse]);
 
   const mutation = useMutation({
@@ -71,6 +91,11 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
         lng: lng ? Number(lng) : undefined,
         externalCode: externalCode || undefined,
         maxRouteDurationHours: maxRouteDurationHours ? Number(maxRouteDurationHours) : undefined,
+        fiscalName: fiscalName || undefined,
+        taxId: taxId || undefined,
+        phone: fiscalPhone || undefined,
+        email: fiscalEmail || "",
+        mercantileRegistryText: mercantileRegistryText || undefined,
       };
       if (isEdit) return (await api.put(`/warehouses/${warehouse!.id}`, payload)).data;
       return (await api.post("/warehouses", payload)).data;
@@ -140,6 +165,49 @@ export default function NewWarehouseModal({ open, warehouse, onClose, onSuccess,
             placeholder="Sin límite propio"
           />
         </Field>
+
+        {/* Fase 24 ("usuarios app" sub-fase 2): datos del EMISOR que se
+            imprimen en la cabecera/pie del albarán de entrega y del DeCA
+            generados desde este centro -- antes vivían en "TMS
+            Configuración" (una única empresa para todo el TMS), ahora son
+            por almacén, para poder tener centros que facturan como
+            sociedades distintas. Sin rellenar, el documento cae en el
+            propio nombre del almacén como razón social y omite el resto de
+            líneas, igual que antes con los datos de empresa sin rellenar. */}
+        <div className="border-t border-slate-200 pt-4">
+          <p className="text-sm font-semibold text-slate-700 mb-1">Datos fiscales (documentos)</p>
+          <p className="text-xs text-slate-500 mb-3">
+            Se imprimen en la cabecera y el pie del albarán de entrega y del DeCA que se generan desde este centro. Sin
+            rellenar, el documento usa el nombre del almacén como razón social y omite el resto de líneas.
+          </p>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <Field label="Razón social" hint="Si se deja vacío, se usa el nombre del almacén">
+              <input className={inputCls} value={fiscalName} onChange={(e) => setFiscalName(e.target.value)} placeholder={name || "BIGMAT IBERIA S.A."} />
+            </Field>
+            <Field label="CIF">
+              <input className={inputCls} value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="A81759813" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <Field label="Teléfono">
+              <input className={inputCls} value={fiscalPhone} onChange={(e) => setFiscalPhone(e.target.value)} />
+            </Field>
+            <Field label="Email">
+              <input type="email" className={inputCls} value={fiscalEmail} onChange={(e) => setFiscalEmail(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Registro Mercantil (pie de página)">
+            <input
+              className={inputCls}
+              value={mercantileRegistryText}
+              onChange={(e) => setMercantileRegistryText(e.target.value)}
+              placeholder="Inscrita en el Registro Mercantil de Madrid al Tomo: 25614, Folio: 165, Hoja: M-461575"
+            />
+          </Field>
+          <p className="text-xs text-slate-400 mt-2">
+            La dirección/CP/población/provincia de la cabecera fiscal son las mismas que la dirección del almacén, arriba.
+          </p>
+        </div>
 
         {isEdit && <WarehouseRoutesEditor warehouseId={warehouse!.id} onError={onError} />}
 

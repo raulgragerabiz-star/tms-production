@@ -977,14 +977,14 @@ routesRouter.get(
     if (!route) throw HttpError.notFound("Ruta no encontrada");
     if (route.stops.length === 0) throw HttpError.badRequest("Esta ruta todavía no tiene paradas -- no hay mercancía que documentar");
 
-    const company = await prisma.company.findUniqueOrThrow({ where: { id: req.auth!.companyId } });
-
     const token = signDocumentToken({ typ: "carriage_note", id: route.id });
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/carriage-note/${route.id}?token=${token}`;
 
+    // Fase 24: ya no hace falta consultar `Company` -- el cargador
+    // contractual del DeCA se lee de `route.warehouse` (datos fiscales del
+    // centro de origen).
     const pdf = await renderCarriageNotePdf(
       { ...route, driver: route.shipment?.driver ?? null },
-      company,
       verifyUrl
     );
 

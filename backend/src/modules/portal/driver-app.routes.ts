@@ -589,7 +589,6 @@ driverAppRouter.get(
             deliveryPoint: true,
             warehouse: true,
             lines: { include: { product: { select: { sku: true, description: true, ean: true } } } },
-            company: true,
           },
         },
       },
@@ -598,12 +597,13 @@ driverAppRouter.get(
 
     const token = signDocumentToken({ typ: "delivery_note", id: stop.order.id });
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/delivery-note/${stop.order.id}?token=${token}`;
+    // Fase 24: ya no hace falta el include de `company` -- el emisor del
+    // albarán se lee de `stop.order.warehouse`.
     const pdf = await renderDeliveryNotePdf(
       {
         ...stop.order,
         pod: stop.pod ? { signatureUrl: stop.pod.signatureUrl, receivedByName: stop.pod.receivedByName, deliveredAt: stop.pod.deliveredAt } : null,
       },
-      stop.order.company,
       verifyUrl
     );
     res.setHeader("Content-Type", "application/pdf");
@@ -637,7 +637,6 @@ driverAppRouter.get(
             },
           },
         },
-        company: true,
         // Fase 10: `phone` -- el DeCA ya muestra los datos del conductor.
         shipment: { include: { driver: { select: { fullName: true, taxId: true, phone: true } } } },
       },
@@ -645,7 +644,9 @@ driverAppRouter.get(
 
     const token = signDocumentToken({ typ: "carriage_note", id: route.id });
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/carriage-note/${route.id}?token=${token}`;
-    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, route.company, verifyUrl);
+    // Fase 24: ya no hace falta el include de `company` -- el cargador
+    // contractual del DeCA se lee de `route.warehouse`.
+    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, verifyUrl);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`);
     res.send(pdf);

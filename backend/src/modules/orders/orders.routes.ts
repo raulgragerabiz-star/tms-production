@@ -268,15 +268,15 @@ ordersRouter.get(
     });
     if (!order) throw HttpError.notFound("Pedido no encontrado");
 
-    const company = await prisma.company.findUniqueOrThrow({ where: { id: req.auth!.companyId } });
     const pod = order.routeStops.find((s) => s.pod)?.pod ?? null;
 
     const token = signDocumentToken({ typ: "delivery_note", id: order.id });
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/delivery-note/${order.id}?token=${token}`;
 
+    // Fase 24: ya no hace falta consultar `Company` -- el emisor del albarán
+    // se lee de `order.warehouse` (datos fiscales del centro de origen).
     const pdf = await renderDeliveryNotePdf(
       { ...order, pod: pod ? { signatureUrl: pod.signatureUrl, receivedByName: pod.receivedByName, deliveredAt: pod.deliveredAt } : null },
-      company,
       verifyUrl
     );
 
