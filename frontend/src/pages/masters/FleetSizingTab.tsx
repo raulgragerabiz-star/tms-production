@@ -107,10 +107,17 @@ function apiErrorMessage(err: unknown): string {
   return anyErr?.response?.data?.message ?? anyErr?.message ?? "error desconocido";
 }
 
-export default function FleetSizingTab() {
+// Fase 22: `warehouseId` (opcional) -- petición explícita de Raúl para que
+// el selector de centro de origen que gobierna "Zonas de influencia"
+// (CarrierFleetPage.tsx) también filtre esta analítica, que hasta ahora
+// agregaba todos los almacenes juntos sin más (de ahí que pareciera
+// "atascada" siempre en los datos de Getafe). Ver el filtrado real en
+// fleet-sizing.service.ts / fleet-sizing-distance.service.ts -- aquí solo
+// se reenvía como query param.
+export default function FleetSizingTab({ warehouseId }: { warehouseId?: string }) {
   const query = useQuery<FleetSizingResult>({
-    queryKey: ["fleet-sizing"],
-    queryFn: async () => (await api.get("/fleet-sizing")).data,
+    queryKey: ["fleet-sizing", warehouseId],
+    queryFn: async () => (await api.get("/fleet-sizing", { params: warehouseId ? { warehouseId } : {} })).data,
     refetchInterval: 300000,
   });
 

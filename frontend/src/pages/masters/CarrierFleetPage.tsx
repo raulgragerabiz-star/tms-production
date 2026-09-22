@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/api/client";
 import TransportistasTab from "@/pages/masters/TransportistasTab";
 import VehiclesPage from "@/pages/masters/VehiclesPage";
 import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
 import FleetSizingTab from "@/pages/masters/FleetSizingTab";
+
+interface WarehouseOption {
+  id: string;
+  name: string;
+}
 
 // Fase 8: petición explícita de Raúl -- reducir esto de 5 pestañas
 // (Empresa/Tarifas/Vehículos/Conductores/Tipo de vehículo) a menos,
@@ -29,6 +36,15 @@ import FleetSizingTab from "@/pages/masters/FleetSizingTab";
 //     por circuito -- ver comentario de cabecera de ese fichero).
 //   - "Zonas / Vehículos": tipos de vehículo + zonas de influencia +
 //     analítica de flota, todo junto.
+//
+// Fase 22: petición explícita de Raúl -- "esa parte [analítica de flota /
+// criterio de asignación] es con datos de almacen getafe, al cambiar de
+// almacén en las zonas de influencia, los datos de getafe se mantienen a la
+// vista". El selector de centro de origen se sube aquí, a la pestaña
+// "Zonas / Vehículos" entera, y gobierna a la vez a InfluenceZonesPage
+// (antes tenía su propio selector interno, ahora controlado desde aquí) y a
+// FleetSizingTab (antes no filtraba por almacén en absoluto) -- un único
+// desplegable en vez de dos que no se sincronizaban.
 type Tab = "rutas-transportistas" | "zonas-vehiculos";
 
 const TABS: { id: Tab; label: string }[] = [
@@ -38,6 +54,22 @@ const TABS: { id: Tab; label: string }[] = [
 
 export default function CarrierFleetPage() {
   const [tab, setTab] = useState<Tab>("rutas-transportistas");
+  const [warehouseId, setWarehouseId] = useState<string>("");
+
+  const warehousesQuery = useQuery({
+    queryKey: ["warehouses"],
+    queryFn: async () => (await api.get("/warehouses")).data as { items: WarehouseOption[] },
+  });
+  const warehouses = warehousesQuery.data?.items ?? [];
+
+  // Mismo criterio que ya tenía InfluenceZonesPage.tsx antes de esta fase:
+  // empezar en el primer almacén en cuanto se conoce la lista, en vez de
+  // dejar la pantalla sin ningún centro seleccionado.
+  useEffect(() => {
+    if (!warehouseId && warehouses.length > 0) {
+      setWarehouseId(warehouses[0].id);
+    }
+  }, [warehouseId, warehouses]);
 
   return (
     <div>
@@ -71,17 +103,36 @@ export default function CarrierFleetPage() {
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Tipos de vehículo</p>
             <VehiclesPage embedded activeTab="types" />
           </div>
+
+          {/* Fase 22: selector de centro de origen compartido -- gobierna a
+              la vez las zonas de influencia y la analítica de flota de aquí
+              abajo, en vez de que cada una tuviera el suyo por separado. */}
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">Centro de origen</label>
+            <select
+              value={warehouseId}
+              onChange={(e) => setWarehouseId(e.target.value)}
+              className="rounded-lg border border-slate-300 text-sm px-3 py-2 min-w-[240px]"
+            >
+              {warehouses.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
               Zonas de influencia (franjas de km del auto-planificador)
             </p>
-            <InfluenceZonesPage embedded />
+            <InfluenceZonesPage embedded warehouseId={warehouseId} />
           </div>
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">
               Analítica de flota por circuito
             </p>
-            <FleetSizingTab />
+            <FleetSizingTab warehouseId={warehouseId} />
           </div>
         </div>
       )}

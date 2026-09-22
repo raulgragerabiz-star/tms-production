@@ -140,7 +140,18 @@ function describeWeeklyFrequency(weekdayCounts: number[], totalViajes: number): 
   return `${names.slice(0, -1).join(" ")} y ${names[names.length - 1]}`;
 }
 
-export async function computeFleetSizing(companyId: string): Promise<FleetSizingResult> {
+// Fase 22: petición explícita de Raúl -- "esa parte es con datos de almacen
+// getafe, al cambiar de almacen en las zonas de influencia, los datos de
+// getafe se mantienen a la vista". Hasta ahora esta pantalla no filtraba por
+// almacén en absoluto (agregaba TODOS los circuitos de la empresa, viniera
+// el pedido de donde viniera) -- de ahí que pareciera "atascada" en Getafe:
+// simplemente no cambiaba nunca. `warehouseId` (opcional) filtra cada parada
+// por el almacén REAL desde el que se sirvió el pedido (`Order.warehouseId`,
+// el dato real de fulfillment -- no una heurística de cercanía como en
+// fleet-sizing-distance.service.ts, que trabaja con clientes sin pedidos
+// todavía). Sin `warehouseId`, el comportamiento es idéntico al de siempre
+// (todos los almacenes juntos).
+export async function computeFleetSizing(companyId: string, warehouseId?: string): Promise<FleetSizingResult> {
   const [routes, vehicleTypes] = await Promise.all([
     prisma.route.findMany({
       where: { companyId },
@@ -170,6 +181,7 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
   const pairsMap = new Map<string, { customerId: string; warehouseId: string }>();
   for (const r of routes) {
     for (const s of r.stops) {
+      if (warehouseId && s.order.warehouseId !== warehouseId) continue; // Fase 22: filtro por centro de origen
       const key = `${s.order.customerId}::${s.order.warehouseId}`;
       if (!pairsMap.has(key)) pairsMap.set(key, { customerId: s.order.customerId, warehouseId: s.order.warehouseId });
     }
@@ -209,6 +221,7 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
     let totalWeightKg = 0;
     const weekday = (r.routeDate.getUTCDay() + 6) % 7; // 0 = lunes, igual que /dashboard/accumulated
     for (const s of r.stops) {
+      if (warehouseId && s.order.warehouseId !== warehouseId) continue; // Fase 22: filtro por centro de origen
       const weightKg = s.order.lines.reduce((acc: number, l: any) => acc + Number(l.lineWeightKg ?? 0), 0);
       totalWeightKg += weightKg;
       const zone = zoneByPair.get(`${s.order.customerId}::${s.order.warehouseId}`);

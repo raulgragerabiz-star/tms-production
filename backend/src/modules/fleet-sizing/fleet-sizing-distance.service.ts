@@ -55,7 +55,16 @@ export interface DistanceAnalyticsResult {
   dispersionGeografica: RouteDispersionRow[];
 }
 
-export async function computeDistanceAnalytics(companyId: string): Promise<DistanceAnalyticsResult> {
+// Fase 22: mismo filtro por centro de origen que fleet-sizing.service.ts
+// (ver comentario ahí) -- petición explícita de Raúl porque este bloque no
+// cambiaba nunca al elegir otro almacén en "Zonas de influencia". Aquí el
+// filtro es por el almacén ANCLA resuelto de cada cliente (no por
+// Order.warehouseId como en fleet-sizing.service.ts): "criterio de
+// distancia" y "dispersión geográfica" hablan de clientes por su dirección,
+// no de pedidos ya servidos, así que el almacén relevante es desde el que
+// se les serviría (ver resolveAnchorWarehouseId más abajo), igual que en
+// /dashboard/clients-map.
+export async function computeDistanceAnalytics(companyId: string, warehouseId?: string): Promise<DistanceAnalyticsResult> {
   const [warehouses, customers] = await Promise.all([
     prisma.warehouse.findMany({
       where: { companyId, active: true, lat: { not: null }, lng: { not: null } },
@@ -107,6 +116,7 @@ export async function computeDistanceAnalytics(companyId: string): Promise<Dista
     if (!point) continue;
     const anchorId = resolveAnchorWarehouseId({ lat: point.lat!, lng: point.lng! }, c.deliveryZone?.warehouseId ?? null);
     if (!anchorId) continue;
+    if (warehouseId && anchorId !== warehouseId) continue; // Fase 22: filtro por centro de origen
     const warehouse = warehouseById.get(anchorId)!;
     const km = haversineKm({ lat: warehouse.lat!, lng: warehouse.lng! }, { lat: point.lat!, lng: point.lng! });
     anchorByCustomer.set(c.id, anchorId);

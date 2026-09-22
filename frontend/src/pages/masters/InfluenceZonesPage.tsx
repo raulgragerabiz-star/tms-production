@@ -32,10 +32,30 @@ const cellCls = "w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm";
 // propio; el resto de la pantalla (selector de almacén, tabla de franjas)
 // funciona exactamente igual. Sin el prop (por si algo la sigue montando
 // suelta) el comportamiento no cambia en nada.
-export default function InfluenceZonesPage({ embedded = false }: { embedded?: boolean }) {
+//
+// Fase 22: `warehouseId` (opcional, controlado) -- petición explícita de
+// Raúl: "al cambiar de almacén en las zonas de influencia, los datos de
+// getafe [en la analítica de flota] se mantienen a la vista".
+// CarrierFleetPage.tsx ahora sube el selector de centro de origen a la
+// pestaña entera ("Zonas / Vehículos"), para que gobierne esta pantalla Y la
+// analítica de flota a la vez con un único desplegable, en vez de tener dos
+// selectores independientes que no se sincronizaban. Si se pasa esta prop,
+// este componente NO gestiona su propio estado ni pinta su propio
+// `<select>` (lo hace el padre, que también decide el cambio); si no se
+// pasa (nadie más la monta así por ahora, pero por si acaso), se comporta
+// exactamente igual que antes.
+export default function InfluenceZonesPage({
+  embedded = false,
+  warehouseId: controlledWarehouseId,
+}: {
+  embedded?: boolean;
+  warehouseId?: string;
+}) {
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
-  const [warehouseId, setWarehouseId] = useState<string>("");
+  const isControlled = controlledWarehouseId !== undefined;
+  const [internalWarehouseId, setInternalWarehouseId] = useState<string>("");
+  const warehouseId = isControlled ? controlledWarehouseId! : internalWarehouseId;
 
   const warehousesQuery = useQuery({
     queryKey: ["warehouses"],
@@ -44,11 +64,13 @@ export default function InfluenceZonesPage({ embedded = false }: { embedded?: bo
 
   // Objetivo 2: las franjas se definen por almacén -- la distancia se mide
   // desde ese almacén concreto, así que cada uno tiene su propia tabla.
+  // (Fase 22: en modo controlado, el valor inicial lo decide el padre.)
   useEffect(() => {
-    if (!warehouseId && warehousesQuery.data?.items.length) {
-      setWarehouseId(warehousesQuery.data.items[0].id);
+    if (isControlled) return;
+    if (!internalWarehouseId && warehousesQuery.data?.items.length) {
+      setInternalWarehouseId(warehousesQuery.data.items[0].id);
     }
-  }, [warehouseId, warehousesQuery.data]);
+  }, [isControlled, internalWarehouseId, warehousesQuery.data]);
 
   const vehicleTypesQuery = useQuery({
     queryKey: ["vehicle-types"],
@@ -124,19 +146,23 @@ export default function InfluenceZonesPage({ embedded = false }: { embedded?: bo
         </button>
       </div>
 
-      <div className="mb-4 mt-4">
-        <select
-          value={warehouseId}
-          onChange={(e) => setWarehouseId(e.target.value)}
-          className="rounded-lg border border-slate-300 text-sm px-3 py-2"
-        >
-          {warehousesQuery.data?.items.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {/* Fase 22: en modo controlado el selector lo pinta el padre
+          (CarrierFleetPage.tsx), compartido con la analítica de flota. */}
+      {!isControlled && (
+        <div className="mb-4 mt-4">
+          <select
+            value={warehouseId}
+            onChange={(e) => setInternalWarehouseId(e.target.value)}
+            className="rounded-lg border border-slate-300 text-sm px-3 py-2"
+          >
+            {warehousesQuery.data?.items.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">
