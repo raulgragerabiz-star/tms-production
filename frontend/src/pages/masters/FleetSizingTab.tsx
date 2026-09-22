@@ -34,6 +34,40 @@ interface FleetSizingRouteRow {
   pctSalidasExceden: number;
 }
 
+// Fase 19: "resumen acumulado por ruta" + "criterio de asignación por
+// distancia" + "dispersión geográfica" -- petición explícita de Raúl a
+// partir de un informe de referencia propio, para dar más contexto en esta
+// misma pestaña además de la tabla de percentiles de arriba (ver comentario
+// largo en fleet-sizing.service.ts / fleet-sizing-distance.service.ts).
+interface RouteAccumulatedRow {
+  deliveryZoneId: string;
+  deliveryZoneName: string;
+  kgTotales: number;
+  pedidos: number;
+  clientes: number;
+  viajes: number;
+  kgPorViaje: number;
+  frecuencia: string;
+}
+
+interface DistanceTierSummaryRow {
+  tier: string;
+  label: string;
+  clientes: number;
+  vehiculoSugerido: string;
+  frecuenciaSugerida: string;
+}
+
+interface RouteDispersionRow {
+  deliveryZoneId: string;
+  deliveryZoneName: string;
+  minKm: number;
+  mediaKm: number;
+  maxKm: number;
+  dispersionKm: number;
+  clientes: number;
+}
+
 interface FleetSizingResult {
   rutas: FleetSizingRouteRow[];
   flota: {
@@ -43,7 +77,26 @@ interface FleetSizingResult {
     diaMayorConcurrenciaLabel: string | null;
     reduccionPct: number | null;
   };
+  resumenAcumulado: RouteAccumulatedRow[];
+  criterioDistancia: DistanceTierSummaryRow[];
+  dispersionGeografica: RouteDispersionRow[];
 }
+
+// Colores por franja de distancia: rampa SECUENCIAL de un solo tono (el azul
+// de marca de BigMat, brand-300..700 de claro a oscuro), no colores
+// categóricos -- las franjas son un orden (más cerca -> más lejos), no
+// identidades sin relación entre sí, así que les corresponde una rampa de
+// magnitud (criterio del skill de dataviz), y de paso reutiliza el color
+// corporativo ya definido en tailwind.config en vez de introducir uno nuevo
+// que hubiera que validar aparte. Solo se usa como acento de borde; el
+// nombre de la franja y el nº de clientes siempre van en texto.
+const TIER_ACCENT: Record<string, string> = {
+  metropolitana: "border-t-brand-300",
+  regional_cercana: "border-t-brand-400",
+  regional_extendida: "border-t-brand-500",
+  larga_distancia: "border-t-brand-600",
+  internacional: "border-t-brand-700",
+};
 
 function formatKg(kg: number) {
   return kg.toLocaleString("es-ES");
@@ -68,19 +121,25 @@ export default function FleetSizingTab() {
     return <p className="text-sm text-slate-400">Cargando…</p>;
   }
 
-  const { rutas, flota } = query.data;
+  const { rutas, flota, resumenAcumulado, criterioDistancia, dispersionGeografica } = query.data;
+  const maxKgTotales = Math.max(1, ...resumenAcumulado.map((r) => r.kgTotales));
 
-  if (rutas.length === 0) {
-    return (
-      <p className="text-sm text-slate-400 py-6 text-center">
-        Todavía no hay histórico de rutas suficiente para calcular vehículo recomendado por circuito. En cuanto haya
-        rutas reales con paradas y peso asignados, aparecerán aquí.
-      </p>
-    );
-  }
-
+  // Fase 19: antes, sin histórico de rutas, esta pestaña no mostraba nada en
+  // absoluto. Ahora los tres bloques nuevos (resumen acumulado, criterio de
+  // distancia, dispersión geográfica) no dependen de que haya rutas
+  // planificadas todavía -- el de distancia, en concreto, solo depende de
+  // que los clientes tengan dirección geolocalizada (Fase 16) -- así que se
+  // muestran igualmente aunque la tabla de percentiles todavía no tenga
+  // datos.
   return (
     <div>
+      {rutas.length === 0 ? (
+        <p className="text-sm text-slate-400 py-6 text-center border border-dashed border-slate-200 rounded-xl mb-8">
+          Todavía no hay histórico de rutas suficiente para calcular vehículo recomendado por circuito. En cuanto haya
+          rutas reales con paradas y peso asignados, aparecerán aquí.
+        </p>
+      ) : (
+        <>
       <p className="text-xs text-slate-500 mb-3">
         Carga acumulada por circuito (todo el histórico real de salidas) y el tipo de vehículo más pequeño que cubre
         el 85% de esas salidas (P85) sin sobredimensionar la flota.
@@ -174,6 +233,141 @@ export default function FleetSizingTab() {
           Día de mayor concurrencia — dimensiona la flota compartida
         </p>
       )}
+        </>
+      )}
+
+      {/* Fase 19: resumen acumulado por ruta -- kg totales, pedidos, clientes,
+          viajes y frecuencia semanal por circuito, con barra de magnitud de
+          kg totales. Petición explícita de Raúl a partir de un informe de
+          referencia propio; crecerá hacia esas cifras a medida que se
+          acumule más histórico real (ver comentario en fleet-sizing.service.ts). */}
+      <div className="mt-8">
+        <p className="text-[0.7rem] font-bold uppercase tracking-wider text-slate-400 mb-1">Resumen acumulado por ruta</p>
+        <p className="text-xs text-slate-500 mb-3">
+          Kg totales, pedidos, clientes distintos, viajes y frecuencia semanal habitual de cada circuito -- todo el
+          histórico real acumulado.
+        </p>
+        {resumenAcumulado.length === 0 ? (
+          <p className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-xl">
+            Todavía no hay pedidos con circuito resuelto en el histórico.
+          </p>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-[11px] font-semibold uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-3 py-2">Ruta</th>
+                  <th className="text-left px-3 py-2 w-1/3">Kg totales</th>
+                  <th className="text-right px-3 py-2">Pedidos</th>
+                  <th className="text-right px-3 py-2">Clientes</th>
+                  <th className="text-right px-3 py-2">Viajes</th>
+                  <th className="text-right px-3 py-2">Kg/viaje</th>
+                  <th className="text-left px-3 py-2">Frecuencia</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {resumenAcumulado.map((r) => (
+                  <tr key={r.deliveryZoneId} className="hover:bg-brand-50/60">
+                    <td className="px-3 py-2 font-semibold text-brand-700 whitespace-nowrap">{r.deliveryZoneName}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-brand-500"
+                            style={{ width: `${Math.max(2, Math.round((r.kgTotales / maxKgTotales) * 100))}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-xs text-slate-600 whitespace-nowrap">{formatKg(r.kgTotales)}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.pedidos.toLocaleString("es-ES")}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.clientes}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.viajes}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{formatKg(r.kgPorViaje)}</td>
+                    <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{r.frecuencia}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Fase 19: criterio de asignación ruta/cliente por distancia real --
+          mismas franjas que el mapa de clientes de Inicio (Fase 16), aquí
+          agregadas en nº de clientes por franja con el vehículo/frecuencia
+          típica de cada una. */}
+      <div className="mt-8">
+        <p className="text-[0.7rem] font-bold uppercase tracking-wider text-slate-400 mb-1">
+          Criterio de asignación ruta/cliente por distancia real
+        </p>
+        <p className="text-xs text-slate-500 mb-3">
+          Zonificación concéntrica desde el almacén de referencia de cada cliente. El vehículo y la frecuencia se
+          ajustan al perímetro real, no al nombre histórico de la ruta.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {criterioDistancia.map((t) => (
+            <div key={t.tier} className={`bg-white rounded-xl border border-slate-200 border-t-4 ${TIER_ACCENT[t.tier] ?? ""} p-3`}>
+              <p className="text-[0.65rem] font-semibold uppercase tracking-wide text-slate-400">{t.label}</p>
+              <p className="font-mono text-2xl font-bold mt-1 text-slate-900">{t.clientes} clientes</p>
+              <p className="text-xs text-slate-500 mt-1">
+                {t.vehiculoSugerido} · {t.frecuenciaSugerida}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Fase 19: dispersión geográfica -- un circuito con clientes muy
+          dispersos en distancia (mezcla cercanos y lejanos) es candidato a
+          dividirse en dos, igual que en el informe de referencia de Raúl. */}
+      <div className="mt-8">
+        <p className="text-[0.7rem] font-bold uppercase tracking-wider text-slate-400 mb-1">
+          Dispersión geográfica de las rutas actuales
+        </p>
+        <p className="text-xs text-slate-500 mb-3">
+          Cuanto mayor la desviación (columna "Dispersión"), más mezclada está la ruta entre clientes cercanos y
+          lejanos -- candidata a dividirse en dos perímetros.
+        </p>
+        {dispersionGeografica.length === 0 ? (
+          <p className="text-sm text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-xl">
+            Todavía no hay suficientes clientes geolocalizados y con circuito asignado para calcular esto.
+          </p>
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-[11px] font-semibold uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-3 py-2">Ruta actual</th>
+                  <th className="text-right px-3 py-2">Mín. km</th>
+                  <th className="text-right px-3 py-2">Media km</th>
+                  <th className="text-right px-3 py-2">Máx. km</th>
+                  <th className="text-right px-3 py-2">Dispersión (σ)</th>
+                  <th className="text-right px-3 py-2">Clientes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {dispersionGeografica.map((r) => (
+                  <tr key={r.deliveryZoneId} className="hover:bg-brand-50/60">
+                    <td className="px-3 py-2 font-semibold text-brand-700 whitespace-nowrap">{r.deliveryZoneName}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.minKm}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.mediaKm}</td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.maxKm}</td>
+                    <td
+                      className={`px-3 py-2 text-right font-mono font-semibold ${
+                        r.dispersionKm >= 80 ? "text-rose-600" : r.dispersionKm >= 40 ? "text-amber-600" : "text-slate-500"
+                      }`}
+                    >
+                      {r.dispersionKm}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-slate-600">{r.clientes}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

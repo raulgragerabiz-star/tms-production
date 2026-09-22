@@ -5,6 +5,10 @@ import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { resolveDeliveryZonesForPairs } from "@/modules/customers/customer-zone-resolution";
 import { haversineKm, RoutePoint } from "@/modules/routing/routing.service";
+// Fase 19: extraído a @/lib/distance-tiers para reutilizar los mismos cortes
+// también en "Zonas / Vehículos" -> "Criterio de asignación ruta/cliente por
+// distancia real" -- sin cambios de comportamiento aquí.
+import { DISTANCE_TIERS, classifyDistanceKm } from "@/lib/distance-tiers";
 
 export const dashboardRouter = Router();
 
@@ -965,18 +969,9 @@ dashboardRouter.get(
 // Distinto de InfluenceZone (Objetivo 2, configurable por almacén y pensado
 // para asignar vehículo): aquí es solo una clasificación visual fija para
 // colorear el mapa y sugerir una "zona de reparto recomendada" en la ficha
-// de cada cliente.
-const DISTANCE_TIERS: { tier: string; label: string; maxKm: number }[] = [
-  { tier: "metropolitana", label: "Metropolitana (0-40 km)", maxKm: 40 },
-  { tier: "regional_cercana", label: "Regional cercana (40-120 km)", maxKm: 120 },
-  { tier: "regional_extendida", label: "Regional extendida (120-250 km)", maxKm: 250 },
-  { tier: "larga_distancia", label: "Larga distancia (250-450 km)", maxKm: 450 },
-  { tier: "internacional", label: "Internacional (>450 km)", maxKm: Infinity },
-];
-function classifyDistanceKm(km: number): { tier: string; label: string } {
-  const found = DISTANCE_TIERS.find((t) => km <= t.maxKm)!;
-  return { tier: found.tier, label: found.label };
-}
+// de cada cliente. (Fase 19: DISTANCE_TIERS/classifyDistanceKm ahora viven en
+// @/lib/distance-tiers, importados arriba, para reutilizarse también en
+// "Zonas / Vehículos" -- sin cambios de comportamiento aquí.)
 
 // Frecuencia de envío sugerida: a falta de un campo de frecuencia pactada
 // con el cliente, se estima a partir de su ritmo real de pedidos (nº de

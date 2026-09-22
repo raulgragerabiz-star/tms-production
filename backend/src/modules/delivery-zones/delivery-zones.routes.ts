@@ -11,6 +11,13 @@
 //   GET    /api/delivery-zones                 -- listado de circuitos
 //   POST   /api/delivery-zones                 -- alta de circuito
 //   PATCH  /api/delivery-zones/:id              -- editar / dar de baja
+//   DELETE /api/delivery-zones/:id              -- eliminar circuito por
+//     completo (Fase 19: hasta ahora solo se podían añadir circuitos o
+//     transportistas a un circuito, nunca sacar un circuito entero -- "hay
+//     que poder eliminar rutas, actualmente solo se pueden añadir rutas o
+//     transportistas a cada ruta, pero no se pueden eliminar si algun se
+//     tiene que sacar de ese almacen". Solo admin, es irreversible: ver
+//     comentario junto al handler)
 //   GET    /api/delivery-zones/assignments      -- una fila por (circuito,
 //     transportista) con su tarifa vigente -- es la tabla que pidió Raúl
 //     para la pestaña "Transportistas" (sustituye a Empresa+Vehículos+Tarifas)
@@ -43,9 +50,11 @@
 // plana antes de esta fase.
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
+import { requireRole } from "@/middleware/auth";
 import { rangesOverlap } from "@/modules/rates/lib/rate-validity";
 
 export const deliveryZonesRouter = Router();
@@ -121,6 +130,64 @@ deliveryZonesRouter.patch(
       include: { warehouse: { select: { id: true, name: true } } },
     });
     res.json(updated);
+  })
+);
+
+// Fase 19: petición explícita de Raúl -- hasta ahora un circuito solo se
+// podía crear o editar (o desactivar con `active: false` vía PATCH), nunca
+// eliminar por completo, aunque hiciera falta sacarlo de un almacén de
+// verdad. Mismo criterio que el borrado de transportista (Fase 11, ver
+// carrier-delete.service.ts): borrado real, no baja lógica, solo para
+// admin, irreversible. A diferencia del transportista, el circuito NO tiene
+// histórico de envíos/liquidaciones colgando directamente de él (una ruta
+// resuelve su circuito dinámicamente por cliente+almacén en el momento,
+// nunca lo guarda) -- lo único que depende de este circuito es:
+//   - sus tarifas por transportista (DeliveryZoneRate + sus tarifas por
+//     tipo de vehículo) -- se eliminan con él.
+//   - los clientes que lo tienen como circuito por defecto
+//     (Customer.deliveryZoneId) -- se desvinculan (a null), no se borran.
+//   - los clientes con un circuito específico para este almacén
+//     (CustomerDeliveryZone, Fase 15) -- esa fila de excepción deja de tener
+//     sentido sin el circuito, se elimina (el cliente cae de vuelta a su
+//     circuito por defecto, si tiene).
+deliveryZonesRouter.delete(
+  "/:id",
+  requireRole("admin_empresa", "admin_plataforma"),
+  asyncHandler(async (req, res) => {
+    const zone = await prisma.deliveryZone.findFirst({
+      where: { id: req.params.id, companyId: req.auth!.companyId },
+    });
+    if (!zone) throw HttpError.notFound("Circuito no encontrado");
+
+    const summary = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const rates = await tx.deliveryZoneRate.findMany({
+        where: { deliveryZoneId: zone.id },
+        select: { id: true, carrierId: true },
+      });
+      const rateIds = rates.map((r: { id: string; carrierId: string }) => r.id);
+      if (rateIds.length > 0) {
+        await tx.deliveryZoneRateVehicleType.deleteMany({ where: { deliveryZoneRateId: { in: rateIds } } });
+        await tx.deliveryZoneRate.deleteMany({ where: { id: { in: rateIds } } });
+      }
+
+      const { count: overridesEliminados } = await tx.customerDeliveryZone.deleteMany({
+        where: { deliveryZoneId: zone.id },
+      });
+      const { count: clientesDesvinculados } = await tx.customer.updateMany({
+        where: { deliveryZoneId: zone.id },
+        data: { deliveryZoneId: null },
+      });
+
+      await tx.deliveryZone.delete({ where: { id: zone.id } });
+
+      return {
+        name: zone.name,
+        transportistasEliminados: new Set(rates.map((r: { id: string; carrierId: string }) => r.carrierId)).size,
+        clientesDesvinculados: clientesDesvinculados + overridesEliminados,
+      };
+    });
+
+    res.json(summary);
   })
 );
 

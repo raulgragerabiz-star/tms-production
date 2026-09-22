@@ -174,8 +174,11 @@ export default function TransportistasTab() {
   // dato desde el perfil de administrador, incluidos datos que contengan
   // histórico". Ya no es una baja lógica: borra el transportista y todos sus
   // vehículos, conductores, envíos, liquidaciones y tarifas en cascada.
+  // Fase 19: mismo criterio (y mismo rol exigido) para poder eliminar un
+  // circuito por completo -- de ahí el nombre genérico `isAdmin` (antes
+  // `canDeleteCarrier`, ahora se reutiliza para ambos borrados).
   const user = useAuthStore((s) => s.user);
-  const canDeleteCarrier = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
+  const isAdmin = user?.roles?.some((r) => r === "admin_empresa" || r === "admin_plataforma") ?? false;
 
   const deleteCarrierMutation = useMutation({
     mutationFn: async (id: string) => api.delete(`/carriers/${id}`),
@@ -194,6 +197,38 @@ export default function TransportistasTab() {
       )
     ) {
       deleteCarrierMutation.mutate(c.id);
+    }
+  }
+
+  // Fase 19: petición explícita de Raúl -- "hay que poder eliminar rutas,
+  // actualmente solo se pueden añadir rutas o transportistas a cada ruta,
+  // pero no se pueden eliminar si algún [circuito] se tiene que sacar de ese
+  // almacén". Borrado real (no baja lógica, para eso ya está "Editar
+  // circuito" -> desactivar), irreversible, solo admin -- ver comentario en
+  // delivery-zones.routes.ts para qué se lleva por delante (sus tarifas por
+  // transportista) y qué solo se desvincula (los clientes que lo tenían
+  // como circuito, sin borrarlos).
+  const deleteZoneMutation = useMutation({
+    mutationFn: async (id: string) => (await api.delete(`/delivery-zones/${id}`)).data as { name: string; transportistasEliminados: number; clientesDesvinculados: number },
+    onSuccess: (summary) => {
+      queryClient.invalidateQueries({ queryKey: ["delivery-zones"] });
+      queryClient.invalidateQueries({ queryKey: ["delivery-zone-assignments"] });
+      notifySuccess(
+        `Circuito "${summary.name}" eliminado` +
+          (summary.transportistasEliminados > 0 ? ` (${summary.transportistasEliminados} transportista(s) desvinculado(s) de él)` : "") +
+          (summary.clientesDesvinculados > 0 ? ` · ${summary.clientesDesvinculados} cliente(s) sin circuito asignado ahora` : "")
+      );
+    },
+    onError: (err: any) => notifyError(err?.response?.data?.message ?? "No se pudo eliminar el circuito"),
+  });
+
+  function handleDeleteZone(zone: { id: string; name: string; _count: { customers: number; rates: number } }) {
+    const detalle: string[] = [];
+    if (zone._count.rates > 0) detalle.push(`sus ${zone._count.rates} tarifa(s) de transportista`);
+    if (zone._count.customers > 0) detalle.push(`${zone._count.customers} cliente(s) que lo tienen como circuito (se desvincularán, no se borrarán)`);
+    const detalleTxt = detalle.length > 0 ? ` Se eliminarán también ${detalle.join(" y ")}.` : "";
+    if (window.confirm(`¿Eliminar definitivamente el circuito "${zone.name}"? Esta acción no se puede deshacer.${detalleTxt}`)) {
+      deleteZoneMutation.mutate(zone.id);
     }
   }
 
@@ -255,6 +290,11 @@ export default function TransportistasTab() {
                 >
                   + Añadir transportista
                 </button>
+                {isAdmin && (
+                  <button onClick={() => handleDeleteZone(zone)} className="text-xs text-red-500 hover:text-red-600 font-medium">
+                    Eliminar circuito
+                  </button>
+                )}
               </div>
             </div>
 
@@ -361,7 +401,7 @@ export default function TransportistasTab() {
                       <button onClick={() => setEditingCarrier(c)} className="text-xs text-brand-600 hover:text-brand-700 font-medium mr-3">
                         Editar
                       </button>
-                      {canDeleteCarrier && (
+                      {isAdmin && (
                         <button onClick={() => handleDeleteCarrier(c)} className="text-xs text-red-500 hover:text-red-600 font-medium">
                           Eliminar
                         </button>

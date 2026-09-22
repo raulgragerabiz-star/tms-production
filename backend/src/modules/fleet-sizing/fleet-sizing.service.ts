@@ -64,6 +64,36 @@ export interface FleetSizingRouteRow {
   pctSalidasExceden: number;
 }
 
+// Fase 19: "resumen acumulado por ruta" -- petición explícita de Raúl a
+// partir de un informe de referencia propio (kg totales, pedidos, clientes,
+// viajes, kg/viaje y frecuencia por circuito), para "inyectar información en
+// la parte de Zonas/Vehículos, en la analítica de flota por circuito". Los
+// números de ese informe son de referencia (tiene más histórico acumulado
+// que el que hay cargado todavía en este sistema) -- aquí se calcula igual
+// que el resto de esta pantalla, con el histórico real de Route + RouteStop
+// + Order, así que el resultado crecerá hacia esas cifras a medida que se
+// acumule más operativa real (mismo aviso que ya existe para la tabla de
+// percentiles de arriba).
+//
+// A diferencia de la tabla de percentiles (que atribuye cada ruta ENTERA a
+// su circuito dominante, para poder calcular un P85 por ruta), aquí cada
+// parada se atribuye a SU PROPIO circuito resuelto (cliente+almacén) --
+// más preciso para sumar kg/pedidos/clientes reales de un circuito, aunque
+// una misma ruta reparta en más de uno. Por eso "viajes" aquí puede no
+// coincidir con "salidas" de la tabla de arriba: "viajes" cuenta cualquier
+// ruta que haya tenido AL MENOS una parada en ese circuito, no solo las
+// rutas en las que ese circuito fue el dominante.
+export interface RouteAccumulatedRow {
+  deliveryZoneId: string;
+  deliveryZoneName: string;
+  kgTotales: number;
+  pedidos: number;
+  clientes: number;
+  viajes: number;
+  kgPorViaje: number;
+  frecuencia: string;
+}
+
 export interface FleetSizingResult {
   rutas: FleetSizingRouteRow[];
   flota: {
@@ -73,6 +103,41 @@ export interface FleetSizingResult {
     diaMayorConcurrenciaLabel: string | null;
     reduccionPct: number | null;
   };
+  resumenAcumulado: RouteAccumulatedRow[];
+}
+
+// Días en minúscula y sin tilde, mismo formato que el informe de referencia
+// de Raúl para la columna "frecuencia" ("lunes y miercoles", "martes y
+// jueves", "miercoles"...) -- distinto de WEEKDAY_LABELS (con tilde, usado en
+// las tarjetas de la flota compartida), que no se toca.
+const WEEKDAY_LABELS_PLAIN = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
+
+// Umbral de cobertura: si un subconjunto pequeño (máx. 5) de días concentra
+// al menos este % de los viajes de un circuito, se listan esos días como su
+// frecuencia. Si ningún subconjunto así de pequeño llega a cubrir ese %
+// (reparto repartido entre muchos días sin patrón fijo, p.ej. "según pedido"),
+// se etiqueta como "cuando hay peso" -- igual que el circuito "MANCHA" del
+// informe de referencia. Ajustable si no encaja con la realidad una vez haya
+// más histórico.
+const FREQUENCY_COVERAGE_THRESHOLD = 0.9;
+const FREQUENCY_MAX_DAYS = 5;
+
+function describeWeeklyFrequency(weekdayCounts: number[], totalViajes: number): string {
+  if (totalViajes === 0) return "Sin histórico";
+  const sorted = weekdayCounts.map((count, day) => ({ day, count })).sort((a, b) => b.count - a.count);
+  const chosen: number[] = [];
+  let covered = 0;
+  for (const { day, count } of sorted) {
+    if (count === 0) break;
+    chosen.push(day);
+    covered += count;
+    if (covered / totalViajes >= FREQUENCY_COVERAGE_THRESHOLD) break;
+  }
+  if (chosen.length === 0 || chosen.length > FREQUENCY_MAX_DAYS) return "cuando hay peso";
+  chosen.sort((a, b) => a - b);
+  const names = chosen.map((d) => WEEKDAY_LABELS_PLAIN[d]);
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(" ")} y ${names[names.length - 1]}`;
 }
 
 export async function computeFleetSizing(companyId: string): Promise<FleetSizingResult> {
@@ -85,7 +150,10 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
         stops: {
           select: {
             order: {
-              select: { customerId: true, warehouseId: true, lines: { select: { lineWeightKg: true } } },
+              // Fase 19: se añade `id` -- necesario para contar pedidos
+              // distintos por circuito en el resumen acumulado (ver
+              // RouteAccumulatedRow); no se usaba hasta ahora.
+              select: { id: true, customerId: true, warehouseId: true, lines: { select: { lineWeightKg: true } } },
             },
           },
         },
@@ -119,11 +187,27 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
     zoneId: string | null;
     zoneName: string | null;
   }
+  // Fase 19: "resumen acumulado por ruta" -- a diferencia de routeAggs (que
+  // solo se queda con el circuito DOMINANTE de cada ruta, para el cálculo de
+  // percentiles), aquí se suma cada parada a SU PROPIO circuito, sin
+  // simplificar a uno solo por ruta -- ver comentario largo junto a
+  // RouteAccumulatedRow más arriba.
+  interface ZoneTouchAgg {
+    name: string;
+    kgTotales: number;
+    orderIds: Set<string>;
+    customerIds: Set<string>;
+    routeIds: Set<string>;
+    weekdayCounts: number[];
+  }
+  const zoneTouchAgg = new Map<string, ZoneTouchAgg>();
+
   const routeAggs: RouteAgg[] = [];
   for (const r of routes) {
     if (r.stops.length === 0) continue;
     const weightByZone = new Map<string, { name: string; weightKg: number }>();
     let totalWeightKg = 0;
+    const weekday = (r.routeDate.getUTCDay() + 6) % 7; // 0 = lunes, igual que /dashboard/accumulated
     for (const s of r.stops) {
       const weightKg = s.order.lines.reduce((acc: number, l: any) => acc + Number(l.lineWeightKg ?? 0), 0);
       totalWeightKg += weightKg;
@@ -132,6 +216,21 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
       const bucket = weightByZone.get(zone.id) ?? { name: zone.name, weightKg: 0 };
       bucket.weightKg += weightKg;
       weightByZone.set(zone.id, bucket);
+
+      const touch = zoneTouchAgg.get(zone.id) ?? {
+        name: zone.name,
+        kgTotales: 0,
+        orderIds: new Set<string>(),
+        customerIds: new Set<string>(),
+        routeIds: new Set<string>(),
+        weekdayCounts: [0, 0, 0, 0, 0, 0, 0],
+      };
+      touch.kgTotales += weightKg;
+      touch.orderIds.add(s.order.id);
+      touch.customerIds.add(s.order.customerId);
+      if (!touch.routeIds.has(r.id)) touch.weekdayCounts[weekday] += 1; // una vez por ruta, no por parada
+      touch.routeIds.add(r.id);
+      zoneTouchAgg.set(zone.id, touch);
     }
     if (totalWeightKg <= 0) continue; // sin peso real, no aporta a los percentiles
 
@@ -143,9 +242,24 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
         dominantId = zoneId;
       }
     }
-    const weekday = (r.routeDate.getUTCDay() + 6) % 7; // 0 = lunes, igual que /dashboard/accumulated
     routeAggs.push({ weightKg: totalWeightKg, weekday, zoneId: dominantId, zoneName: dominant?.name ?? null });
   }
+
+  const resumenAcumulado: RouteAccumulatedRow[] = [...zoneTouchAgg.entries()]
+    .map(([zoneId, t]) => {
+      const viajes = t.routeIds.size;
+      return {
+        deliveryZoneId: zoneId,
+        deliveryZoneName: t.name,
+        kgTotales: Math.round(t.kgTotales),
+        pedidos: t.orderIds.size,
+        clientes: t.customerIds.size,
+        viajes,
+        kgPorViaje: viajes > 0 ? Math.round(t.kgTotales / viajes) : 0,
+        frecuencia: describeWeeklyFrequency(t.weekdayCounts, viajes),
+      };
+    })
+    .sort((a, b) => b.kgTotales - a.kgTotales); // más volumen primero, igual que el informe de referencia
 
   // Agrupar por circuito.
   const byZone = new Map<string, { name: string; weights: number[]; weekdayCounts: number[] }>();
@@ -217,5 +331,6 @@ export async function computeFleetSizing(companyId: string): Promise<FleetSizing
       diaMayorConcurrenciaLabel: compartidaMax > 0 ? WEEKDAY_LABELS[diaMayorConcurrenciaIdx] : null,
       reduccionPct: dedicada > 0 ? Math.round(((dedicada - compartidaMax) / dedicada) * 1000) / 10 : null,
     },
+    resumenAcumulado,
   };
 }
