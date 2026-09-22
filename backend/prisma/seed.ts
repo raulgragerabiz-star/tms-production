@@ -42,11 +42,19 @@ async function main() {
     permissionCodes.map((code) => prisma.permission.upsert({ where: { code }, update: {}, create: { code } }))
   );
 
+  // Fase 23: "usuarios app" -- petición explícita de Raúl de reducir los
+  // roles a solo 2 (Administrador y Planificador), cada uno dado de alta
+  // contra un centro (Warehouse) concreto -- ver AppUser.warehouseId. Los
+  // roles "gestor_flota" y "administracion" que había antes se retiran de
+  // aquí (dejan de sembrarse en instalaciones nuevas); en un entorno ya
+  // desplegado con usuarios reales en esos roles, esas filas de Role NO se
+  // borran solas con `prisma db push` -- usa el script de migración
+  // `fase23-migrar-roles-legacy.sql` (entregado junto a esta fase) para
+  // reasignar a esos usuarios al rol Administrador y limpiar los roles
+  // sobrantes antes de desplegar este cambio.
   const roleDefs: { code: string; name: string; permissionCodes: string[] }[] = [
-    { code: "admin_empresa", name: "Administrador de empresa", permissionCodes: permissionCodes },
+    { code: "admin_empresa", name: "Administrador", permissionCodes: permissionCodes },
     { code: "planificador", name: "Planificador", permissionCodes: ["orders.read", "orders.write", "planning.read", "planning.write", "rates.read", "masters.read"] },
-    { code: "gestor_flota", name: "Gestor de flota", permissionCodes: ["masters.read", "masters.write", "rates.read", "rates.write"] },
-    { code: "administracion", name: "Administración / Facturación", permissionCodes: ["billing.read", "billing.write", "orders.read", "planning.read", "rates.read", "masters.read"] },
   ];
 
   const roles: Record<string, string> = {};

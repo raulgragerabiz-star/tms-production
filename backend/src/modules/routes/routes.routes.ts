@@ -11,6 +11,7 @@ import { broadcastToWarehouse } from "@/realtime/ws.server";
 import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 import { summarizeOrderPallets, computeLinePallets } from "@/modules/orders/lib/line-pallets";
 import { resolveDeliveryZonesForPairs, zonePairKey } from "@/modules/customers/customer-zone-resolution";
+import { getWarehouseScope, assertWarehouseWriteAccess } from "@/middleware/warehouse-scope";
 
 export const routesRouter = Router();
 
@@ -1010,6 +1011,9 @@ routesRouter.post(
 
     const warehouse = await prisma.warehouse.findFirst({ where: { id: data.warehouseId, companyId: req.auth!.companyId } });
     if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+    // Fase 23: planificar una ruta que sale de un centro que no es el propio
+    // -- misma restricción que crear pedidos, ver orders.routes.ts.
+    assertWarehouseWriteAccess(getWarehouseScope(req), warehouse.id, `el centro "${warehouse.name}"`);
 
     const orders = await prisma.order.findMany({ where: { id: { in: data.orderIds }, companyId: req.auth!.companyId } });
     if (orders.length !== data.orderIds.length) throw HttpError.badRequest("Uno o más pedidos no existen");
@@ -1222,6 +1226,7 @@ routesRouter.delete(
       include: { stops: true, shipment: true },
     });
     if (!route) throw HttpError.notFound("Ruta no encontrada");
+    assertWarehouseWriteAccess(getWarehouseScope(req), route.warehouseId, "esta ruta");
 
     if (route.shipment?.status === "finished") {
       throw HttpError.badRequest(

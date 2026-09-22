@@ -52,8 +52,16 @@ import { prisma } from "@/lib/prisma";
 // cual para cualquier otro origen (ej. un dominio propio en producción).
 const CODESPACES_ORIGIN_PATTERN = /^https:\/\/[a-z0-9-]+-(4000|5173|5174|5175|5176)\.app\.github\.dev$/;
 
+// Fase 23: mismo problema, pero probando desde Google Cloud Shell en vez de
+// Codespaces -- "Vista previa en la Web" publica cada puerto como
+// "<puerto>-cs-<id>.cs-<region>.cloudshell.dev", con un <id> y una <region>
+// distintos cada vez que se abre una sesión de Cloud Shell nueva. Mismo
+// criterio que arriba: se admite automáticamente el patrón para los mismos
+// puertos del proyecto, en vez de perseguir la URL exacta en CORS_ORIGIN.
+const CLOUD_SHELL_ORIGIN_PATTERN = /^https:\/\/(4000|5173|5174|5175|5176)-cs-[a-z0-9-]+\.cs-[a-z0-9-]+\.cloudshell\.dev$/;
+
 function isKnownCodespacesOrigin(origin: string): boolean {
-  return CODESPACES_ORIGIN_PATTERN.test(origin);
+  return CODESPACES_ORIGIN_PATTERN.test(origin) || CLOUD_SHELL_ORIGIN_PATTERN.test(origin);
 }
 
 export function createApp() {
@@ -129,7 +137,7 @@ export function createApp() {
   app.use("/api/warehouses", requireAuth, warehousesRouter);
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/delivery-zones", requireAuth, deliveryZonesRouter);
-  app.use("/api/users", requireAuth, requireRole("admin_empresa", "admin_plataforma"), usersRouter);
+  app.use("/api/users", requireAuth, requireRole("admin_empresa"), usersRouter);
   // Motor de inteligencia (1/3): detección de anomalías -- ver
   // anomaly-detection.service.ts.
   app.use("/api/intelligence/anomalies", requireAuth, anomalyRouter);
@@ -146,7 +154,7 @@ export function createApp() {
   app.use(
     "/api/company/settings",
     requireAuth,
-    requireRole("admin_empresa", "admin_plataforma"),
+    requireRole("admin_empresa"),
     companySettingsRouter
   );
 

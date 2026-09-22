@@ -505,7 +505,7 @@ billingRouter.get(
 // `onDelete: Cascade` de SettlementLine hacia CarrierSettlement.
 billingRouter.delete(
   "/settlements/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const settlement = await prisma.carrierSettlement.findFirst({
       where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } },

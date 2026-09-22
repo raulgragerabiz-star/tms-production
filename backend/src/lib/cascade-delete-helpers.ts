@@ -5,8 +5,8 @@
 // daban de baja (soft delete) y Vehicle/Driver bloqueaban el borrado si ya
 // tenían historial real -- todo ese freno de seguridad queda sustituido por
 // borrado en cascada total, igual que ya se hizo para Pedidos (Fase 9) y
-// Liquidaciones (Fase 10), y siempre restringido a admin_empresa/
-// admin_plataforma (ver requireRole en cada router).
+// Liquidaciones (Fase 10), y siempre restringido al rol Administrador
+// (Fase 23: código "admin_empresa" -- ver requireRole en cada router).
 //
 // Este fichero reúne la única pieza de cascada que se repite en más de un
 // sitio: borrar un Shipment y todo lo que depende EN EXCLUSIVA de él, para

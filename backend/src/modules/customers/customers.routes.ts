@@ -274,7 +274,7 @@ customersRouter.put(
 // es irreversible.
 customersRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const summary = await deleteCustomerCascade(req.params.id, req.auth!.companyId);
     res.json(summary);

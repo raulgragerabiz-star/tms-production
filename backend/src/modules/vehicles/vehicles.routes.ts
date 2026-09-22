@@ -312,7 +312,7 @@ vehiclesRouter.patch(
 // sí se conserva, solo pierde el conductor). Solo admin: es irreversible.
 vehiclesRouter.delete(
   "/drivers/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const driver = await prisma.driver.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
     if (!driver) throw HttpError.notFound("Conductor no encontrado");
@@ -349,7 +349,7 @@ vehiclesRouter.patch(
 // `vehicleCascadeDeleteTx`). Solo admin.
 vehiclesRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const vehicle = await prisma.vehicle.findFirst({ where: { id: req.params.id, carrier: { companyId: req.auth!.companyId } } });
     if (!vehicle) throw HttpError.notFound("Vehículo no encontrado");

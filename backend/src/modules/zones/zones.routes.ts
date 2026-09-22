@@ -93,7 +93,7 @@ zonesRouter.patch(
 // influencia no tiene datos hijos).
 zonesRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const zone = await prisma.influenceZone.findFirst({
       where: { id: req.params.id, warehouse: { companyId: req.auth!.companyId } },

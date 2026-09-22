@@ -152,7 +152,7 @@ deliveryZonesRouter.patch(
 //     circuito por defecto, si tiene).
 deliveryZonesRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const zone = await prisma.deliveryZone.findFirst({
       where: { id: req.params.id, companyId: req.auth!.companyId },

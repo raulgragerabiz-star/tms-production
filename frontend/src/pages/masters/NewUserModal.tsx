@@ -34,6 +34,11 @@ interface RoleOption {
   code: string;
 }
 
+interface WarehouseOption {
+  id: string;
+  name: string;
+}
+
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
@@ -53,7 +58,13 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
   const [carrierId, setCarrierId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [driverId, setDriverId] = useState("");
-  const [roleIds, setRoleIds] = useState<string[]>([]);
+  // Fase 23: "usuarios app" -- un usuario interno tiene exactamente UN rol
+  // (Administrador o Planificador), ya no varios a la vez -- ver comentario
+  // en users.routes.ts. `roleId` sustituye al antiguo array `roleIds`
+  // (checkbox múltiple); se sigue mandando como array de 1 elemento al
+  // backend para no tocar la forma del payload.
+  const [roleId, setRoleId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
 
   const carriersQuery = useQuery({
     queryKey: ["carriers"],
@@ -79,6 +90,18 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
     enabled: open && userType === "internal",
   });
 
+  const warehousesQuery = useQuery({
+    queryKey: ["warehouses"],
+    queryFn: async () => (await api.get("/warehouses")).data as { items: WarehouseOption[] },
+    enabled: open && userType === "internal",
+  });
+
+  const selectedRole = rolesQuery.data?.items.find((r) => r.id === roleId);
+  // Fase 23: Planificador siempre atado a un centro; Administrador puede
+  // quedar "sin centro" = todos (ver warehouse-scope.ts) -- por eso el
+  // desplegable de centro solo es obligatorio para Planificador.
+  const warehouseRequired = selectedRole?.code === "planificador";
+
   const mutation = useMutation({
     mutationFn: async () =>
       (
@@ -90,7 +113,8 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
           carrierId: userType === "carrier_portal" || userType === "driver_app" ? carrierId : undefined,
           customerId: userType === "customer_portal" ? customerId : undefined,
           driverId: userType === "driver_app" ? driverId : undefined,
-          roleIds: userType === "internal" ? roleIds : undefined,
+          roleIds: userType === "internal" ? [roleId] : undefined,
+          warehouseId: userType === "internal" && warehouseId ? warehouseId : undefined,
         })
       ).data,
     onSuccess: () => {
@@ -109,12 +133,9 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
     setCarrierId("");
     setCustomerId("");
     setDriverId("");
-    setRoleIds([]);
+    setRoleId("");
+    setWarehouseId("");
     onClose();
-  }
-
-  function toggleRole(id: string) {
-    setRoleIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
   }
 
   const canSubmit =
@@ -123,7 +144,8 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
     password.length >= 8 &&
     (userType !== "carrier_portal" || carrierId) &&
     (userType !== "customer_portal" || customerId) &&
-    (userType !== "driver_app" || (carrierId && driverId));
+    (userType !== "driver_app" || (carrierId && driverId)) &&
+    (userType !== "internal" || (roleId && (!warehouseRequired || warehouseId)));
 
   return (
     <Modal open={open} title="Nuevo usuario" onClose={resetAndClose}>
@@ -206,16 +228,48 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
         )}
 
         {userType === "internal" && (
-          <Field label="Roles">
-            <div className="space-y-1 border border-slate-200 rounded-lg p-2 max-h-32 overflow-y-auto">
-              {rolesQuery.data?.items.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 text-sm px-1 py-0.5">
-                  <input type="checkbox" checked={roleIds.includes(r.id)} onChange={() => toggleRole(r.id)} className="rounded border-slate-300" />
-                  {r.name}
-                </label>
-              ))}
-            </div>
-          </Field>
+          <>
+            {/* Fase 23: "usuarios app" -- exactamente 2 roles posibles, uno
+                por cuenta (antes checkboxes múltiples). Se pueden crear
+                varios usuarios (perfiles) distintos para la misma persona
+                si necesita más de un rol/centro, en vez de una cuenta con
+                varios roles a la vez. */}
+            <Field label="Rol" required>
+              <div className="space-y-1 border border-slate-200 rounded-lg p-2">
+                {rolesQuery.data?.items.map((r) => (
+                  <label key={r.id} className="flex items-center gap-2 text-sm px-1 py-1">
+                    <input
+                      type="radio"
+                      name="roleId"
+                      checked={roleId === r.id}
+                      onChange={() => setRoleId(r.id)}
+                      className="border-slate-300"
+                    />
+                    {r.name}
+                  </label>
+                ))}
+              </div>
+            </Field>
+
+            <Field
+              label="Centro"
+              required={warehouseRequired}
+              hint={
+                selectedRole?.code === "admin_empresa"
+                  ? "Déjalo sin seleccionar para un Administrador general con acceso a todos los centros."
+                  : "El Planificador solo puede crear/editar datos de su propio centro."
+              }
+            >
+              <select className={inputCls} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                <option value="">{selectedRole?.code === "admin_empresa" ? "Todos los centros" : "Selecciona…"}</option>
+                {warehousesQuery.data?.items.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
         )}
 
         <div className="flex justify-end gap-2 pt-2">

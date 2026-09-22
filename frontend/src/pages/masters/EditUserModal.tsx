@@ -18,10 +18,17 @@ export interface UserEditable {
   email: string;
   fullName: string;
   userType: string;
-  roles: { role: { id: string; name: string } }[];
+  warehouseId?: string | null;
+  roles: { role: { id: string; name: string; code?: string } }[];
 }
 
 interface RoleOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+interface WarehouseOption {
   id: string;
   name: string;
 }
@@ -41,7 +48,9 @@ export default function EditUserModal({ open, user, onClose, onSuccess, onError 
   const queryClient = useQueryClient();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [roleIds, setRoleIds] = useState<string[]>([]);
+  // Fase 23: un único rol por cuenta -- ver comentario en NewUserModal.tsx.
+  const [roleId, setRoleId] = useState("");
+  const [warehouseId, setWarehouseId] = useState("");
 
   const rolesQuery = useQuery({
     queryKey: ["roles"],
@@ -49,12 +58,22 @@ export default function EditUserModal({ open, user, onClose, onSuccess, onError 
     enabled: open && user?.userType === "internal",
   });
 
+  const warehousesQuery = useQuery({
+    queryKey: ["warehouses"],
+    queryFn: async () => (await api.get("/warehouses")).data as { items: WarehouseOption[] },
+    enabled: open && user?.userType === "internal",
+  });
+
   useEffect(() => {
     if (!open || !user) return;
     setFullName(user.fullName);
     setEmail(user.email);
-    setRoleIds(user.roles.map((r) => r.role.id));
+    setRoleId(user.roles[0]?.role.id ?? "");
+    setWarehouseId(user.warehouseId ?? "");
   }, [open, user]);
+
+  const selectedRole = rolesQuery.data?.items.find((r) => r.id === roleId);
+  const warehouseRequired = selectedRole?.code === "planificador";
 
   const mutation = useMutation({
     mutationFn: async () =>
@@ -62,7 +81,8 @@ export default function EditUserModal({ open, user, onClose, onSuccess, onError 
         await api.put(`/users/${user!.id}`, {
           fullName: fullName.trim(),
           email: email.trim(),
-          roleIds: user!.userType === "internal" ? roleIds : undefined,
+          roleIds: user!.userType === "internal" ? [roleId] : undefined,
+          warehouseId: user!.userType === "internal" ? (warehouseId || null) : undefined,
         })
       ).data,
     onSuccess: () => {
@@ -73,12 +93,11 @@ export default function EditUserModal({ open, user, onClose, onSuccess, onError 
     onError: (err: any) => onError(err?.response?.data?.message ?? "Error al actualizar el usuario"),
   });
 
-  function toggleRole(id: string) {
-    setRoleIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
-  }
-
   if (!user) return null;
-  const canSubmit = fullName.trim().length > 0 && email.trim().length > 0;
+  const canSubmit =
+    fullName.trim().length > 0 &&
+    email.trim().length > 0 &&
+    (user.userType !== "internal" || (roleId && (!warehouseRequired || warehouseId)));
 
   return (
     <Modal open={open} title={`Editar usuario — ${user.email}`} onClose={onClose}>
@@ -99,16 +118,43 @@ export default function EditUserModal({ open, user, onClose, onSuccess, onError 
         </div>
 
         {user.userType === "internal" && (
-          <Field label="Roles">
-            <div className="space-y-1 border border-slate-200 rounded-lg p-2 max-h-32 overflow-y-auto">
-              {rolesQuery.data?.items.map((r) => (
-                <label key={r.id} className="flex items-center gap-2 text-sm px-1 py-0.5">
-                  <input type="checkbox" checked={roleIds.includes(r.id)} onChange={() => toggleRole(r.id)} className="rounded border-slate-300" />
-                  {r.name}
-                </label>
-              ))}
-            </div>
-          </Field>
+          <>
+            <Field label="Rol" required>
+              <div className="space-y-1 border border-slate-200 rounded-lg p-2">
+                {rolesQuery.data?.items.map((r) => (
+                  <label key={r.id} className="flex items-center gap-2 text-sm px-1 py-1">
+                    <input
+                      type="radio"
+                      name="editRoleId"
+                      checked={roleId === r.id}
+                      onChange={() => setRoleId(r.id)}
+                      className="border-slate-300"
+                    />
+                    {r.name}
+                  </label>
+                ))}
+              </div>
+            </Field>
+
+            <Field
+              label="Centro"
+              required={warehouseRequired}
+              hint={
+                selectedRole?.code === "admin_empresa"
+                  ? "Sin seleccionar = Administrador general con acceso a todos los centros."
+                  : "El Planificador solo puede crear/editar datos de su propio centro."
+              }
+            >
+              <select className={inputCls} value={warehouseId} onChange={(e) => setWarehouseId(e.target.value)}>
+                <option value="">{selectedRole?.code === "admin_empresa" ? "Todos los centros" : "Selecciona…"}</option>
+                {warehousesQuery.data?.items.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
         )}
 
         <p className="text-xs text-slate-400">

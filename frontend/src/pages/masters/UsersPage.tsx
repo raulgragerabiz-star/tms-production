@@ -15,7 +15,9 @@ interface UserRow {
   userType: string;
   active: boolean;
   createdAt: string;
-  roles: { role: { id: string; name: string } }[];
+  warehouseId?: string | null;
+  warehouseName?: string | null;
+  roles: { role: { id: string; name: string; code?: string } }[];
 }
 
 const userTypeLabel: Record<string, string> = {
@@ -87,6 +89,7 @@ export default function UsersPage() {
               <th className="text-left px-4 py-3">Email</th>
               <th className="text-left px-4 py-3">Tipo de acceso</th>
               <th className="text-left px-4 py-3">Roles</th>
+              <th className="text-left px-4 py-3">Centro</th>
               <th className="text-left px-4 py-3">Estado</th>
               <th className="text-left px-4 py-3">Acción</th>
             </tr>
@@ -94,7 +97,7 @@ export default function UsersPage() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
+                <td colSpan={7} className="px-4 py-6 text-center text-slate-400">Cargando…</td>
               </tr>
             )}
             {data?.items.map((u) => (
@@ -103,6 +106,9 @@ export default function UsersPage() {
                 <td className="px-4 py-3 text-slate-500">{u.email}</td>
                 <td className="px-4 py-3">{userTypeLabel[u.userType] ?? u.userType}</td>
                 <td className="px-4 py-3 text-slate-500">{u.roles.map((r) => r.role.name).join(", ") || "—"}</td>
+                <td className="px-4 py-3 text-slate-500">
+                  {u.userType === "internal" ? u.warehouseName ?? "Todos los centros" : "—"}
+                </td>
                 <td className="px-4 py-3">
                   <Chip color={u.active ? "teal" : "slate"}>{u.active ? "Activo" : "Inactivo"}</Chip>
                 </td>

@@ -1,8 +1,9 @@
 // Configuración de empresa -- de momento solo el interruptor de
 // auto-asignación del motor de inteligencia (pieza 3/3), pensado para
 // crecer con más ajustes de empresa en el futuro sin tener que abrir un
-// módulo nuevo cada vez. Restringido a admin_empresa/admin_plataforma
-// (montado con requireRole en app.ts), mismo criterio que /api/users.
+// módulo nuevo cada vez. Restringido al rol Administrador (Fase 23: código
+// "admin_empresa", montado con requireRole en app.ts), mismo criterio que
+// /api/users.
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";

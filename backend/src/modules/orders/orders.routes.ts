@@ -11,6 +11,7 @@ import { buildOrdersImportTemplate, startOrdersExcelImportJob } from "./orders-e
 import { getImportJob } from "./lib/import-jobs.store";
 import { renderDeliveryNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
 import { deleteOrderCascade, wipeAllOrders } from "./order-delete.service";
+import { getWarehouseScope, assertWarehouseWriteAccess } from "@/middleware/warehouse-scope";
 
 export const ordersRouter = Router();
 
@@ -301,6 +302,11 @@ ordersRouter.post(
     if (!customer) throw HttpError.notFound("Cliente no encontrado");
     if (!deliveryPoint) throw HttpError.notFound("Punto de entrega no válido para este cliente");
     if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+    // Fase 23: un Planificador (o un Administrador de un centro concreto)
+    // solo puede dar de alta pedidos que salgan DE SU centro -- petición
+    // explícita de Raúl ("no teniendo edición sobre ningún dato
+    // perteneciente a otros centros").
+    assertWarehouseWriteAccess(getWarehouseScope(req), warehouse.id, `el centro "${warehouse.name}"`);
 
     const productIds = data.lines.map((l) => l.productId);
     const products = await prisma.product.findMany({ where: { id: { in: productIds }, companyId: req.auth!.companyId } });
@@ -388,6 +394,7 @@ ordersRouter.patch(
 
     const order = await prisma.order.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
     if (!order) throw HttpError.notFound("Pedido no encontrado");
+    assertWarehouseWriteAccess(getWarehouseScope(req), order.warehouseId, "este pedido");
 
     const allowed = statusTransitions[order.status] ?? [];
     if (!allowed.includes(status)) {
@@ -406,10 +413,19 @@ ordersRouter.patch(
 // generados es SIEMPRE en cascada total (decisión explícita de Raúl, ver
 // `deleteOrderCascade`) -- restringido a administradores por ser una acción
 // destructiva y sin vuelta atrás sobre datos reales.
+// Fase 23: vacía TODOS los pedidos de la empresa (todos los centros) -- se
+// restringe al Administrador global, igual que dar de alta/borrar un centro
+// entero (warehouses.routes.ts).
 ordersRouter.delete(
   "/wipe-all",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
+    const scope = getWarehouseScope(req);
+    if (!scope.scopeAllWarehouses) {
+      throw HttpError.forbidden(
+        "Vaciar todos los pedidos requiere un Administrador general (sin centro asignado). Contacta con uno."
+      );
+    }
     const summary = await wipeAllOrders(req.auth!.companyId);
     res.json(summary);
   })
@@ -417,8 +433,11 @@ ordersRouter.delete(
 
 ordersRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
+    const order = await prisma.order.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!order) throw HttpError.notFound("Pedido no encontrado");
+    assertWarehouseWriteAccess(getWarehouseScope(req), order.warehouseId, "este pedido");
     const summary = await deleteOrderCascade(req.params.id, req.auth!.companyId);
     res.json(summary);
   })

@@ -147,7 +147,7 @@ productsRouter.get(
 // que no sea un borrado físico incondicional).
 productsRouter.post(
   "/wipe-catalog",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const summary = await wipeProductCatalog(req.auth!.companyId);
     res.json(summary);

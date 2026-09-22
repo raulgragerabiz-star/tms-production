@@ -153,7 +153,7 @@ carriersRouter.put(
 // admin: es irreversible.
 carriersRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
     const summary = await deleteCarrierCascade(req.params.id, req.auth!.companyId);
     res.json(summary);

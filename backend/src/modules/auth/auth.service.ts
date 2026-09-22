@@ -14,6 +14,11 @@ export interface JwtPayload {
   carrierId?: string | null;
   customerId?: string | null;
   driverId?: string | null;
+  // Fase 23: "centro" (Warehouse) del usuario -- ver AppUser.warehouseId
+  // (schema.prisma) y warehouse-scope.ts. null = sin centro fijo (solo tiene
+  // sentido para Administrador -- ver warehouse-scope.ts, ahí se interpreta
+  // como acceso a todos los centros).
+  warehouseId?: string | null;
 }
 
 export async function login(email: string, password: string) {
@@ -42,6 +47,7 @@ export async function login(email: string, password: string) {
     carrierId: user.carrierId,
     customerId: user.customerId,
     driverId: user.driverId,
+    warehouseId: user.warehouseId,
   };
 
   const token = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn as any });
@@ -57,6 +63,7 @@ export async function login(email: string, password: string) {
       companyId: user.companyId,
       carrierId: user.carrierId,
       driverId: user.driverId,
+      warehouseId: user.warehouseId,
     },
   };
 }
@@ -112,6 +119,7 @@ export async function loginWithVehicleQrToken(token: string) {
     carrierId: user.carrierId,
     customerId: user.customerId,
     driverId: user.driverId,
+    warehouseId: user.warehouseId,
   };
 
   const jwtToken = jwt.sign(payload, env.jwtSecret, { expiresIn: env.jwtExpiresIn as any });
@@ -129,6 +137,7 @@ export async function loginWithVehicleQrToken(token: string) {
       companyId: user.companyId,
       carrierId: user.carrierId,
       driverId: user.driverId,
+      warehouseId: user.warehouseId,
     },
     vehicle: { plate: vehicle.plate, vehicleType: vehicle.vehicleType?.name, carrier: vehicle.carrier?.legalName },
   };

@@ -161,6 +161,20 @@ model AppUser {
   carrierId    String?    @map("carrier_id")
   customerId   String?    @map("customer_id")
   driverId     String?    @map("driver_id")
+  // Fase 23: "centro" al que pertenece este usuario interno -- petición
+  // explícita de Raúl ("usuarios app": Administrador y Planificador se
+  // determinan/seleccionan a qué centro pertenecen, sin visibilidad de
+  // edición sobre el resto). Igual que carrierId/customerId/driverId de
+  // arriba, es una referencia SUELTA a Warehouse (sin @relation formal),
+  // validada a mano en users.routes.ts -- mismo criterio ya usado en este
+  // modelo para no acoplar Prisma a una FK real.
+  //
+  // null = sin centro fijo = ve y administra TODOS los centros de la
+  // empresa (solo tiene sentido para userType "internal" con rol
+  // Administrador -- Planificador siempre debe tener un centro asignado,
+  // esa validación vive en users.routes.ts, no aquí). Se usa para dar de
+  // alta un Administrador general (p.ej. Raúl) sin crear un tercer rol.
+  warehouseId  String?    @map("warehouse_id")
   active       Boolean    @default(true)
   createdAt    DateTime   @default(now()) @map("created_at")
   updatedAt    DateTime   @updatedAt @map("updated_at")

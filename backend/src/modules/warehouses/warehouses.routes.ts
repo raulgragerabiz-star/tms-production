@@ -6,6 +6,7 @@ import { HttpError } from "@/utils/http-error";
 import { requireRole } from "@/middleware/auth";
 import { geocodeAddress } from "@/modules/routing/ors.service";
 import { deleteWarehouseCascade } from "./warehouse-delete.service";
+import { getWarehouseScope, assertWarehouseWriteAccess } from "@/middleware/warehouse-scope";
 
 export const warehousesRouter = Router();
 
@@ -77,21 +78,38 @@ warehousesRouter.get(
   })
 );
 
+// Fase 23: dar de alta un centro nuevo es una acción de alcance de empresa
+// entera (todavía no existe un "propio centro" al que atarla) -- se
+// restringe al Administrador global (sin centro fijo, ver
+// warehouse-scope.ts), no a un Administrador de un centro concreto.
 warehousesRouter.post(
   "/",
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
+    const scope = getWarehouseScope(req);
+    if (!scope.scopeAllWarehouses) {
+      throw HttpError.forbidden(
+        "Dar de alta un nuevo centro requiere un Administrador general (sin centro asignado). Contacta con uno."
+      );
+    }
     const data = await geocodeIfMissing(warehouseSchema.parse(req.body));
     const warehouse = await prisma.warehouse.create({ data: { ...data, companyId: req.auth!.companyId } });
     res.status(201).json(warehouse);
   })
 );
 
+// Fase 23: editar un almacén es Maestros -- restringido al rol
+// Administrador, y dentro de ese rol, solo sobre SU propio centro (o
+// cualquiera si es Administrador global) -- petición explícita de Raúl
+// ("visibilidad de solo lectura" sobre el resto de centros).
 warehousesRouter.put(
   "/:id",
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
-    const data = await geocodeIfMissing(warehouseSchema.partial().parse(req.body));
     const warehouse = await prisma.warehouse.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
     if (!warehouse) throw HttpError.notFound("Almacén no encontrado");
+    assertWarehouseWriteAccess(getWarehouseScope(req), warehouse.id, `el almacén "${warehouse.name}"`);
+    const data = await geocodeIfMissing(warehouseSchema.partial().parse(req.body));
     const updated = await prisma.warehouse.update({ where: { id: warehouse.id }, data });
     res.json(updated);
   })
@@ -107,10 +125,19 @@ warehousesRouter.put(
 // histórico". Sustituye la baja lógica anterior por un borrado en cascada
 // total (ver warehouse-delete.service.ts): sus pedidos y rutas (con paradas,
 // envíos, etc.) desaparecen con él. Solo admin: es irreversible.
+// Fase 23: igual que el alta, borrar un centro entero (con su cascada de
+// pedidos/rutas) se restringe al Administrador global -- un Administrador de
+// un centro concreto no puede autoeliminarse su propio centro.
 warehousesRouter.delete(
   "/:id",
-  requireRole("admin_empresa", "admin_plataforma"),
+  requireRole("admin_empresa"),
   asyncHandler(async (req, res) => {
+    const scope = getWarehouseScope(req);
+    if (!scope.scopeAllWarehouses) {
+      throw HttpError.forbidden(
+        "Eliminar un centro requiere un Administrador general (sin centro asignado). Contacta con uno."
+      );
+    }
     const summary = await deleteWarehouseCascade(req.params.id, req.auth!.companyId);
     res.json(summary);
   })
