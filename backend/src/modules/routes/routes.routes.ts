@@ -153,6 +153,41 @@ export async function recalculateLoadPlan(routeId: string) {
       estimatedDurationMin: estimate ? Math.round(estimate.durationMin) : null,
     },
   });
+
+  // Fase 28: se guarda la distancia ya calculada arriba (real por carretera
+  // vía ORS si hay clave configurada, si no la aproximación por línea recta
+  // de siempre -- ver estimateRoute en routing.service.ts) en
+  // Route.distancePlannedKm, que existía en el esquema desde el motor de
+  // detección de anomalías pero nunca se rellenaba en ningún sitio.
+  //
+  // Con esa misma distancia se sugiere el "Modelo de transporte" (a portes /
+  // dedicado) SOLO si hay un umbral configurado en
+  // Company.transportModelDistanceThresholdKm (criterio explícito de Raúl:
+  // por debajo del umbral, dedicado; por encima, a portes -- demasiado
+  // complejo mantener un camión dedicado a un destino tan lejano) Y la ruta
+  // no tiene ya un valor puesto A MANO (transportModelManual=true): la
+  // gestión manual de revisión que pidió Raúl siempre gana sobre la
+  // sugerencia automática, nunca se pisa un cambio manual en un recálculo
+  // posterior (p.ej. al mover una parada).
+  if (route) {
+    const distancePlannedKm = estimate?.distanceKm ?? null;
+    let transportModelPatch: Record<string, unknown> = {};
+    if (!route.transportModelManual) {
+      const company = await prisma.company.findUnique({
+        where: { id: route.companyId },
+        select: { transportModelDistanceThresholdKm: true },
+      });
+      const thresholdKm =
+        company?.transportModelDistanceThresholdKm != null ? Number(company.transportModelDistanceThresholdKm) : null;
+      if (thresholdKm != null && distancePlannedKm != null) {
+        transportModelPatch = { transportModel: distancePlannedKm > thresholdKm ? "a_portes" : "dedicado" };
+      }
+    }
+    await prisma.route.update({
+      where: { id: routeId },
+      data: { distancePlannedKm, ...transportModelPatch } as any,
+    });
+  }
 }
 
 // Fase 11 (petición explícita de Raúl): "poder no solo elegir un día
@@ -1198,6 +1233,33 @@ routesRouter.patch(
         subcontractedCarrierAddress: clean(data.subcontractedCarrierAddress),
         subcontractedCarrierPhone: clean(data.subcontractedCarrierPhone),
       },
+    });
+    res.json(updated);
+  })
+);
+
+// Fase 28: fijar/soltar a mano el "Modelo de transporte" (a portes /
+// dedicado) de una ruta -- petición explícita de Raúl: la sugerencia
+// automática por distancia (ver recalculateLoadPlan) "requerira una gestion
+// manual en revision". Enviar `transportModel: null` SUELTA la fijación
+// manual (transportModelManual pasa a false) y deja que el próximo
+// recálculo vuelva a sugerir el valor automáticamente; enviar "a_portes" o
+// "dedicado" lo fija a mano y ya no se toca solo.
+routesRouter.patch(
+  "/:id/transport-model",
+  asyncHandler(async (req, res) => {
+    const schema = z.object({ transportModel: z.enum(["a_portes", "dedicado"]).nullable() });
+    const data = schema.parse(req.body);
+
+    const route = await prisma.route.findFirst({ where: { id: req.params.id, companyId: req.auth!.companyId } });
+    if (!route) throw HttpError.notFound("Ruta no encontrada");
+
+    const updated = await prisma.route.update({
+      where: { id: route.id },
+      data: {
+        transportModel: data.transportModel,
+        transportModelManual: data.transportModel !== null,
+      } as any,
     });
     res.json(updated);
   })

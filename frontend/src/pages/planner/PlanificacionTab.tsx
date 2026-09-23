@@ -85,11 +85,13 @@ const priorityLabel: Record<string, string> = {
   low: "Baja",
 };
 
+// Fase 28: etiquetas actualizadas al vocabulario real de Raúl (ver
+// RatesPage.tsx) -- los valores técnicos del enum no cambian.
 const serviceTypeLabel: Record<string, string> = {
   paqueteria: "Paquetería",
   paleteria: "Paletería",
-  paleteria_pesada: "Paletería pesada",
-  gran_volumen: "Gran volumen",
+  paleteria_pesada: "Ligero",
+  gran_volumen: "Pesado",
 };
 
 const serviceTypeColor: Record<string, ChipColor> = {

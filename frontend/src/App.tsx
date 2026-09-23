@@ -13,6 +13,7 @@ import CarrierFleetPage from "@/pages/masters/CarrierFleetPage";
 import UsersPage from "@/pages/masters/UsersPage";
 import WarehousesPage from "@/pages/masters/WarehousesPage";
 import InfluenceZonesPage from "@/pages/masters/InfluenceZonesPage";
+import SegmentationRulesPage from "@/pages/masters/SegmentationRulesPage";
 import ReturnsPage from "@/pages/ReturnsPage";
 import BillingPage from "@/pages/BillingPage";
 import CompanySettingsPage from "@/pages/CompanySettingsPage";
@@ -53,6 +54,7 @@ export default function App() {
         <Route path="maestros/usuarios" element={<UsersPage />} />
         <Route path="maestros/almacenes" element={<WarehousesPage />} />
         <Route path="maestros/zonas-influencia" element={<InfluenceZonesPage />} />
+        <Route path="maestros/segmentacion" element={<SegmentationRulesPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

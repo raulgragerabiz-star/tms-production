@@ -95,7 +95,8 @@ async function importOneProduct(
 ): Promise<void> {
   const rowLabel = row.internalCode || row.ean || `fila ${row.rowNumber}`;
   try {
-    let existing: { id: string; grossWeightKg: unknown; fullPalletWeightKg: unknown } | null = null;
+    let existing: { id: string; grossWeightKg: unknown; fullPalletWeightKg: unknown; netWeightKg: unknown } | null =
+      null;
     if (row.internalCode) {
       existing = await prisma.product.findFirst({ where: { companyId, internalCode: row.internalCode } });
     }
@@ -129,19 +130,35 @@ async function importOneProduct(
       weightUnit: row.weightUnit,
       packagingType: row.packagingType,
       minOrderQtyB2c: row.minOrderQtyB2c,
+      // Fase 28: "Peso caja"/"Peso palet"/"Peso neto" -- ver comentario en
+      // product-master-parser.ts. `row.xxxWeightKg` es `undefined` cuando la
+      // plantilla subida no trae esa columna (p.ej. la plantilla antigua de
+      // Bigmat, ver Fase 11 más abajo), y Prisma ignora una clave
+      // `undefined` en `data`: en un `update` no toca el valor ya guardado,
+      // en un `create` lo deja en su default (null) -- mismo criterio que el
+      // resto de campos opcionales de aquí, nunca sobrescribe un peso real
+      // con un blanco solo porque el fichero de turno no traiga la columna.
+      grossWeightKg: row.grossWeightKg,
+      fullPalletWeightKg: row.fullPalletWeightKg,
+      netWeightKg: row.netWeightKg,
       ...derivePalletMeters(row),
     };
 
-    // Fase 11: la plantilla real de Bigmat no trae ningún valor de peso en
-    // kg (ver comentario en ProductMasterImportSummary) -- `data` (arriba)
-    // nunca incluye grossWeightKg/fullPalletWeightKg porque el parser no los
-    // lee de ninguna columna, así que un producto NUEVO siempre se crea sin
-    // peso, y uno YA EXISTENTE conserva el que ya tuviera (el `update` de
-    // abajo no los toca). Se avisa por cada producto que se queda sin
-    // NINGUNO de los dos, para completarlo a mano desde Maestros > Productos.
-    const stillMissingWeight = existing
-      ? existing.grossWeightKg == null && existing.fullPalletWeightKg == null
-      : true;
+    // Fase 11: hasta ahora ninguna plantilla real de Bigmat traía un valor de
+    // peso en kg (ver comentario histórico en ProductMasterImportSummary).
+    // Fase 28: la plantilla "DDBB Productos" (análisis de transporte) sí los
+    // trae -- `data` (arriba) ya puede incluir grossWeightKg/
+    // fullPalletWeightKg/netWeightKg cuando el Excel subido tiene esas 3
+    // columnas. Se avisa solo si, DESPUÉS de esta carga, el producto se
+    // queda sin NINGUNO de los tres: ni esta fila los trae (row.xxx == null)
+    // ni el producto ya existente los tenía guardados de antes -- así un
+    // producto nuevo que sí trae peso en "DDBB Productos" ya no sale en el
+    // aviso, aunque `existing` fuera null.
+    const rowHasWeight = row.grossWeightKg != null || row.fullPalletWeightKg != null || row.netWeightKg != null;
+    const existingHasWeight = existing
+      ? existing.grossWeightKg != null || existing.fullPalletWeightKg != null || existing.netWeightKg != null
+      : false;
+    const stillMissingWeight = !rowHasWeight && !existingHasWeight;
     if (stillMissingWeight) {
       summary.productosSinPesoCargado.push(rowLabel);
     }

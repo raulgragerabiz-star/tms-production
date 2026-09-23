@@ -71,6 +71,16 @@ model Company {
   // auto-optimization.orchestrator.ts.
   autoAssignEnabled       Boolean                   @default(false) @map("auto_assign_enabled")
   autoAssignMinConfidence Decimal                   @default(0.75) @map("auto_assign_min_confidence") @db.Decimal(3, 2)
+  // Fase 28: petición explícita de Raúl sobre el criterio real de "a portes"
+  // vs "dedicado" -- "se basa en las distancias... a partir de cierta
+  // distancia, el tipo de servicio seria a portes por la complegidad de
+  // mantener ese tipo de envios dentro de un servicio dedicado. pero
+  // requerira una gestion manual en revision". `null` = función desactivada
+  // (no se sugiere nada todavía, hasta que se configure un valor desde
+  // Configuración) -- ver recalculateLoadPlan en routes.routes.ts, que SOLO
+  // calcula la sugerencia cuando este umbral está relleno, y nunca pisa un
+  // valor puesto a mano (Route.transportModelManual).
+  transportModelDistanceThresholdKm Decimal? @map("transport_model_distance_threshold_km") @db.Decimal(8, 2)
 
   @@map("company")
 }
@@ -1094,11 +1104,27 @@ model Route {
   // anomaly-detection.service.ts): distancia planificada al secuenciar vs.
   // distancia real recorrida. Ambas opcionales -- no rompen filas
   // existentes ni exigen que ya estén pobladas para poder usar el resto de
-  // Route con normalidad. Todavía sin alimentar automáticamente en ningún
-  // sitio; el detector de anomalías simplemente no genera alertas de este
-  // tipo hasta que haya datos.
+  // Route con normalidad.
+  //
+  // Fase 28: `distancePlannedKm` ya se rellena en cada recálculo
+  // (recalculateLoadPlan, routes.routes.ts) con la distancia real por
+  // carretera de la ruta (ORS -- ver routing.service.ts -- con su misma
+  // caída automática a línea recta si ORS no está disponible). `distanceRealKm`
+  // sigue sin alimentarse en ningún sitio -- exigiría una traza GPS real del
+  // trayecto ejecutado, que todavía no existe como fuente de datos.
   distancePlannedKm Decimal?       @map("distance_planned_km") @db.Decimal(10, 2)
   distanceRealKm    Decimal?       @map("distance_real_km") @db.Decimal(10, 2)
+
+  // Fase 28: "Modelo de transporte" (a portes/dedicado) de esta ruta -- ver
+  // enum TransportModel más abajo. `null` = sin clasificar todavía (no hay
+  // umbral configurado en Company.transportModelDistanceThresholdKm, o la
+  // ruta aún no tiene distancia calculada). `transportModelManual=true`
+  // significa que alguien lo ha fijado a mano (petición explícita de Raúl:
+  // "requerira una gestion manual en revision") -- mientras esté a true,
+  // recalculateLoadPlan ya NO sobrescribe transportModel con la sugerencia
+  // automática por distancia.
+  transportModel       TransportModel? @map("transport_model")
+  transportModelManual Boolean         @default(false) @map("transport_model_manual")
 
   // Fase 8Y: "transportista subcontratado" para ESTA ruta/envío en concreto
   // -- corrección explícita de Raúl sobre el diseño de la Fase 8X. NO es la
@@ -1472,6 +1498,19 @@ enum ServiceType {
   paleteria
   paleteria_pesada
   gran_volumen
+}
+
+// Fase 28: "Modelo de transporte" de la plantilla de análisis de Raúl -- "a
+// portes" (reparto compartido con otros envíos, en la práctica el
+// transportista con CarrierServiceType.pallet) frente a "dedicado" (camión
+// en exclusiva, CarrierServiceType.full_truck). Hasta ahora este concepto
+// solo existía como preferencia declarada por el TRANSPORTISTA
+// (Carrier.serviceType) -- no había forma de guardar cuál se usó realmente
+// en una ruta concreta para poder sacar la estadística (ver
+// Route.transportModel).
+enum TransportModel {
+  a_portes
+  dedicado
 }
 
 enum DocumentType {

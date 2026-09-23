@@ -29,11 +29,14 @@ const inputCls =
 // Los 4 segmentos reales de ServiceType (columna `service_type` de customer_rate /
 // zone_rate) — antes solo "Paletería"/"Camión completo", 2 valores heredados que ya
 // no existen en el enum y hacían fallar cualquier alta de tarifa por cliente o zona.
+//
+// Fase 28: etiquetas actualizadas al vocabulario real de Raúl (ver
+// RatesPage.tsx) -- los valores técnicos no cambian.
 const serviceTypeOptions = [
   { value: "paqueteria", label: "Paquetería" },
   { value: "paleteria", label: "Paletería" },
-  { value: "paleteria_pesada", label: "Paletería pesada" },
-  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+  { value: "paleteria_pesada", label: "Ligero" },
+  { value: "gran_volumen", label: "Pesado / Camión completo" },
 ] as const;
 
 // Tarifas de mayor prioridad que la tarifa general del transportista (Fase 9: by_customer

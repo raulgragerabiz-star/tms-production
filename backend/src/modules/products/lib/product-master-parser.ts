@@ -107,10 +107,28 @@ const HEADER_ALIASES: Record<string, string> = {
   codigo: "internalCode",
   "codigo interno": "internalCode",
   "codigo empresa": "internalCode",
+  // Fase 28: la plantilla real "DDBB Productos" (análisis de transporte de
+  // Raúl) usa "SKU" como columna identificadora en vez de "CODIGO" -- es la
+  // referencia propia de Bigmat (mismo papel que "codigo"/"codigo interno"
+  // de arriba), NO el código EAN/de barras (eso sigue siendo la columna
+  // "Código EAN" de más abajo, que es lo que realmente rellena
+  // Product.sku -- ver comentario de sku en schema.prisma).
+  sku: "internalCode",
   descripcion: "description",
   proveedor: "supplier",
+  // Fase 28: "Razón" (razón social del proveedor) es como llama a esa misma
+  // columna la plantilla "DDBB Productos" -- alias adicional sobre el mismo
+  // campo que ya rellenaba "Proveedor", ningún template real trae las dos a
+  // la vez.
+  razon: "supplier",
   familia: "category",
   categoria: "category",
+  // Fase 28: "DDBB Productos" separa la jerarquía en 3 columnas (Grupo >
+  // Familia > Subfamilia) en vez de una sola "Familia"/"Categoria" -- se
+  // combinan las 3 en el único campo `category` que ya existe (ver el bucle
+  // de parseo más abajo), sin necesidad de tocar el esquema.
+  grupo: "groupRaw",
+  subfamilia: "subfamilyRaw",
   "unidad medida base": "baseUnit",
   "unidad de medida base": "baseUnit",
   "unidades caja": "unitsPerBox",
@@ -135,6 +153,17 @@ const HEADER_ALIASES: Record<string, string> = {
   "tipo envase": "packagingType",
   "pedido minimo b2c": "minOrderQtyB2c",
   "pedido minimo": "minOrderQtyB2c",
+  // Fase 28: pesos reales -- hasta ahora ninguna plantilla de Bigmat traía
+  // el peso en kg de cada artículo (ver Fase 11, `productosSinPesoCargado`
+  // en product-master-import.service.ts); "DDBB Productos" SÍ los trae en
+  // estas 3 columnas. "Peso caja" se interpreta como el peso bruto de venta
+  // (grossWeightKg) -- es el peso del envase tal cual se manipula en
+  // almacén/transporte, mismo criterio que "peso bruto" en el resto del
+  // sector. "Peso palet"/"Peso neto" mapean directo a los campos ya
+  // existentes en Product (fullPalletWeightKg/netWeightKg).
+  "peso caja": "grossWeightKgRaw",
+  "peso palet": "fullPalletWeightKgRaw",
+  "peso neto": "netWeightKgRaw",
 };
 
 export interface ParsedProductRow {
@@ -164,6 +193,10 @@ export interface ParsedProductRow {
   weightUnit?: string;
   packagingType?: string;
   minOrderQtyB2c?: number;
+  // Fase 28: pesos reales de "DDBB Productos" -- ver HEADER_ALIASES arriba.
+  grossWeightKg?: number;
+  fullPalletWeightKg?: number;
+  netWeightKg?: number;
 }
 
 export interface ParseProductsResult {
@@ -215,12 +248,20 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
     const palletDims = parseDimsCell(cell(record.palletDimsRaw));
     const stackability = parseStackabilityCell(cell(record.stackabilityRaw));
 
+    // Fase 28: "Grupo" > "Familia"/"Categoria" > "Subfamilia" -- se combinan
+    // en un único texto para el campo `category` (que no se parte en el
+    // esquema). Con la plantilla antigua (solo "Familia") esto da
+    // exactamente el mismo resultado de siempre.
+    const categoryParts = [cell(record.groupRaw), cell(record.category), cell(record.subfamilyRaw)].filter(
+      (p) => p.length > 0
+    );
+
     products.push({
       rowNumber: excelRowNumber,
       internalCode: internalCode || undefined,
       description,
       supplier: cell(record.supplier) || undefined,
-      category: cell(record.category) || undefined,
+      category: categoryParts.length > 0 ? categoryParts.join(" > ") : undefined,
       baseUnit: cell(record.baseUnit) || undefined,
       unitsPerBox: parseSpanishInt(cell(record.unitsPerBox)),
       unitsPerPallet: parseSpanishInt(cell(record.unitsPerPallet)),
@@ -242,6 +283,9 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
       weightUnit: cell(record.weightUnit) || undefined,
       packagingType: cell(record.packagingType) || undefined,
       minOrderQtyB2c: parseSpanishInt(cell(record.minOrderQtyB2c)),
+      grossWeightKg: parseSpanishNumber(cell(record.grossWeightKgRaw)),
+      fullPalletWeightKg: parseSpanishNumber(cell(record.fullPalletWeightKgRaw)),
+      netWeightKg: parseSpanishNumber(cell(record.netWeightKgRaw)),
     });
   }
 

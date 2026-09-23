@@ -17,6 +17,13 @@ interface AutoAssignSettings {
   autoAssignMinConfidence: string;
 }
 
+// Fase 28: umbral de distancia que decide la sugerencia de "Modelo de
+// transporte" (a portes / dedicado) de cada ruta -- ver
+// recalculateLoadPlan en routes.routes.ts. `null` = función desactivada.
+interface TransportModelSettings {
+  transportModelDistanceThresholdKm: string | null;
+}
+
 export default function CompanySettingsPage() {
   const queryClient = useQueryClient();
   const { toast, showSuccess, showError, dismiss } = useToast();
@@ -45,6 +52,36 @@ export default function CompanySettingsPage() {
       ).data as AutoAssignSettings,
     onSuccess: (result) => {
       queryClient.setQueryData(["company-settings", "auto-assign"], result);
+      showSuccess("Configuración guardada");
+    },
+    onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo guardar la configuración"),
+  });
+
+  const [transportThresholdKm, setTransportThresholdKm] = useState("");
+  const transportModelQuery = useQuery({
+    queryKey: ["company-settings", "transport-model"],
+    queryFn: async () => (await api.get("/company/settings/transport-model")).data as TransportModelSettings,
+  });
+
+  useEffect(() => {
+    if (transportModelQuery.data) {
+      setTransportThresholdKm(
+        transportModelQuery.data.transportModelDistanceThresholdKm == null
+          ? ""
+          : String(transportModelQuery.data.transportModelDistanceThresholdKm)
+      );
+    }
+  }, [transportModelQuery.data]);
+
+  const saveTransportModelMutation = useMutation({
+    mutationFn: async () =>
+      (
+        await api.patch("/company/settings/transport-model", {
+          transportModelDistanceThresholdKm: transportThresholdKm === "" ? null : Number(transportThresholdKm),
+        })
+      ).data as TransportModelSettings,
+    onSuccess: (result) => {
+      queryClient.setQueryData(["company-settings", "transport-model"], result);
       showSuccess("Configuración guardada");
     },
     onError: (err: any) => showError(err?.response?.data?.message ?? "No se pudo guardar la configuración"),
@@ -107,6 +144,45 @@ export default function CompanySettingsPage() {
               className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
             >
               {saveMutation.isPending ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Fase 28: umbral de distancia para sugerir "a portes"/"dedicado" en
+          cada ruta -- ver recalculateLoadPlan (routes.routes.ts) y el
+          selector manual en el Planificador (RouteAssignmentModal.tsx). */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 max-w-2xl mt-6">
+        <h2 className="text-sm font-semibold text-slate-800 mb-1">Modelo de transporte — a portes / dedicado</h2>
+        <p className="text-sm text-slate-500 mb-4">
+          A partir de esta distancia desde el almacén, una ruta se sugiere como "a portes" en vez de "dedicado" —
+          mantener un camión en exclusiva para un destino tan lejano deja de compensar. Es solo una sugerencia
+          automática: se puede corregir a mano para cada ruta desde el Planificador, y ese cambio manual ya no se
+          vuelve a tocar solo. Déjalo en blanco para desactivar la sugerencia automática.
+        </p>
+
+        {transportModelQuery.isLoading ? (
+          <p className="text-sm text-slate-400">Cargando…</p>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm text-slate-700 mb-1">Umbral de distancia (km)</label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Sin umbral configurado"
+                value={transportThresholdKm}
+                onChange={(e) => setTransportThresholdKm(e.target.value)}
+                className="w-40 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <button
+              onClick={() => saveTransportModelMutation.mutate()}
+              disabled={saveTransportModelMutation.isPending}
+              className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm font-medium px-4 py-2 rounded-lg"
+            >
+              {saveTransportModelMutation.isPending ? "Guardando…" : "Guardar"}
             </button>
           </div>
         )}

@@ -33,6 +33,7 @@ import { anomalyRouter } from "@/modules/intelligence/anomaly.routes";
 import { demandForecastRouter } from "@/modules/intelligence/demand-forecast.routes";
 import { fleetSizingRouter } from "@/modules/fleet-sizing/fleet-sizing.routes";
 import { companySettingsRouter } from "@/modules/company/company-settings.routes";
+import { segmentationRouter } from "@/modules/segmentation/segmentation.routes";
 import { publicDocumentsRouter } from "@/modules/documents/public-documents.routes";
 import { requireAuth, requireRole } from "@/middleware/auth";
 import { prisma } from "@/lib/prisma";
@@ -145,6 +146,9 @@ export function createApp() {
   app.use("/api/route-qr", requireAuth, routeQrRouter);
   app.use("/api/zones", requireAuth, zonesRouter);
   app.use("/api/delivery-zones", requireAuth, deliveryZonesRouter);
+  // Fase 28: reglas de segmentación de pedidos por peso (Maestros >
+  // Segmentación) -- ver segmentation.routes.ts.
+  app.use("/api/segmentation", requireAuth, segmentationRouter);
   app.use("/api/users", requireAuth, requireRole("admin_empresa"), usersRouter);
   // Motor de inteligencia (1/3): detección de anomalías -- ver
   // anomaly-detection.service.ts.

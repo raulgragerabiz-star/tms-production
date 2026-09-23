@@ -47,6 +47,12 @@ interface RouteDetail {
   subcontractedCarrierTaxId: string | null;
   subcontractedCarrierAddress: string | null;
   subcontractedCarrierPhone: string | null;
+  // Fase 28: "Modelo de transporte" (a portes/dedicado) -- ver comentario en
+  // Route.transportModel (schema.prisma) y recalculateLoadPlan
+  // (routes.routes.ts, que calcula la sugerencia automática por distancia).
+  distancePlannedKm: string | null;
+  transportModel: "a_portes" | "dedicado" | null;
+  transportModelManual: boolean;
   loadPlan: { weightOccupancyPct: number; palletOccupancyPct: number; totalWeightKg: string; totalPallets: string } | null;
   stops: { id: string; order: { orderNumber: string; customer: { legalName: string } } }[];
   costSimulations: {
@@ -229,6 +235,19 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
       onSuccess("Guardado como borrador inicial del campo \"Transportista efectivo\" del DeCA — sigue siendo editable dentro del propio PDF");
     },
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo guardar el transportista subcontratado"),
+  });
+
+  // Fase 28: "" (Automático) suelta la fijación manual y deja que el
+  // próximo recálculo de la ruta vuelva a sugerir el valor por distancia;
+  // "a_portes"/"dedicado" lo fija a mano (ver PATCH /:id/transport-model).
+  const setTransportModelMutation = useMutation({
+    mutationFn: async (value: "" | "a_portes" | "dedicado") =>
+      (await api.patch(`/routes/${routeId}/transport-model`, { transportModel: value || null })).data,
+    onSuccess: () => {
+      invalidateAll();
+      onSuccess("Modelo de transporte guardado");
+    },
+    onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo guardar el modelo de transporte"),
   });
 
   const setVehicleMutation = useMutation({
@@ -564,6 +583,31 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                   )}
                 </div>
               )}
+
+              {/* Fase 28: "Modelo de transporte" (a portes/dedicado) -- la
+                  sugerencia automática por distancia (Configuración > Modelo
+                  de transporte) se puede corregir a mano en cualquier
+                  momento; en cuanto se fija a mano, ya no se vuelve a tocar
+                  sola en próximos recálculos. */}
+              <div className="flex items-center gap-3 text-sm">
+                <span className="font-semibold text-slate-700">Modelo de transporte:</span>
+                <select
+                  value={route.transportModel ?? ""}
+                  onChange={(e) => setTransportModelMutation.mutate(e.target.value as "" | "a_portes" | "dedicado")}
+                  disabled={LOCKED_STATUSES.includes(route.status) || setTransportModelMutation.isPending}
+                  className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50"
+                >
+                  <option value="">Sin clasificar</option>
+                  <option value="a_portes">A portes</option>
+                  <option value="dedicado">Dedicado</option>
+                </select>
+                {!route.transportModelManual && route.transportModel && (
+                  <span className="text-xs text-slate-400">(sugerido automáticamente por distancia)</span>
+                )}
+                {route.distancePlannedKm && (
+                  <span className="text-xs text-slate-400">— {Number(route.distancePlannedKm).toFixed(0)} km</span>
+                )}
+              </div>
 
               {/* Paso 2: vehículo del transportista ya elegido */}
               {route.carrier && (

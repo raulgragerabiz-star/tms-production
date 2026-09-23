@@ -75,3 +75,37 @@ companySettingsRouter.patch(
     res.json(updated);
   })
 );
+
+// Fase 28: umbral de distancia (km) que decide la sugerencia de "Modelo de
+// transporte" (a portes / dedicado) de una ruta -- criterio explícito de
+// Raúl: "a partir de cierta distancia, el tipo de servicio seria a portes
+// por la complegidad de mantener ese tipo de envios dentro de un servicio
+// dedicado". `null`/vacío = función desactivada, ninguna ruta se clasifica
+// sola todavía (ver recalculateLoadPlan en routes.routes.ts).
+companySettingsRouter.get(
+  "/transport-model",
+  asyncHandler(async (req, res) => {
+    const company = await prisma.company.findUniqueOrThrow({
+      where: { id: req.auth!.companyId },
+      select: { transportModelDistanceThresholdKm: true },
+    });
+    res.json(company);
+  })
+);
+
+const transportModelSchema = z.object({
+  transportModelDistanceThresholdKm: z.number().min(0).nullable(),
+});
+
+companySettingsRouter.patch(
+  "/transport-model",
+  asyncHandler(async (req, res) => {
+    const data = transportModelSchema.parse(req.body);
+    const updated = await prisma.company.update({
+      where: { id: req.auth!.companyId },
+      data: { transportModelDistanceThresholdKm: data.transportModelDistanceThresholdKm },
+      select: { transportModelDistanceThresholdKm: true },
+    });
+    res.json(updated);
+  })
+);

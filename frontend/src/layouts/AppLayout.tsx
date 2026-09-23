@@ -25,10 +25,14 @@ const navItems = [
 // (junto a "Tipo de vehículo", con quien comparte configuración). La ruta
 // /maestros/zonas-influencia se mantiene activa por si algo enlaza
 // directamente a ella -- solo se quita el enlace del menú.
+// Fase 28: "Segmentación" -- umbrales de peso que clasifican un pedido en
+// Paquetería/Paletería/Ligero/Pesado (ver SegmentationRulesPage.tsx). Hasta
+// ahora esta configuración no tenía NINGÚN acceso desde Backoffice.
 const masterItems = [
   { to: "/maestros/clientes", label: "Clientes" },
   { to: "/maestros/productos", label: "Productos" },
   { to: "/maestros/flota-transportistas", label: "Flota y Transportistas" },
+  { to: "/maestros/segmentacion", label: "Segmentación" },
   { to: "/maestros/usuarios", label: "Usuarios" },
   { to: "/maestros/almacenes", label: "Almacenes" },
 ];

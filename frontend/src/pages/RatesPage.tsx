@@ -76,11 +76,19 @@ const calculationModeLabel: Record<string, string> = {
 // Etiquetas legibles de los 4 segmentos reales de ServiceType, usadas en las
 // columnas "Servicio" de las tablas de tarifa por cliente/zona (antes se
 // mostraba el valor crudo del enum con guiones bajos sustituidos por espacios).
+//
+// Fase 28: decisión explícita de Raúl -- mantener los 4 valores TÉCNICOS del
+// enum tal cual están en la base de datos (sin migrar Postgres) y solo
+// cambiar la etiqueta que se ve en pantalla al vocabulario real de su
+// operativa (Paquetería/Paletería/Ligero/Pesado, con los umbrales de peso de
+// service_segmentation_rule -- ver SegmentationRulesPage.tsx). "paleteria_pesada"
+// pasa a mostrarse como "Ligero" y "gran_volumen" como "Pesado": son solo
+// las 2 etiquetas que cambian, los valores que viajan a la API no se tocan.
 const serviceSegmentLabel: Record<string, string> = {
   paqueteria: "Paquetería",
   paleteria: "Paletería",
-  paleteria_pesada: "Paletería pesada",
-  gran_volumen: "Gran volumen",
+  paleteria_pesada: "Ligero",
+  gran_volumen: "Pesado",
 };
 
 type Tab = "full_truck" | "pallet" | "surcharges" | "customer" | "zone";

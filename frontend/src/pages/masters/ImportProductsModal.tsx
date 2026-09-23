@@ -224,9 +224,9 @@ export default function ImportProductsModal({ open, onClose, onSuccess, onError 
                 Sin peso cargado ({summary.productosSinPesoCargado.length})
               </h3>
               <p className="text-xs text-amber-700 mb-1">
-                Esta plantilla no trae el peso en kg de cada producto ("Medida a Peso" solo indica la unidad, no el
-                valor). Sin peso, sus pedidos saldrán con peso "—" en vez de uno real -- complétalos desde Maestros
-                &gt; Productos.
+                Estos productos se han quedado sin ningún peso (ni "Peso caja", ni "Peso palet" ni "Peso neto" en el
+                archivo, ni uno ya guardado de antes). Sin peso, sus pedidos saldrán con peso "—" en vez de uno real
+                -- complétalos desde Maestros &gt; Productos.
               </p>
               <p className="text-xs text-amber-600 font-mono break-all">
                 {summary.productosSinPesoCargado.join(", ")}

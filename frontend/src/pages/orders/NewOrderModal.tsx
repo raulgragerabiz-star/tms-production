@@ -47,12 +47,16 @@ const inputCls =
 // Los 4 segmentos reales (antes solo "Paletería"/"Camión completo", 2 valores
 // que ya no existen en el enum de la base de datos). "" = dejar que el
 // backend clasifique automáticamente por peso/palés al crear el pedido.
+//
+// Fase 28: etiquetas actualizadas al vocabulario real de Raúl (Paquetería/
+// Paletería/Ligero/Pesado) -- los valores técnicos que se envían al backend
+// NO cambian, ver comentario en RatesPage.tsx.
 const serviceTypeOptions = [
   { value: "", label: "Automático (por peso/palés)" },
   { value: "paqueteria", label: "Paquetería" },
   { value: "paleteria", label: "Paletería" },
-  { value: "paleteria_pesada", label: "Paletería pesada" },
-  { value: "gran_volumen", label: "Gran volumen / Camión completo" },
+  { value: "paleteria_pesada", label: "Ligero" },
+  { value: "gran_volumen", label: "Pesado / Camión completo" },
 ] as const;
 
 export default function NewOrderModal({ open, onClose, onSuccess, onError }: Props) {
