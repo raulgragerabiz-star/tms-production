@@ -13,7 +13,14 @@ export function requireCarrierPortal(req: Request, _res: Response, next: NextFun
 
 export function requireDriverApp(req: Request, _res: Response, next: NextFunction) {
   if (!req.auth) return next(HttpError.unauthorized());
-  if (req.auth.userType !== "driver_app" || !req.auth.driverId) {
+  // Fase 25 ("usuarios app" sub-fase 3): una sesión de QR de ruta también es
+  // userType "driver_app" pero no tiene ninguna cuenta de conductor real
+  // detrás -- `driverId` va a null y en su lugar lleva el bloque `routeQr`
+  // (ver JwtPayload, auth.service.ts). Antes de esta fase, `driverId` era
+  // obligatorio para entrar aquí; ahora basta con tener uno de los dos.
+  const hasDriverAccount = !!req.auth.driverId;
+  const hasRouteQrSession = !!req.auth.routeQr;
+  if (req.auth.userType !== "driver_app" || (!hasDriverAccount && !hasRouteQrSession)) {
     return next(HttpError.forbidden("Acceso exclusivo de la App Conductor"));
   }
   next();

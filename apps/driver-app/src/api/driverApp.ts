@@ -1,7 +1,13 @@
-// Funciones del cliente de API para QR de conductor + vehículo y jornada.
+// Funciones del cliente de API para QR de ruta + jornada.
 //
-// bindVehicleByQrToken se deja como llamada directa (requiere respuesta
-// inmediata para mostrar el vehículo vinculado, no tiene sentido en cola).
+// Fase 25 ("usuarios app" sub-fase 3): sustituye del todo al login por QR de
+// vehículo + email/contraseña (loginWithVehicleQr / bindVehicleByQrToken,
+// que usaban VehicleQrToken) -- petición explícita de Raúl. La App Conductor
+// entra ahora escaneando el QR fijo de un circuito de reparto (centro +
+// circuito + transportista) y rellenando un formulario de identificación.
+// Los endpoints antiguos (`/auth/driver-qr-login`,
+// `/driver-app/session/bind-vehicle`) se dejan tal cual en el backend por si
+// hiciera falta consultarlos más adelante, pero esta app ya no los llama.
 //
 // confirmShipmentLoad queda sin usar por ahora: el checkpoint de "carga" ya
 // se cubre desde TodayRoutePage con el botón "He cargado el vehículo"
@@ -12,25 +18,53 @@
 
 import { apiClient, api } from "./client"; // cliente ya existente en la app
 import { enqueueAction } from "@/offline/offlineQueue";
+import type { RouteQrSession } from "@/store/auth-store";
 
-export async function bindVehicleByQrToken(token: string) {
-  const res = await apiClient.post("/driver-app/session/bind-vehicle", { token });
-  return res.data as { vehicleId: string; plate: string; vehicleType: string; carrier: string };
+export interface RouteQrLoginForm {
+  driverName: string;
+  driverDni: string;
+  driverPhone?: string;
+  vehiclePlate: string;
+  trailerPlate?: string;
 }
 
-// Fase 8k: login solo-con-QR -- a diferencia de bindVehicleByQrToken (que
-// requiere ya tener sesión iniciada), esta llamada es la que arranca la
-// sesión: escanear el QR del vehículo basta para entrar en la App Conductor,
-// sin email/contraseña. Usa `api` en vez de `apiClient` a propósito: en este
-// momento no hay ningún token todavía (es indiferente cuál se use, son la
-// misma instancia -- ver client.ts -- pero así queda más claro en el nombre
-// que es una llamada "pre-login").
-export async function loginWithVehicleQr(token: string) {
-  const res = await api.post("/auth/driver-qr-login", { token });
+// Fase 25: login solo-con-QR de RUTA -- usa `api` en vez de `apiClient` a
+// propósito: en este momento no hay ningún token todavía (es indiferente
+// cuál se use, son la misma instancia -- ver client.ts -- pero así queda más
+// claro en el nombre que es una llamada "pre-login").
+export async function loginWithRouteQr(token: string, form: RouteQrLoginForm) {
+  const res = await api.post("/auth/route-qr-login", { token, ...form });
   return res.data as {
     token: string;
-    user: { id: string; email: string; fullName: string; userType: string; driverId: string | null };
-    vehicle: { plate: string; vehicleType?: string; carrier?: string };
+    routeQr: {
+      warehouseId: string;
+      deliveryZoneId: string;
+      carrierId: string;
+      driverName: string;
+      driverDni: string;
+      driverPhone: string | null;
+      vehiclePlate: string;
+      trailerPlate: string | null;
+    };
+    warehouse: { id: string; name: string };
+    deliveryZone: { id: string; name: string };
+    carrier: { id: string; legalName: string };
+  };
+}
+
+// Arma el objeto de sesión (auth-store.ts) a partir de la respuesta de
+// loginWithRouteQr -- centralizado aquí para no repetir el mapeo en
+// LoginPage.tsx.
+export function routeQrSessionFromLoginResponse(res: Awaited<ReturnType<typeof loginWithRouteQr>>): RouteQrSession {
+  return {
+    driverName: res.routeQr.driverName,
+    driverDni: res.routeQr.driverDni,
+    driverPhone: res.routeQr.driverPhone,
+    vehiclePlate: res.routeQr.vehiclePlate,
+    trailerPlate: res.routeQr.trailerPlate,
+    warehouse: res.warehouse,
+    deliveryZone: res.deliveryZone,
+    carrier: res.carrier,
   };
 }
 

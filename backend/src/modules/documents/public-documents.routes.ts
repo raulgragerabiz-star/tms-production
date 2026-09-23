@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { asyncHandler } from "@/utils/async-handler";
 import { HttpError } from "@/utils/http-error";
 import { documentsRateLimiter } from "@/middleware/documents-rate-limit";
-import { renderDeliveryNotePdf, renderCarriageNotePdf, verifyDocumentToken } from "./document-pdf.service";
+import { renderDeliveryNotePdf, renderCarriageNotePdf, resolveCarriageNoteDriver, verifyDocumentToken } from "./document-pdf.service";
 
 export const publicDocumentsRouter = Router();
 publicDocumentsRouter.use(documentsRateLimiter);
@@ -100,7 +100,10 @@ publicDocumentsRouter.get(
     // Fase 24: ya no hace falta consultar `Company` -- el cargador
     // contractual del DeCA se lee de `route.warehouse` (datos fiscales del
     // centro de origen).
-    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, verifyUrl);
+    // Fase 25: si el envío se opera por QR de ruta (sin Driver real), el
+    // conductor que se imprime es el sellado por trazabilidad en el propio
+    // Shipment -- ver resolveCarriageNoteDriver.
+    const pdf = await renderCarriageNotePdf({ ...route, driver: resolveCarriageNoteDriver(route.shipment) }, verifyUrl);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`);

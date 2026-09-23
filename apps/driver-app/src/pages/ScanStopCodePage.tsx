@@ -1,10 +1,10 @@
 // Fase 8L (rediseño App Conductor): "Escáner de códigos" de la barra de
 // acciones de una parada -- verificación de mercancía (código de palet o
-// bulto) durante la entrega. Mismo motor que ScanVehicleQrPage.tsx
-// (html5-qrcode, sin API key), pero como pantalla aparte en vez de cámara
-// incrustada en StopDetailPage: es el mismo patrón ya usado en esta app
-// (ScanVehicleQrPage.tsx, ScanToLoginPage.tsx) para no pelear con el ciclo
-// de vida de la cámara dentro de una pantalla con scroll.
+// bulto) durante la entrega. Mismo motor (html5-qrcode, sin API key) y mismo
+// criterio que el resto de escaneos de esta app (LoginPage.tsx, Fase 25):
+// pantalla aparte en vez de cámara incrustada en StopDetailPage, para no
+// pelear con el ciclo de vida de la cámara dentro de una pantalla con
+// scroll.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";

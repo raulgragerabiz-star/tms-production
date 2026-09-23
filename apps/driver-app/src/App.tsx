@@ -3,8 +3,6 @@ import { useAuthStore } from "@/store/auth-store";
 import LoginPage from "@/pages/LoginPage";
 import TodayRoutePage from "@/pages/TodayRoutePage";
 import StopDetailPage from "@/pages/StopDetailPage";
-import ScanVehicleQrPage from "@/pages/ScanVehicleQrPage";
-import ScanToLoginPage from "@/pages/ScanToLoginPage";
 import ScanStopCodePage from "@/pages/ScanStopCodePage";
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
@@ -16,10 +14,12 @@ function ProtectedRoute({ children }: { children: JSX.Element }) {
 export default function App() {
   return (
     <Routes>
+      {/* Fase 25 ("usuarios app" sub-fase 3): LoginPage ahora ES el
+          escaneo del QR de ruta + formulario de identificación -- sustituye
+          del todo al login por email/contraseña y al QR de vehículo (antes
+          en /escanear-acceso, ver ScanToLoginPage.tsx, retirada). Sin
+          ProtectedRoute -- todavía no hay ningún token en este punto. */}
       <Route path="/login" element={<LoginPage />} />
-      {/* Fase 8k: acceso solo-con-QR, sin ProtectedRoute -- todavía no hay
-          ningún token en este punto (ver ScanToLoginPage.tsx). */}
-      <Route path="/escanear-acceso" element={<ScanToLoginPage />} />
       <Route
         path="/"
         element={
@@ -33,14 +33,6 @@ export default function App() {
         element={
           <ProtectedRoute>
             <StopDetailPage />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/escanear-vehiculo"
-        element={
-          <ProtectedRoute>
-            <ScanVehicleQrPage />
           </ProtectedRoute>
         }
       />

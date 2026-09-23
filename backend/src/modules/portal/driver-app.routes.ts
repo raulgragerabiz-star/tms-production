@@ -9,7 +9,48 @@ import { requireDriverApp } from "@/middleware/scoped-auth";
 import { resolveVehicleFromQrToken, bindVehicleToDriverToday } from "@/modules/vehicles/vehicle-qr.service";
 import { broadcastToShipment, broadcastToWarehouse } from "@/realtime/ws.server";
 import { maybeRecalculateEta } from "@/modules/routing/eta-recalc.service";
-import { renderDeliveryNotePdf, renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
+import { renderDeliveryNotePdf, renderCarriageNotePdf, resolveCarriageNoteDriver, signDocumentToken } from "@/modules/documents/document-pdf.service";
+// Fase 25 ("usuarios app" sub-fase 3): esta app ya no solo la usan cuentas de
+// conductor real (driverId) -- también sesiones abiertas por QR de ruta
+// (centro + circuito + transportista), sin ningún Driver detrás. Todo el
+// alcance por sesión (qué envíos/paradas puede tocar) se resuelve aquí, ver
+// comentario largo en driver-app-scope.ts.
+import {
+  resolveDriverAppScope,
+  scopedRouteWhereForShipmentQuery,
+  scopedShipmentWhere,
+  routeBelongsToDeliveryZone,
+  findShipmentIdsForRouteQrScope,
+  driverAppScopeLabel,
+  DriverAppScope,
+} from "@/modules/portal/driver-app-scope";
+
+// Alcance de una jornada (DriverShift) -- por driverId para una cuenta real,
+// por centro+circuito+transportista para una sesión de QR de ruta (no hay
+// ninguna columna de identidad individual que valga para esta última, ver
+// comentario largo en el modelo DriverShift, schema.prisma). `as any` en los
+// dos usos de esta función: este sandbox no puede regenerar el cliente de
+// Prisma (sin red hacia su CDN) para conocer las columnas routeQr* nuevas,
+// pero sí existen ya en el schema -- mismo criterio que el resto de campos
+// nuevos de esta fase (ver driverNotes/scannedCodes más abajo).
+function shiftScopeWhere(scope: DriverAppScope) {
+  return scope.kind === "driver"
+    ? { driverId: scope.driverId }
+    : ({ routeQrWarehouseId: scope.warehouseId, routeQrDeliveryZoneId: scope.deliveryZoneId, routeQrCarrierId: scope.carrierId } as any);
+}
+
+// Mismo patrón que arriba (scopedRouteWhereForShipmentQuery +
+// routeBelongsToDeliveryZone) pero para los endpoints que operan sobre un
+// Shipment directamente (gps-ping, incidencias, mensajes, checkpoints de
+// estado, DeCA) en vez de sobre una parada -- se repite en cada uno para no
+// forzar un `include` genérico difícil de tipar contra el cliente de Prisma
+// (este sandbox no puede regenerarlo, ver comentario de shiftScopeWhere).
+async function findScopedShipment(scope: DriverAppScope, shipmentId: string) {
+  const shipment = await prisma.shipment.findFirst({ where: { id: shipmentId, ...scopedShipmentWhere(scope) } });
+  if (!shipment) return null;
+  if (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(shipment.routeId, scope.warehouseId, scope.deliveryZoneId))) return null;
+  return shipment;
+}
 
 export const driverAppRouter = Router();
 driverAppRouter.use(requireDriverApp);
@@ -61,7 +102,7 @@ const SHIPMENT_STATUS_PRIORITY: Record<string, number> = { in_transit: 0, loaded
 driverAppRouter.get(
   "/today-route",
   asyncHandler(async (req, res) => {
-    const driverId = req.auth!.driverId!;
+    const scope = resolveDriverAppScope(req.auth!);
     const dateParam = req.query.date as string | undefined;
     const day = dateParam ? new Date(`${dateParam}T00:00:00`) : new Date();
     if (Number.isNaN(day.getTime())) throw HttpError.badRequest("Fecha no válida");
@@ -69,9 +110,18 @@ driverAppRouter.get(
     const nextDay = new Date(day);
     nextDay.setDate(nextDay.getDate() + 1);
 
+    // Fase 25: una sesión de QR de ruta no tiene driverId -- sus envíos de
+    // ese día se resuelven por centro+circuito+transportista (ver
+    // findShipmentIdsForRouteQrScope, driver-app-scope.ts) en vez de por la
+    // columna `driverId`.
+    const shipmentWhere =
+      scope.kind === "driver"
+        ? { driverId: scope.driverId }
+        : { id: { in: await findShipmentIdsForRouteQrScope(scope, day) } };
+
     const shipments = await prisma.shipment.findMany({
       where: {
-        driverId,
+        ...shipmentWhere,
         status: { in: ["programmed", "loaded", "in_transit", "finished"] },
         route: { routeDate: { gte: day, lt: nextDay } },
       },
@@ -122,10 +172,17 @@ driverAppRouter.post(
   asyncHandler(async (req, res) => {
     const schema = z.object({ token: z.string().min(10) });
     const { token } = schema.parse(req.body);
-    const driverId = req.auth!.driverId!;
+    // Fase 25: solo tiene sentido para una cuenta de conductor real -- una
+    // sesión de QR de ruta ya declaró su matrícula en el propio formulario
+    // de entrada (trazabilidad, no vincula ningún Vehicle real), así que no
+    // hay ningún vehículo "pendiente de vincular" que resolver aquí.
+    const scope = resolveDriverAppScope(req.auth!);
+    if (scope.kind !== "driver") {
+      throw HttpError.badRequest("Esta acción no está disponible en una sesión de QR de ruta");
+    }
 
     const vehicle = await resolveVehicleFromQrToken(token);
-    await bindVehicleToDriverToday(driverId, vehicle.id);
+    await bindVehicleToDriverToday(scope.driverId, vehicle.id);
 
     res.json({
       vehicleId: vehicle.id,
@@ -143,8 +200,9 @@ driverAppRouter.post(
 driverAppRouter.get(
   "/shifts/current",
   asyncHandler(async (req, res) => {
+    const scope = resolveDriverAppScope(req.auth!);
     const shift = await prisma.driverShift.findFirst({
-      where: { driverId: req.auth!.driverId!, endedAt: null },
+      where: { ...shiftScopeWhere(scope), endedAt: null },
       include: { vehicle: { select: { plate: true } } },
       orderBy: { startedAt: "desc" },
     });
@@ -157,21 +215,43 @@ driverAppRouter.post(
   asyncHandler(async (req, res) => {
     const schema = z.object({ lat: z.number().optional(), lng: z.number().optional() });
     const { lat, lng } = schema.parse(req.body);
-    const driverId = req.auth!.driverId!;
+    const scope = resolveDriverAppScope(req.auth!);
 
-    const existing = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+    const existing = await prisma.driverShift.findFirst({ where: { ...shiftScopeWhere(scope), endedAt: null } });
     if (existing) throw HttpError.conflict("Ya hay una jornada en curso");
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const todayShipment = await prisma.shipment.findFirst({
-      where: { driverId, route: { routeDate: { gte: today, lt: tomorrow } } },
-    });
+    // Fase 25: una sesión de QR de ruta no tiene driverId -- su envío de hoy
+    // (si ya existe) se resuelve igual que en GET /today-route, solo para
+    // poder mostrar el vehículo asignado en la propia jornada.
+    const todayShipment =
+      scope.kind === "driver"
+        ? await prisma.shipment.findFirst({ where: { driverId: scope.driverId, route: { routeDate: { gte: today, lt: tomorrow } } } })
+        : await prisma.shipment.findFirst({
+            where: { id: { in: await findShipmentIdsForRouteQrScope(scope, today) } },
+          });
 
     const shift = await prisma.driverShift.create({
-      data: { driverId, vehicleId: todayShipment?.vehicleId ?? null, startLat: lat, startLng: lng },
+      data: {
+        ...(scope.kind === "driver"
+          ? { driverId: scope.driverId }
+          : ({
+              routeQrWarehouseId: scope.warehouseId,
+              routeQrDeliveryZoneId: scope.deliveryZoneId,
+              routeQrCarrierId: scope.carrierId,
+              routeQrDriverName: scope.driverName,
+              routeQrDriverDni: scope.driverDni,
+              routeQrDriverPhone: scope.driverPhone,
+              routeQrVehiclePlate: scope.vehiclePlate,
+              routeQrTrailerPlate: scope.trailerPlate,
+            } as any)),
+        vehicleId: todayShipment?.vehicleId ?? null,
+        startLat: lat,
+        startLng: lng,
+      },
       include: { vehicle: { select: { plate: true } } },
     });
     res.status(201).json({ shift });
@@ -183,9 +263,9 @@ driverAppRouter.post(
   asyncHandler(async (req, res) => {
     const schema = z.object({ lat: z.number().optional(), lng: z.number().optional() });
     const { lat, lng } = schema.parse(req.body);
-    const driverId = req.auth!.driverId!;
+    const scope = resolveDriverAppScope(req.auth!);
 
-    const existing = await prisma.driverShift.findFirst({ where: { driverId, endedAt: null } });
+    const existing = await prisma.driverShift.findFirst({ where: { ...shiftScopeWhere(scope), endedAt: null } });
     if (!existing) throw HttpError.notFound("No hay ninguna jornada en curso");
 
     const shift = await prisma.driverShift.update({
@@ -200,10 +280,13 @@ driverAppRouter.post(
 driverAppRouter.post(
   "/stops/:routeStopId/arrive",
   asyncHandler(async (req, res) => {
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
     const updated = await prisma.routeStop.update({ where: { id: stop.id }, data: { status: "arrived" } });
 
     const shipment = await prisma.shipment.findUnique({ where: { routeId: stop.routeId } });
@@ -229,10 +312,13 @@ driverAppRouter.patch(
     const schema = z.object({ note: z.string().max(2000) });
     const { note } = schema.parse(req.body);
 
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
 
     const updated = await prisma.routeStop.update({
       where: { id: stop.id },
@@ -251,10 +337,13 @@ driverAppRouter.post(
     const schema = z.object({ code: z.string().min(1).max(200) });
     const { code } = schema.parse(req.body);
 
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
 
     const current = Array.isArray((stop as any).scannedCodes) ? (stop as any).scannedCodes : [];
     const next = [...current, { code, scannedAt: new Date().toISOString() }];
@@ -285,11 +374,21 @@ driverAppRouter.post(
     });
     const data = schema.parse(req.body);
 
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
       include: { order: true },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
+    // Fase 25: `Incident.reportedBy` guardaba siempre `req.auth!.sub` -- para
+    // una sesión de conductor real sigue siendo el id del AppUser (igual que
+    // hasta ahora); para una sesión de QR de ruta, `sub` es un identificador
+    // sintético del propio token (route-qr:<id>, ver auth.service.ts) que no
+    // significa nada para quien lo lea después, así que se usa una etiqueta
+    // legible en su lugar (ver driverAppScopeLabel, driver-app-scope.ts).
+    const { reportedBy } = driverAppScopeLabel(scope, req.auth!.sub, req.auth!.email);
 
     await prisma.$transaction(async (tx) => {
       const nextStatus = data.returned ? "returned" : data.failed ? "failed" : "completed";
@@ -335,7 +434,7 @@ driverAppRouter.post(
               routeStopId: stop.id,
               incidentType: "other",
               description: data.failureReason ?? "Retorno a almacén reportado desde App Conductor",
-              reportedBy: req.auth!.sub,
+              reportedBy,
             },
           });
         }
@@ -351,7 +450,7 @@ driverAppRouter.post(
               routeStopId: stop.id,
               incidentType: "refused",
               description: data.failureReason ?? "Entrega fallida reportada desde App Conductor",
-              reportedBy: req.auth!.sub,
+              reportedBy,
             },
           });
         }
@@ -434,7 +533,8 @@ driverAppRouter.post(
     const schema = z.object({ status: z.enum(SHIPMENT_STATUS_ORDER) });
     const { status } = schema.parse(req.body);
 
-    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, req.params.id);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
     const currentIdx = SHIPMENT_STATUS_ORDER.indexOf(shipment.status as (typeof SHIPMENT_STATUS_ORDER)[number]);
@@ -464,7 +564,8 @@ driverAppRouter.post(
     const schema = z.object({ shipmentId: z.string().uuid(), lat: z.number(), lng: z.number() });
     const data = schema.parse(req.body);
 
-    const shipment = await prisma.shipment.findFirst({ where: { id: data.shipmentId, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, data.shipmentId);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
     const event = await prisma.trackingEvent.create({
@@ -503,7 +604,8 @@ driverAppRouter.post(
     });
     const { pings } = schema.parse(req.body);
 
-    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, req.params.id);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
     const result = await prisma.trackingEvent.createMany({
@@ -541,7 +643,8 @@ driverAppRouter.post(
       description: z.string().optional(),
     });
     const data = schema.parse(req.body);
-    const shipment = await prisma.shipment.findFirst({ where: { id: data.shipmentId, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, data.shipmentId);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
     const incident = await prisma.incident.create({
@@ -550,7 +653,7 @@ driverAppRouter.post(
         routeStopId: data.routeStopId,
         incidentType: data.incidentType,
         description: data.description,
-        reportedBy: req.auth!.sub,
+        reportedBy: driverAppScopeLabel(scope, req.auth!.sub, req.auth!.email).reportedBy,
       },
     });
     res.status(201).json(incident);
@@ -562,11 +665,14 @@ driverAppRouter.post(
 driverAppRouter.get(
   "/stops/:routeStopId/documents",
   asyncHandler(async (req, res) => {
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
       include: { order: { include: { documents: true } } },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
     res.json({ items: stop.order.documents });
   })
 );
@@ -579,8 +685,9 @@ driverAppRouter.get(
 driverAppRouter.get(
   "/stops/:routeStopId/documents/delivery-note.pdf",
   asyncHandler(async (req, res) => {
+    const scope = resolveDriverAppScope(req.auth!);
     const stop = await prisma.routeStop.findFirst({
-      where: { id: req.params.routeStopId, route: { shipment: { driverId: req.auth!.driverId! } } },
+      where: { id: req.params.routeStopId, route: scopedRouteWhereForShipmentQuery(scope) },
       include: {
         pod: true,
         order: {
@@ -593,7 +700,9 @@ driverAppRouter.get(
         },
       },
     });
-    if (!stop) throw HttpError.notFound("Parada no encontrada");
+    if (!stop || (scope.kind === "routeQr" && !(await routeBelongsToDeliveryZone(stop.routeId, scope.warehouseId, scope.deliveryZoneId)))) {
+      throw HttpError.notFound("Parada no encontrada");
+    }
 
     const token = signDocumentToken({ typ: "delivery_note", id: stop.order.id });
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/delivery-note/${stop.order.id}?token=${token}`;
@@ -615,7 +724,8 @@ driverAppRouter.get(
 driverAppRouter.get(
   "/shipments/:id/documents/carriage-note.pdf",
   asyncHandler(async (req, res) => {
-    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, req.params.id);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
     const route = await prisma.route.findUniqueOrThrow({
@@ -646,7 +756,10 @@ driverAppRouter.get(
     const verifyUrl = `${req.protocol}://${req.get("host")}/api/documents/public/carriage-note/${route.id}?token=${token}`;
     // Fase 24: ya no hace falta el include de `company` -- el cargador
     // contractual del DeCA se lee de `route.warehouse`.
-    const pdf = await renderCarriageNotePdf({ ...route, driver: route.shipment?.driver ?? null }, verifyUrl);
+    // Fase 25: si el envío se opera por QR de ruta (sin Driver real), el
+    // conductor que se imprime es el sellado por trazabilidad en el propio
+    // Shipment -- ver resolveCarriageNoteDriver (document-pdf.service.ts).
+    const pdf = await renderCarriageNotePdf({ ...route, driver: resolveCarriageNoteDriver(route.shipment) }, verifyUrl);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="carta-porte-${route.id.slice(0, 8)}.pdf"`);
     res.send(pdf);
@@ -657,7 +770,8 @@ driverAppRouter.get(
 driverAppRouter.get(
   "/shipments/:id/messages",
   asyncHandler(async (req, res) => {
-    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, req.params.id);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
     const items = await prisma.shipmentMessage.findMany({ where: { shipmentId: shipment.id }, orderBy: { createdAt: "asc" } });
     res.json({ items });
@@ -669,11 +783,16 @@ driverAppRouter.post(
   asyncHandler(async (req, res) => {
     const schema = z.object({ body: z.string().min(1) });
     const { body } = schema.parse(req.body);
-    const shipment = await prisma.shipment.findFirst({ where: { id: req.params.id, driverId: req.auth!.driverId! } });
+    const scope = resolveDriverAppScope(req.auth!);
+    const shipment = await findScopedShipment(scope, req.params.id);
     if (!shipment) throw HttpError.notFound("Envío no encontrado");
 
+    // Fase 25: `senderName` guardaba siempre `req.auth!.email` -- una sesión
+    // de QR de ruta no tiene email (payload.email = "", ver
+    // auth.service.ts), así que se usa la misma etiqueta legible que ya usa
+    // Incident.reportedBy (ver driverAppScopeLabel, driver-app-scope.ts).
     const message = await prisma.shipmentMessage.create({
-      data: { shipmentId: shipment.id, senderType: "driver_app", senderName: req.auth!.email, body },
+      data: { shipmentId: shipment.id, senderType: "driver_app", senderName: driverAppScopeLabel(scope, req.auth!.sub, req.auth!.email).senderName, body },
     });
     res.status(201).json(message);
   })

@@ -8,7 +8,7 @@ import { env } from "@/config/env";
 import { estimateRoute, estimateStopEtas, suggestVehicleType, getRouteGeometry, STOP_SERVICE_MINUTES } from "@/modules/routing/routing.service";
 import { optimizePlan, OrsNotConfiguredError, VroomJob, VroomVehicle } from "@/modules/routing/ors.service";
 import { broadcastToWarehouse } from "@/realtime/ws.server";
-import { renderCarriageNotePdf, signDocumentToken } from "@/modules/documents/document-pdf.service";
+import { renderCarriageNotePdf, resolveCarriageNoteDriver, signDocumentToken } from "@/modules/documents/document-pdf.service";
 import { summarizeOrderPallets, computeLinePallets } from "@/modules/orders/lib/line-pallets";
 import { resolveDeliveryZonesForPairs, zonePairKey } from "@/modules/customers/customer-zone-resolution";
 import { getWarehouseScope, assertWarehouseWriteAccess } from "@/middleware/warehouse-scope";
@@ -983,8 +983,11 @@ routesRouter.get(
     // Fase 24: ya no hace falta consultar `Company` -- el cargador
     // contractual del DeCA se lee de `route.warehouse` (datos fiscales del
     // centro de origen).
+    // Fase 25: si el envío se opera por QR de ruta (sin Driver real), el
+    // conductor que se imprime es el sellado por trazabilidad en el propio
+    // Shipment -- ver resolveCarriageNoteDriver.
     const pdf = await renderCarriageNotePdf(
-      { ...route, driver: route.shipment?.driver ?? null },
+      { ...route, driver: resolveCarriageNoteDriver(route.shipment) },
       verifyUrl
     );
 

@@ -5,6 +5,7 @@ import { env } from "@/config/env";
 import { HttpError } from "@/utils/http-error";
 import { resolveVehicleFromQrToken, bindVehicleToDriverToday } from "@/modules/vehicles/vehicle-qr.service";
 import { resolveRouteQrToken } from "@/modules/route-qr/route-qr.service";
+import { stampRouteQrIdentity } from "@/modules/portal/driver-app-scope";
 
 export interface JwtPayload {
   sub: string;
@@ -214,6 +215,19 @@ export async function loginWithRouteQrToken(token: string, form: RouteQrFormInpu
   };
 
   const jwtToken = jwt.sign(payload, env.jwtSecret, { expiresIn: "16h" });
+
+  // Fase 25: sella los envíos de HOY que correspondan a este centro+circuito+
+  // transportista con los datos que se acaban de rellenar -- trazabilidad de
+  // quién opera realmente la ruta, y lo que usa el DeCA (carriage-note.pdf)
+  // como conductor cuando no hay ninguna cuenta real detrás. "Avisa y no
+  // rompas nada si falla" (mismo criterio que notifyShipmentChange en
+  // driver-app.routes.ts): un fallo aquí no debe impedir entrar en la app.
+  try {
+    await stampRouteQrIdentity({ kind: "routeQr", ...routeQr });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[route-qr] no se pudo sellar la identidad en los envíos de hoy:", (err as Error)?.message ?? err);
+  }
 
   return {
     token: jwtToken,

@@ -662,7 +662,13 @@ model RouteQrToken {
 // claro ("ya hay una jornada en curso") en vez de un error de integridad.
 model DriverShift {
   id        String    @id @default(uuid())
-  driverId  String    @map("driver_id")
+  // Fase 25 ("usuarios app" sub-fase 3): pasa a ser opcional -- una jornada
+  // abierta desde una sesión de QR de ruta (ver más abajo) no tiene ningún
+  // Driver real detrás. Decisión explícita de Raúl ("Extender DriverShift")
+  // sobre cómo fichar jornada sin cuenta de conductor: aditivo, el fichaje de
+  // conductores reales con cuenta (driverId relleno) sigue funcionando
+  // exactamente igual que hasta ahora.
+  driverId  String?   @map("driver_id")
   vehicleId String?   @map("vehicle_id")
   startedAt DateTime  @default(now()) @map("started_at")
   endedAt   DateTime? @map("ended_at")
@@ -670,10 +676,31 @@ model DriverShift {
   startLng  Float?    @map("start_lng")
   endLat    Float?    @map("end_lat")
   endLng    Float?    @map("end_lng")
-  driver    Driver    @relation(fields: [driverId], references: [id])
+  driver    Driver?   @relation(fields: [driverId], references: [id])
   vehicle   Vehicle?  @relation(fields: [vehicleId], references: [id])
 
+  // Fase 25: jornada abierta desde una sesión de QR de ruta -- identifica el
+  // "quién" (centro + circuito + transportista, igual que RouteQrToken; no
+  // hay driverId real) para poder resolver "la jornada en curso de este QR"
+  // sin ninguna cuenta de conductor. driverName/driverDni/driverPhone +
+  // vehiclePlate/trailerPlate son los mismos datos de trazabilidad que ya se
+  // sellan en Shipment (ver stampRouteQrIdentity, driver-app-scope.ts) --
+  // aquí quedan también, por si la jornada se fichó antes de que existiera
+  // ningún envío para hoy en ese centro+circuito+transportista (jornada
+  // independiente de la ruta, igual que ya pasaba con el conductor real).
+  // Cualquiera que escanee ese mismo QR físico ese día ve y puede cerrar la
+  // jornada abierta -- mismo nivel de confianza que ya tiene el QR en sí.
+  routeQrWarehouseId    String? @map("route_qr_warehouse_id")
+  routeQrDeliveryZoneId String? @map("route_qr_delivery_zone_id")
+  routeQrCarrierId      String? @map("route_qr_carrier_id")
+  routeQrDriverName     String? @map("route_qr_driver_name")
+  routeQrDriverDni      String? @map("route_qr_driver_dni")
+  routeQrDriverPhone    String? @map("route_qr_driver_phone")
+  routeQrVehiclePlate   String? @map("route_qr_vehicle_plate")
+  routeQrTrailerPlate   String? @map("route_qr_trailer_plate")
+
   @@index([driverId, startedAt])
+  @@index([routeQrWarehouseId, routeQrDeliveryZoneId, routeQrCarrierId, endedAt])
   @@map("driver_shift")
 }
 
@@ -1188,6 +1215,28 @@ model Shipment {
   vehicle         Vehicle           @relation(fields: [vehicleId], references: [id])
   messages        ShipmentMessage[]
   trackingEvents  TrackingEvent[]
+
+  // Fase 25 ("usuarios app" sub-fase 3): identidad de quien opera este envío
+  // cuando entra por QR de RUTA (centro + circuito + transportista) en vez
+  // de por una cuenta de conductor real -- ver RouteQrToken y
+  // loginWithRouteQrToken (auth.service.ts). No hay ningún Driver vinculado
+  // en ese caso (driverId de arriba se queda a null), así que estos campos
+  // quedan "sellados" con los datos del formulario (nombre/DNI/teléfono/
+  // matrícula/remolque) la primera vez que alguien escanea el QR de ese
+  // circuito+transportista el mismo día de la ruta -- ver
+  // stampRouteQrIdentity (driver-app-scope.ts). Solo trazabilidad: nunca
+  // crean ni referencian ningún Vehicle ni Driver real (petición explícita
+  // de Raúl). Se usan también como recambio del bloque "Conductor asignado"
+  // del DeCA cuando no hay `driver` real (ver
+  // document-pdf.service.ts:resolveCarriageNoteDriver). Todos opcionales y
+  // aditivos: un envío operado por una cuenta de conductor real (el flujo de
+  // siempre) los deja todos a null y no cambia en nada.
+  routeQrDriverName   String?   @map("route_qr_driver_name")
+  routeQrDriverDni    String?   @map("route_qr_driver_dni")
+  routeQrDriverPhone  String?   @map("route_qr_driver_phone")
+  routeQrVehiclePlate String?   @map("route_qr_vehicle_plate")
+  routeQrTrailerPlate String?   @map("route_qr_trailer_plate")
+  routeQrLoggedInAt   DateTime? @map("route_qr_logged_in_at")
 
   @@map("shipment")
 }

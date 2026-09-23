@@ -636,6 +636,33 @@ const BIGMAT_CARGADOR_FALLBACK: CompanyProfile = {
   mercantileRegistryText: "Inscrita en el Registro Mercantil de Madrid",
 };
 
+// Fase 25 ("usuarios app" sub-fase 3): cuando el envío se opera por QR de
+// ruta en vez de por una cuenta de conductor real, no hay ningún Driver
+// vinculado (Shipment.driverId queda null) -- se usan en su lugar los datos
+// que la persona introdujo al escanear el QR, sellados en el propio Shipment
+// al iniciar sesión (ver stampRouteQrIdentity, driver-app-scope.ts). Los 3
+// sitios que llaman a renderCarriageNotePdf (Backoffice, verificación
+// pública y App Conductor) comparten esta resolución para mostrar siempre lo
+// mismo, generen el documento cuando lo generen.
+export function resolveCarriageNoteDriver(
+  shipment:
+    | {
+        driver: { fullName: string; taxId: string; phone: string | null } | null;
+        routeQrDriverName?: string | null;
+        routeQrDriverDni?: string | null;
+        routeQrDriverPhone?: string | null;
+      }
+    | null
+    | undefined
+): { fullName: string; taxId: string; phone?: string | null } | null {
+  if (!shipment) return null;
+  if (shipment.driver) return shipment.driver;
+  if (shipment.routeQrDriverName) {
+    return { fullName: shipment.routeQrDriverName, taxId: shipment.routeQrDriverDni ?? "", phone: shipment.routeQrDriverPhone ?? null };
+  }
+  return null;
+}
+
 export async function renderCarriageNotePdf(route: CarriageNoteRoute, verifyUrl: string): Promise<Buffer> {
   const doc = new PDFDocument({ size: "A4", margin: PAGE_MARGIN, bufferPages: true });
   const bufferPromise = drainToBuffer(doc);

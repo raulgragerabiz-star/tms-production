@@ -88,7 +88,10 @@ const NEXT_SHIPMENT_STATUS: Record<string, { next: "loaded" | "in_transit"; labe
 export default function TodayRoutePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const user = useAuthStore((s) => s.user);
+  // Fase 25 ("usuarios app" sub-fase 3): ya no hay ninguna cuenta de
+  // conductor real -- `session` es la identidad de trazabilidad rellenada al
+  // escanear el QR de ruta (ver auth-store.ts / LoginPage.tsx).
+  const session = useAuthStore((s) => s.session);
   const logout = useAuthStore((s) => s.logout);
 
   // Fase 8k: selector de fecha -- petición de Raúl para poder consultar
@@ -153,7 +156,10 @@ export default function TodayRoutePage() {
             </span>
             <div>
               <h1 className="text-lg font-bold">{isToday ? "Ruta de hoy" : "Ruta del día"}</h1>
-              <p className="text-xs text-brand-100">{user?.fullName}</p>
+              <p className="text-xs text-brand-100">
+                {session?.driverName}
+                {session?.vehiclePlate ? ` · ${session.vehiclePlate}` : ""}
+              </p>
             </div>
           </div>
           <button onClick={handleLogout} className="text-sm text-brand-100 font-medium">
@@ -190,11 +196,6 @@ export default function TodayRoutePage() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            {shiftQuery.data?.shift && !shiftQuery.data.shift.vehicle?.plate && (
-              <button onClick={() => navigate("/escanear-vehiculo")} className="text-xs font-medium text-brand-600 border border-brand-200 rounded-lg px-3 py-2">
-                Escanear QR
-              </button>
-            )}
             {shiftQuery.data?.shift ? (
               <button
                 onClick={() => endShiftMutation.mutate()}
