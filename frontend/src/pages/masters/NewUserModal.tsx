@@ -42,9 +42,15 @@ interface WarehouseOption {
 const inputCls =
   "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500";
 
+// Fase 26 ("usuarios app" sub-fase 4): "Portal Transportista" se retira de las
+// opciones de "Tipo de acceso" que se pueden dar de alta -- la app
+// (apps/carrier-portal) y su API (/api/carrier-portal) se retiraron por
+// completo (petición explícita de Raúl: "carece de sentido"). Ver
+// claude/fase26-retirada-portal-transportista.md. Cualquier cuenta antigua de
+// ese tipo se sigue viendo (con su etiqueta) en la lista de Maestros →
+// Usuarios (ver UsersPage.tsx) -- solo deja de poderse crear una nueva aquí.
 const userTypeLabel: Record<string, string> = {
   internal: "Interno (backoffice)",
-  carrier_portal: "Portal Transportista",
   driver_app: "App Conductor",
   customer_portal: "Portal Cliente",
 };
@@ -54,7 +60,7 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
   const [password, setPassword] = useState("");
-  const [userType, setUserType] = useState<"internal" | "carrier_portal" | "driver_app" | "customer_portal">("internal");
+  const [userType, setUserType] = useState<"internal" | "driver_app" | "customer_portal">("internal");
   const [carrierId, setCarrierId] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [driverId, setDriverId] = useState("");
@@ -69,7 +75,7 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
   const carriersQuery = useQuery({
     queryKey: ["carriers"],
     queryFn: async () => (await api.get("/carriers")).data as { items: CarrierOption[] },
-    enabled: open && (userType === "carrier_portal" || userType === "driver_app"),
+    enabled: open && userType === "driver_app",
   });
 
   const customersQuery = useQuery({
@@ -110,7 +116,7 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
           fullName,
           password,
           userType,
-          carrierId: userType === "carrier_portal" || userType === "driver_app" ? carrierId : undefined,
+          carrierId: userType === "driver_app" ? carrierId : undefined,
           customerId: userType === "customer_portal" ? customerId : undefined,
           driverId: userType === "driver_app" ? driverId : undefined,
           roleIds: userType === "internal" ? [roleId] : undefined,
@@ -142,7 +148,6 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
     email.trim() &&
     fullName.trim() &&
     password.length >= 8 &&
-    (userType !== "carrier_portal" || carrierId) &&
     (userType !== "customer_portal" || customerId) &&
     (userType !== "driver_app" || (carrierId && driverId)) &&
     (userType !== "internal" || (roleId && (!warehouseRequired || warehouseId)));
@@ -188,7 +193,7 @@ export default function NewUserModal({ open, onClose, onSuccess, onError }: Prop
           <input type="password" className={inputCls} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} />
         </Field>
 
-        {(userType === "carrier_portal" || userType === "driver_app") && (
+        {userType === "driver_app" && (
           <Field label="Transportista" required>
             <select className={inputCls} value={carrierId} onChange={(e) => setCarrierId(e.target.value)} required>
               <option value="">Selecciona…</option>

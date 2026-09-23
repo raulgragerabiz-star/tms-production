@@ -14,7 +14,8 @@ import { useAuthStore } from "@/store/auth-store";
 // de cada importe) y el ciclo de disputa a nivel de línea que ya estaba
 // escrito pero nunca activado (ver settlement-dispute.routes.ts en
 // _deferred_v1.1_delta) -- aquí lo inicia y resuelve backoffice, porque el
-// portal transportista (apps/carrier-portal) no está en producción.
+// Portal Transportista (apps/carrier-portal) se retiró por completo en la
+// sub-fase 4 de "usuarios app" (ver claude/fase26-retirada-portal-transportista.md).
 interface SettlementLineRow {
   id: string;
   status: "accepted" | "disputed";

@@ -34,7 +34,7 @@ services:
       JWT_EXPIRES_IN: 8h
       PORT: 4000
       NODE_ENV: development
-      CORS_ORIGIN: http://localhost:5173,http://localhost:5174,http://localhost:5175
+      CORS_ORIGIN: http://localhost:5173,http://localhost:5175
     ports:
       - "4000:4000"
     volumes:
@@ -60,22 +60,9 @@ services:
       - /app/node_modules
     command: sh -c "npm run dev -- --host 0.0.0.0"
 
-  carrier-portal:
-    build:
-      context: ../apps/carrier-portal
-      dockerfile: Dockerfile
-    container_name: tms_carrier_portal
-    restart: unless-stopped
-    depends_on:
-      - backend
-    environment:
-      VITE_API_URL: http://localhost:4000/api
-    ports:
-      - "5174:5174"
-    volumes:
-      - ../apps/carrier-portal:/app
-      - /app/node_modules
-    command: sh -c "npm run dev -- --host 0.0.0.0"
+  # Fase 26 ("usuarios app" sub-fase 4): el servicio carrier-portal (Portal
+  # Transportista, apps/carrier-portal, puerto 5174) se retiró por completo --
+  # petición explícita de Raúl, ver claude/fase26-retirada-portal-transportista.md.
 
   driver-app:
     build:

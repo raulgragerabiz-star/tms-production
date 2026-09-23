@@ -79,8 +79,12 @@ jobs:
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
   # --------------------------------------------------------------------
-  # 4 frontends -> Firebase Hosting (multi-site). Cada uno recibe la URL
+  # 3 frontends -> Firebase Hosting (multi-site). Cada uno recibe la URL
   # real de Cloud Run recién desplegado como VITE_API_BASE_URL de build.
+  #
+  # Fase 26 ("usuarios app" sub-fase 4): apps/carrier-portal (Portal
+  # Transportista) se retiró por completo -- petición explícita de Raúl, ver
+  # claude/fase26-retirada-portal-transportista.md.
   # --------------------------------------------------------------------
   deploy-frontends:
     needs: deploy-backend
@@ -89,7 +93,6 @@ jobs:
       matrix:
         app:
           - { path: apps/backoffice, target: backoffice }
-          - { path: apps/carrier-portal, target: carrier-portal }
           - { path: apps/app-conductor, target: driver-app }
           - { path: apps/customer-portal, target: customer-portal }
     steps:

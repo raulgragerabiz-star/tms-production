@@ -10,11 +10,18 @@ import { HttpError } from "@/utils/http-error";
 
 export const usersRouter = Router();
 
+// Fase 26 ("usuarios app" sub-fase 4): "carrier_portal" se retira de los tipos
+// de acceso que se pueden CREAR -- el Portal Transportista (apps/carrier-portal)
+// se retiró por completo (petición explícita de Raúl, ver
+// claude/fase26-retirada-portal-transportista.md). El valor sigue existiendo en
+// el enum UserType de la base de datos (no se toca, mismo criterio que otras
+// fases de este proyecto): cualquier cuenta AppUser antigua con este tipo se
+// deja intacta para histórico, solo deja de poderse crear una nueva.
 const userSchema = z.object({
   email: z.string().email(),
   fullName: z.string().min(1),
   password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
-  userType: z.enum(["internal", "customer_portal", "carrier_portal", "driver_app"]),
+  userType: z.enum(["internal", "customer_portal", "driver_app"]),
   roleIds: z.array(z.string().uuid()).optional(),
   carrierId: z.string().uuid().optional(),
   customerId: z.string().uuid().optional(),
@@ -127,9 +134,6 @@ usersRouter.post(
     // Consistencia de scope: cada tipo de usuario externo debe traer su referencia,
     // y no debe traer las de otros tipos (evita usuarios "ambiguos" con carrierId Y
     // customerId a la vez, por ejemplo).
-    if (data.userType === "carrier_portal" && !data.carrierId) {
-      throw HttpError.badRequest("Un usuario de Portal Transportista requiere carrierId");
-    }
     if (data.userType === "customer_portal" && !data.customerId) {
       throw HttpError.badRequest("Un usuario de Portal Cliente requiere customerId");
     }
@@ -162,7 +166,7 @@ usersRouter.post(
         fullName: data.fullName,
         passwordHash,
         userType: data.userType,
-        carrierId: data.userType === "carrier_portal" || data.userType === "driver_app" ? data.carrierId : undefined,
+        carrierId: data.userType === "driver_app" ? data.carrierId : undefined,
         customerId: data.userType === "customer_portal" ? data.customerId : undefined,
         driverId: data.userType === "driver_app" ? data.driverId : undefined,
         warehouseId: data.userType === "internal" ? data.warehouseId : undefined,

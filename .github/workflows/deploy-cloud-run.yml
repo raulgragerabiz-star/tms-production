@@ -1,11 +1,16 @@
 name: Deploy a Cloud Run
 
-# Este workflow es lo que hace que backend + los 4 frontends sigan funcionando
+# Este workflow es lo que hace que backend + los 3 frontends sigan funcionando
 # aunque el Codespace esté parado: en cada push a main construye las imágenes
 # Docker (los Dockerfile.prod que ya existían en el repo) y las despliega como
-# 5 servicios de Cloud Run, que corren de forma independiente y permanente en
+# 4 servicios de Cloud Run, que corren de forma independiente y permanente en
 # Google Cloud. La base de datos sigue siendo la misma de Neon (DATABASE_URL),
 # no se crea ningún Postgres nuevo.
+#
+# Fase 26 ("usuarios app" sub-fase 4): antes eran 4 frontends / 5 servicios --
+# el 5º era tms-carrier-portal (Portal Transportista), retirado por completo
+# (petición explícita de Raúl: "carece de sentido"). Ver
+# claude/fase26-retirada-portal-transportista.md.
 #
 # Requiere que antes se haya hecho, UNA SOLA VEZ, la configuración manual de GCP
 # (repositorio de Artifact Registry + cuenta de servicio) y que existan estos
@@ -206,66 +211,12 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-  deploy-carrier-portal:
-    needs: deploy-backend
-    runs-on: ubuntu-latest
-    outputs:
-      url: ${{ steps.describe.outputs.url }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.GCPSAKEY }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
-
-      - name: Build y push (carrier-portal)
-        run: |
-          set -e
-          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCPPROJECTID }}/${{ env.REPO }}/tms-carrier-portal:${{ github.sha }}"
-          # Ver comentario de reintento en el build del backend.
-          n=0
-          until [ "$n" -ge 3 ]; do
-            docker build -f apps/carrier-portal/Dockerfile.prod \
-              --build-arg VITE_API_URL="${{ needs.deploy-backend.outputs.url }}/api" \
-              -t "$IMAGE" apps/carrier-portal && break
-            n=$((n + 1))
-            echo "docker build falló (intento $n/3), reintentando en 15s..."
-            sleep 15
-          done
-          if [ "$n" -ge 3 ]; then
-            echo "ERROR: docker build del carrier-portal siguió fallando tras 3 intentos"
-            exit 1
-          fi
-          docker push "$IMAGE"
-          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
-
-      - name: Despliegue en Cloud Run
-        run: |
-          gcloud run deploy tms-carrier-portal \
-            --project="${{ secrets.GCPPROJECTID }}" \
-            --region="${{ env.REGION }}" \
-            --image="$IMAGE" \
-            --platform=managed \
-            --allow-unauthenticated \
-            --port=80
-
-      - id: describe
-        run: |
-          # Reintentamos unas veces: la primera vez que se crea un servicio de Cloud Run,
-          # status.url puede tardar unos segundos en poblarse justo despues del `gcloud run
-          # deploy` anterior (nos paso una vez con tms-backoffice: URL vacia -> CORS roto).
-          for i in 1 2 3 4 5; do
-            URL=$(gcloud run services describe tms-carrier-portal --project="${{ secrets.GCPPROJECTID }}" --region="${{ env.REGION }}" --format='value(status.url)')
-            if [ -n "$URL" ]; then break; fi
-            echo "URL todavia vacia, esperando 5s (intento $i)..."
-            sleep 5
-          done
-          if [ -z "$URL" ]; then
-            echo "ERROR: no se pudo obtener la URL de tms-carrier-portal tras varios intentos"
-            exit 1
-          fi
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
+  # Fase 26 ("usuarios app" sub-fase 4): el job deploy-carrier-portal (apps/carrier-portal,
+  # servicio Cloud Run tms-carrier-portal) se retiró por completo -- petición explícita de
+  # Raúl ("carece de sentido"), ver claude/fase26-retirada-portal-transportista.md. El
+  # servicio YA DESPLEGADO en Cloud Run no se borra solo -- hay que borrarlo a mano una vez
+  # (gcloud run services delete tms-carrier-portal --project=<PROJECT_ID> --region=europe-west1),
+  # ver ese mismo doc para el paso a paso completo.
 
   deploy-driver-app:
     needs: deploy-backend
@@ -391,13 +342,13 @@ jobs:
           fi
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-  # Los 4 frontends solo obtienen su URL pública de Cloud Run DESPUÉS de su primer
+  # Los 3 frontends solo obtienen su URL pública de Cloud Run DESPUÉS de su primer
   # despliegue (arriba), así que el CORS del backend no puede fijarse hasta este punto
-  # — de ahí este último paso, que actualiza el backend ya desplegado con los 4 orígenes
+  # — de ahí este último paso, que actualiza el backend ya desplegado con los 3 orígenes
   # reales en cuanto se conocen. En despliegues posteriores las URLs no cambian (Cloud Run
   # las mantiene estables mientras no se borre el servicio), así que este paso es idempotente.
   update-backend-cors:
-    needs: [deploy-backend, deploy-backoffice, deploy-carrier-portal, deploy-driver-app, deploy-customer-portal]
+    needs: [deploy-backend, deploy-backoffice, deploy-driver-app, deploy-customer-portal]
     runs-on: ubuntu-latest
     steps:
       - uses: google-github-actions/auth@v2
@@ -426,12 +377,11 @@ jobs:
           }
 
           BACKOFFICE_URL=$(get_url tms-backoffice)
-          CARRIER_URL=$(get_url tms-carrier-portal)
           DRIVER_URL=$(get_url tms-driver-app)
           CUSTOMER_URL=$(get_url tms-customer-portal)
 
           ORIGINS=""
-          for url in "$BACKOFFICE_URL" "$CARRIER_URL" "$DRIVER_URL" "$CUSTOMER_URL"; do
+          for url in "$BACKOFFICE_URL" "$DRIVER_URL" "$CUSTOMER_URL"; do
             if [ -n "$url" ]; then
               if [ -z "$ORIGINS" ]; then ORIGINS="$url"; else ORIGINS="$ORIGINS,$url"; fi
             fi

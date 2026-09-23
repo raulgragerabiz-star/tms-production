@@ -207,24 +207,16 @@ async function main() {
     }
   }
 
-  // Usuarios demo de Portal Transportista y App Conductor (Fases 12-13), scoped al primer
+  // Usuario demo de App Conductor (Fase 13), scoped al primer
   // transportista/vehículo sembrados arriba.
+  //
+  // El usuario demo de Portal Transportista ("transportista@tms.local",
+  // userType carrier_portal) que se sembraba aquí se retiró en la sub-fase 4
+  // de "usuarios app" junto con toda la app apps/carrier-portal -- ver
+  // claude/fase26-retirada-portal-transportista.md. Un seed nuevo ya no debe
+  // crear cuentas de un tipo de acceso que no tiene ninguna app ni ninguna
+  // ruta de API que las use.
   if (firstCarrier) {
-    const carrierPortalHash = await bcrypt.hash("Carrier1234!", 10);
-    await prisma.appUser.upsert({
-      where: { email: "transportista@tms.local" },
-      update: {},
-      create: {
-        companyId: company.id,
-        email: "transportista@tms.local",
-        passwordHash: carrierPortalHash,
-        fullName: "Portal Transportista Demo",
-        userType: "carrier_portal",
-        carrierId: firstCarrier.id,
-        active: true,
-      },
-    });
-
     const driver = await prisma.driver.upsert({
       where: { taxId: "D00000001" },
       update: {},

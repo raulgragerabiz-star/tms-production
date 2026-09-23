@@ -17,7 +17,14 @@ import { viewDocumentPdf, downloadDocumentPdf } from "@/lib/document-pdf";
 // Conductor y en Seguimiento -- de ahí que ningún pedido de prueba llegara a
 // ninguna app. Este modal cierra ese hueco de punta a punta: comparar →
 // elegir transportista → elegir vehículo → elegir conductor → crear envío →
-// (mientras no haya Portal Transportista real en uso) confirmar manualmente.
+// confirmar manualmente.
+//
+// Fase 26 ("usuarios app" sub-fase 4): el Portal Transportista
+// (apps/carrier-portal), que en su día iba a asumir el aceptar/rechazar de
+// este último paso, se retiró por completo -- petición explícita de Raúl
+// ("carece de sentido"), ver claude/fase26-retirada-portal-transportista.md.
+// La confirmación manual de aquí deja de ser un paso provisional "mientras
+// no haya Portal Transportista": es la vía definitiva.
 
 interface Props {
   routeId: string | null;
@@ -84,8 +91,8 @@ interface CarrierOption {
   legalName: string;
 }
 
-// Estados en los que la ruta ya no se gestiona desde aquí: el transportista
-// (Portal Transportista) o el conductor (App Conductor) llevan el resto.
+// Estados en los que la ruta ya no se gestiona desde aquí: el conductor
+// (App Conductor) lleva el resto.
 const LOCKED_STATUSES = ["in_progress", "closed", "rejected"];
 
 export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onError }: Props) {
@@ -253,10 +260,9 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
     onError: (err: any) => onError(err?.response?.data?.message ?? "No se pudo asignar el conductor"),
   });
 
-  // Marcar como confirmada a mano: en producción este paso lo hace el
-  // transportista desde su Portal (aceptar/rechazar), pero mientras no haya
-  // usuarios de Portal Transportista dados de alta para probar, backoffice
-  // puede destrabarlo igualmente -- backoffice es quien manda internamente.
+  // Marcar como confirmada a mano: sin Portal Transportista (retirado en la
+  // sub-fase 4 de "usuarios app"), backoffice es quien confirma siempre --
+  // backoffice es quien manda internamente.
   const confirmMutation = useMutation({
     mutationFn: async () => (await api.patch(`/routes/${routeId}/status`, { status: "confirmed" })).data,
     onSuccess: () => {
@@ -340,8 +346,7 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
 
           {LOCKED_STATUSES.includes(route.status) && (
             <p className="text-sm text-slate-500">
-              Esta ruta ya está en manos del transportista/conductor (App Conductor o Portal Transportista) — no se gestiona
-              desde aquí.
+              Esta ruta ya está en manos del conductor (App Conductor) — no se gestiona desde aquí.
             </p>
           )}
 
@@ -646,7 +651,7 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                 </div>
               )}
 
-              {/* Paso 4: confirmación manual, mientras no haya Portal Transportista en uso real */}
+              {/* Paso 4: confirmación manual (vía definitiva -- ver comentario de cabecera) */}
               {route.carrier && route.status === "assigned" && (
                 <div className="pt-2 border-t border-slate-100">
                   <button
@@ -657,8 +662,8 @@ export default function RouteAssignmentModal({ routeId, onClose, onSuccess, onEr
                     Marcar como confirmada (manual)
                   </button>
                   <p className="text-xs text-slate-400 mt-1">
-                    En producción lo hace el transportista desde su Portal (aceptar/rechazar). Úsalo mientras pruebas sin un
-                    usuario de Portal Transportista dado de alta.
+                    Confirmación manual desde Backoffice -- el transportista no tiene ningún portal propio para
+                    aceptar/rechazar rutas.
                   </p>
                 </div>
               )}

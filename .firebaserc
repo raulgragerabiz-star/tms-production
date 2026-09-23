@@ -8,9 +8,6 @@
         "backoffice": [
           "tms-backoffice-f3aa3"
         ],
-        "carrier-portal": [
-          "tms-carrier-portal"
-        ],
         "driver-app": [
           "tms-driver-app-927c1"
         ],

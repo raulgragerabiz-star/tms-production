@@ -7,12 +7,6 @@
       "rewrites": [{ "source": "**", "destination": "/index.html" }]
     },
     {
-      "target": "carrier-portal",
-      "public": "apps/carrier-portal/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }]
-    },
-    {
       "target": "driver-app",
       "public": "apps/app-conductor/dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],

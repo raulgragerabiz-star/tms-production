@@ -23,7 +23,6 @@ import { warehousesRouter } from "@/modules/warehouses/warehouses.routes";
 import { routeQrRouter } from "@/modules/route-qr/route-qr.routes";
 import { zonesRouter } from "@/modules/zones/zones.routes";
 import { deliveryZonesRouter } from "@/modules/delivery-zones/delivery-zones.routes";
-import { carrierPortalRouter } from "@/modules/portal/carrier-portal.routes";
 import { driverAppRouter } from "@/modules/portal/driver-app.routes";
 import { customerPortalRouter } from "@/modules/portal/customer-portal.routes";
 import { usersRouter } from "@/modules/users/users.routes";
@@ -48,9 +47,11 @@ import { prisma } from "@/lib/prisma";
 //
 // En vez de pedir que se actualice el .env cada vez, se admite automáticamente
 // cualquier origen de Codespaces para los puertos que ya usan las apps de
-// este proyecto (4000 backend, 5173 Backoffice, 5174 Portal Transportista,
-// 5175 App Conductor, 5176 Portal Cliente) -- CORS_ORIGIN se mantiene tal
-// cual para cualquier otro origen (ej. un dominio propio en producción).
+// este proyecto (4000 backend, 5173 Backoffice, 5174 libre -- antes Portal
+// Transportista, retirado en la sub-fase 4 de "usuarios app", ver
+// claude/fase26-retirada-portal-transportista.md --, 5175 App Conductor,
+// 5176 Portal Cliente) -- CORS_ORIGIN se mantiene tal cual para cualquier
+// otro origen (ej. un dominio propio en producción).
 const CODESPACES_ORIGIN_PATTERN = /^https:\/\/[a-z0-9-]+-(4000|5173|5174|5175|5176)\.app\.github\.dev$/;
 
 // Fase 23: mismo problema, pero probando desde Google Cloud Shell en vez de
@@ -167,7 +168,12 @@ export function createApp() {
 
   // Portales externos: autenticación independiente (mismo /api/auth/login, distinto
   // userType) pero scope restringido por carrierId/driverId, reforzado en cada router.
-  app.use("/api/carrier-portal", requireAuth, carrierPortalRouter);
+  // El Portal Transportista (apps/carrier-portal, /api/carrier-portal) se retiró por
+  // completo en la sub-fase 4 de "usuarios app" -- petición explícita de Raúl ("carece
+  // de sentido"). Ver claude/fase26-retirada-portal-transportista.md. El router y su
+  // middleware (requireCarrierPortal) se eliminaron; el valor de enum UserType.carrier_portal
+  // y las cuentas AppUser/mensajes de chat históricos que ya existieran NO se tocan (se
+  // dejan para histórico, mismo criterio ya usado en otras fases de este proyecto).
   app.use("/api/driver-app", requireAuth, driverAppRouter);
   app.use("/api/customer-portal", requireAuth, customerPortalRouter);
 

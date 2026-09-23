@@ -34,7 +34,7 @@ services:
       JWT_EXPIRES_IN: 8h
       PORT: 4000
       NODE_ENV: production
-      CORS_ORIGIN: ${CORS_ORIGIN:?falta CORS_ORIGIN, ej. https://tms.tudominio.com,https://transportistas.tudominio.com,https://conductor.tudominio.com}
+      CORS_ORIGIN: ${CORS_ORIGIN:?falta CORS_ORIGIN, ej. https://tms.tudominio.com,https://conductor.tudominio.com}
       # Fase 8c: faltaba pasar estas dos variables al contenedor de producción.
       # Esta imagen de backend usa la publicada por CD (sin bind-mount del
       # código ni del .env), así que aunque backend/.env tenga ORS_API_KEY
@@ -58,13 +58,10 @@ services:
     ports:
       - "8080:80"
 
-  carrier-portal:
-    image: ghcr.io/${GHCR_OWNER:?falta GHCR_OWNER}/tms-carrier-portal:${TMS_VERSION:-latest}
-    restart: unless-stopped
-    depends_on:
-      - backend
-    ports:
-      - "8081:80"
+  # Fase 26 ("usuarios app" sub-fase 4): el servicio carrier-portal (Portal
+  # Transportista, imagen tms-carrier-portal, puerto 8081) se retiró por
+  # completo -- petición explícita de Raúl, ver
+  # claude/fase26-retirada-portal-transportista.md.
 
   driver-app:
     image: ghcr.io/${GHCR_OWNER:?falta GHCR_OWNER}/tms-driver-app:${TMS_VERSION:-latest}
