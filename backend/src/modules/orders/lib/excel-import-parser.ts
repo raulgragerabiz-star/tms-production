@@ -4,6 +4,7 @@
 // Prisma/Postgres (que este entorno de desarrollo no siempre tiene).
 import * as XLSX from "xlsx";
 import crypto from "node:crypto";
+import { trimSheetToUsedRange } from "@/lib/xlsx-parse-utils";
 
 // --- Normalización de cabeceras -------------------------------------------
 // Tolerante a los nombres de columna reales que ya usa Bigmat en sus propios
@@ -202,6 +203,11 @@ export function parseOrdersWorkbook(buffer: Buffer): ParseResult {
     return { orders: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0, linesSkippedDueToStatus: 0 };
 
   const sheet = workbook.Sheets[sheetName];
+  // Fase 31: mismo recorte defensivo que en product-master-parser.ts -- si un
+  // futuro export del ERP declarase un rango usado mucho mayor que sus datos
+  // reales (visto en la plantilla de productos), esto evita el mismo
+  // problema de parseo lentísimo/con mucha RAM en pedidos.
+  trimSheetToUsedRange(sheet);
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
   if (rows.length === 0)
     return { orders: [], parseErrors: ["La hoja está vacía"], rowsRead: 0, linesSkippedDueToStatus: 0 };

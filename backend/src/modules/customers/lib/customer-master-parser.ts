@@ -11,6 +11,7 @@
 // direcciones por código de cliente para que la carga de pedidos las
 // resuelva automáticamente (ver orders-excel-import.service.ts).
 import * as XLSX from "xlsx";
+import { trimSheetToUsedRange } from "@/lib/xlsx-parse-utils";
 
 // Exportada (no solo para cabeceras): el servicio la reutiliza para
 // comparar el texto de las columnas "circuito"/"Centro" de la plantilla
@@ -157,6 +158,9 @@ export function parseCustomersWorkbook(buffer: Buffer): ParseCustomersResult {
   if (!sheetName) return { customers: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0 };
 
   const sheet = workbook.Sheets[sheetName];
+  // Fase 31: mismo recorte defensivo que en product-master-parser.ts -- ver
+  // xlsx-parse-utils.ts para el detalle del problema real que soluciona.
+  trimSheetToUsedRange(sheet);
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
   if (rows.length === 0) return { customers: [], parseErrors: ["La hoja está vacía"], rowsRead: 0 };
 

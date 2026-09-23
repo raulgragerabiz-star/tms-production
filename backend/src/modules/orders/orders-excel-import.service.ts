@@ -70,6 +70,45 @@ export interface OrdersImportSummary {
   // (Estado Documento = Enviado/Cerrado/...) -- no es un error, así que va
   // aparte de `errores` (ver excel-import-parser.ts, RESOLVED_LINE_STATUS_VALUES).
   lineasOmitidasPorEstadoErp: number;
+  // Fase 31 (petición de Raúl: "tampoco muestra el listado de los que si
+  // estan ok") -- antes el resumen solo daba el RECUENTO de pedidos creados,
+  // nunca sus números, así que no había forma de ver a golpe de vista cuáles
+  // habían entrado bien cuando el lote tenía muchos errores mezclados.
+  pedidosCreadosNumeros: string[];
+}
+
+// Fase 31: bug real reportado por Raúl -- "Transaction API error: Unable to
+// start a transaction in the given time." en algún pedido suelto de un lote
+// grande. Es un síntoma típico de Neon (Postgres serverless) cuando el pool
+// de conexiones está momentáneamente saturado por la concurrencia del propio
+// import (IMPORT_CONCURRENCY pedidos abriendo transacción a la vez) o la base
+// de datos tarda en "despertar" tras estar inactiva -- no un dato erróneo del
+// pedido en sí. Un reintento corto con espera creciente suele bastar sin
+// tener que repetir el lote entero a mano; también se amplía `maxWait`
+// (tiempo máximo esperando para poder EMPEZAR la transacción) y `timeout`
+// (tiempo máximo con la transacción abierta) por encima de los 2s/5s por
+// defecto de Prisma, ajustados para transacciones cortas típicas, no para un
+// pedido con varias líneas bajo carga concurrente.
+const IMPORT_TRANSACTION_OPTIONS = { maxWait: 15000, timeout: 30000 };
+const TRANSACTION_RETRY_ATTEMPTS = 3;
+
+function isTransientTransactionError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return message.includes("Unable to start a transaction") || message.includes("Transaction API error");
+}
+
+async function runImportTransaction<T>(fn: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= TRANSACTION_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await prisma.$transaction(fn, IMPORT_TRANSACTION_OPTIONS);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientTransactionError(err) || attempt === TRANSACTION_RETRY_ATTEMPTS) throw err;
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+  throw lastErr;
 }
 
 // Ejecuta `worker` sobre `items` con como mucho `limit` tareas en paralelo a
@@ -88,24 +127,57 @@ async function runWithConcurrency<T>(items: T[], limit: number, worker: (item: T
   await Promise.all(slots);
 }
 
+// Fase 31: mismo criterio de normalización que excel-import-parser.ts para
+// cabeceras -- sin tildes, minúsculas, espacios/puntuación colapsados.
+function normalizeWarehouseName(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 async function resolveWarehouseId(
   tx: Prisma.TransactionClient,
   companyId: string,
   warehouseName: string | undefined
 ): Promise<string> {
+  const warehouses: { id: string; name: string }[] = await tx.warehouse.findMany({
+    where: { companyId, active: true },
+    select: { id: true, name: true },
+  });
+  if (warehouses.length === 0) throw new Error("La empresa no tiene ningún almacén activo configurado");
+
   if (warehouseName) {
-    const match = await tx.warehouse.findFirst({
-      where: { companyId, active: true, name: { contains: warehouseName, mode: "insensitive" } },
+    // Fase 31 (bug real reportado por Raúl): el `contains` case-insensitive
+    // anterior comparaba directamente contra Postgres, sin tocar acentos, y
+    // solo admitía que el nombre del Excel estuviese CONTENIDO en el nombre
+    // guardado -- nunca al revés. Bastaba una tilde distinta ("Logística" en
+    // el Excel vs. "Logistica" en el almacén, o justo lo contrario), o que el
+    // nombre guardado fuese una versión más corta/larga del de la plantilla,
+    // para que un almacén que sí existía ("Getafe BM Logística", confirmado
+    // por Raúl) nunca encajase. Ahora se normaliza (sin tildes, minúsculas,
+    // espacios colapsados) y se compara en los dos sentidos.
+    const normalizedTarget = normalizeWarehouseName(warehouseName);
+    const match = warehouses.find((w) => {
+      const normalizedName = normalizeWarehouseName(w.name);
+      return normalizedName.includes(normalizedTarget) || normalizedTarget.includes(normalizedName);
     });
     if (match) return match.id;
   }
-  const warehouses = await tx.warehouse.findMany({ where: { companyId, active: true }, select: { id: true } });
+
   if (warehouses.length === 1) return warehouses[0].id;
-  if (warehouses.length === 0) throw new Error("La empresa no tiene ningún almacén activo configurado");
+
+  // Fase 31: se listan los almacenes activos reales en el propio mensaje de
+  // error -- así, si vuelve a fallar, se ve de un vistazo si es un problema
+  // de nombre (comparar contra esta lista) o de que falta dar de alta el
+  // almacén, sin depender de acceso directo a la base de datos.
+  const activeNames = warehouses.map((w) => `"${w.name}"`).join(", ");
   throw new Error(
     warehouseName
-      ? `No se ha encontrado ningún almacén activo que coincida con "${warehouseName}"`
-      : `Hay ${warehouses.length} almacenes activos: la plantilla debe indicar la columna "Almacén"`
+      ? `No se ha encontrado ningún almacén activo que coincida con "${warehouseName}". Almacenes activos: ${activeNames}.`
+      : `Hay ${warehouses.length} almacenes activos (${activeNames}): la plantilla debe indicar la columna "Almacén"`
   );
 }
 
@@ -280,7 +352,7 @@ async function importOneOrder(
     // de un `tx`, por ser una llamada de red externa).
     let deliveryPointId: string | undefined;
 
-    await prisma.$transaction(async (tx) => {
+    await runImportTransaction(async (tx) => {
       const resolved = await resolveCustomerAndDeliveryPoint(tx, companyId, parsed, summary);
       const customerId = resolved.customerId;
       deliveryPointId = resolved.deliveryPointId;
@@ -349,6 +421,7 @@ async function importOneOrder(
     }
 
     summary.pedidosCreados += 1;
+    summary.pedidosCreadosNumeros.push(parsed.orderNumber);
   } catch (err: any) {
     summary.errores.push({ pedido: parsed.orderNumber, motivo: err?.message ?? "Error desconocido" });
   }
@@ -394,6 +467,7 @@ export function startOrdersExcelImportJob(companyId: string, buffer: Buffer): { 
     clientesCreados: [],
     productosCreadosAutomaticamente: [],
     lineasOmitidasPorEstadoErp: linesSkippedDueToStatus,
+    pedidosCreadosNumeros: [],
   };
 
   const job = createImportJob(orders.length);

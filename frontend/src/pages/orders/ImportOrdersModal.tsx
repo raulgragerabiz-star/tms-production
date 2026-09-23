@@ -50,6 +50,10 @@ interface OrdersImportSummary {
   // Fase 30: líneas ya resueltas en el ERP (Estado Documento = Enviado/
   // Cerrado/...) que no se importan como pendientes de planificar.
   lineasOmitidasPorEstadoErp: number;
+  // Fase 31: números de los pedidos que sí se han creado correctamente --
+  // antes solo se veía el RECUENTO, sin forma de saber cuáles eran cuando el
+  // lote traía errores mezclados con aciertos.
+  pedidosCreadosNumeros: string[];
 }
 
 interface ImportStatusResponse {
@@ -245,6 +249,17 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
                   {portalUrl}/seguimiento
                 </a>
                 .
+              </p>
+            </div>
+          )}
+
+          {summary.pedidosCreadosNumeros.length > 0 && (
+            <div className="border border-slate-200 rounded-lg p-3">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">
+                Pedidos creados correctamente ({summary.pedidosCreadosNumeros.length})
+              </h3>
+              <p className="text-xs text-slate-400 font-mono break-all">
+                {summary.pedidosCreadosNumeros.join(", ")}
               </p>
             </div>
           )}

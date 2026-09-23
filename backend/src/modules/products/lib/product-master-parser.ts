@@ -13,6 +13,7 @@
 // juntos ("5x5x22,6") y "Apilabilidad (sí/no, nº capas)" trae el sí/no y el
 // número de capas en la misma celda ("si, 3 capas").
 import * as XLSX from "xlsx";
+import { trimSheetToUsedRange } from "@/lib/xlsx-parse-utils";
 
 function normalizeHeader(raw: string): string {
   return raw
@@ -211,6 +212,14 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
   if (!sheetName) return { products: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0 };
 
   const sheet = workbook.Sheets[sheetName];
+  // Fase 31: la plantilla real de Bigmat puede declarar un rango usado mucho
+  // mayor que los datos reales (restos sueltos de ediciones anteriores muy
+  // por debajo de la última fila con datos) -- sin este recorte,
+  // sheet_to_json tarda decenas de segundos y llega a consumir >1GB de RAM
+  // para un fichero de pocos miles de filas reales, lo que provoca el
+  // "Network Error" que veía Raúl al importar el catálogo. Ver
+  // xlsx-parse-utils.ts para el detalle completo.
+  trimSheetToUsedRange(sheet);
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
   if (rows.length === 0) return { products: [], parseErrors: ["La hoja está vacía"], rowsRead: 0 };
 
@@ -225,9 +234,24 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
     const excelRowNumber = i + 1;
     if (!row || row.every((v) => cell(v) === "")) continue; // fila vacía, se ignora sin avisar
 
+    // Fase 31: la plantilla real "DDBB Productos" repite un mismo bloque de
+    // 8 columnas (Mínimo de compra, Tipo Envase, ...) hasta 8 veces seguidas
+    // en la misma fila (condiciones de compra por tramo/proveedor) -- muchas
+    // de esas columnas repetidas están vacías salvo en uno de los bloques, y
+    // no siempre es el mismo bloque el que trae el dato en todas las filas.
+    // Con una asignación simple (`record[field] = row[idx]`) el ÚLTIMO
+    // bloque procesado siempre gana, y en ~1 de cada 6 filas ese último
+    // bloque está vacío -- se pierde en silencio un dato (p.ej. Tipo Envase)
+    // que sí venía en un bloque anterior de la misma fila. Con "primer valor
+    // no vacío gana" nos quedamos con el dato real venga del bloque que
+    // venga, y no cambia nada para las columnas que solo aparecen una vez
+    // (que son la inmensa mayoría).
     const record: Record<string, unknown> = {};
     colMap.forEach((field, idx) => {
-      if (field) record[field] = row[idx];
+      if (!field) return;
+      const existing = record[field];
+      const existingIsEmpty = existing === undefined || existing === null || cell(existing) === "";
+      if (existingIsEmpty) record[field] = row[idx];
     });
 
     const internalCode = cellAsCode(record.internalCode);
