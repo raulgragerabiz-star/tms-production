@@ -5,6 +5,7 @@ import KpiCard from "@/components/KpiCard";
 import Panel from "@/components/Panel";
 import SectionTitle from "@/components/SectionTitle";
 import ClientDistanceMap, { ClientMapPoint, MapWarehouse, DistanceTierDef } from "@/pages/dashboard/ClientDistanceMap";
+import AnalyticsPage from "@/pages/AnalyticsPage";
 
 // Fase 16: "Inicio" pasa a ser SOLO el panel de indicadores acumulados +
 // mapa interactivo de clientes que pidió Raúl -- sustituye por completo al
@@ -16,6 +17,24 @@ import ClientDistanceMap, { ClientMapPoint, MapWarehouse, DistanceTierDef } from
 // (envíos en curso, incidencias, flota) sigue disponible en Seguimiento y
 // Planificación -- no se ha borrado nada del backend, solo esta pantalla ya
 // no la muestra.
+//
+// Fase 29 (2026-09-23): petición explícita de Raúl -- "unifica esos datos
+// analíticos con los KPI dentro de la pestaña Inicio... elimina de la
+// ecuación las alertas y la previsión de demanda... optimizar el panel y
+// retirar las partes no productivas". "Analítica" (antes su propio acceso
+// de menú, AnalyticsHubPage con pestañas KPIs/Alertas/Previsión) desaparece
+// como sección independiente: su contenido de KPIs (AnalyticsPage, con
+// filtro de periodo/almacén/transportista) pasa a ser la segunda pestaña de
+// Inicio, junto al resumen acumulado que ya existía. "Alertas"
+// (AnomaliesPage) y "Previsión de demanda" (DemandForecastPage) se retiran
+// por completo de Backoffice -- Raúl las considera partes no productivas del
+// panel. Sus pantallas se han borrado (AnalyticsHubPage/AnomaliesPage/
+// DemandForecastPage.tsx) pero el backend que las sostenía NO se toca: el
+// motor de auto-optimización (auto-optimization.service.ts) sigue leyendo
+// anomalías internamente para su cálculo de confianza, y fleet-sizing sigue
+// usando funciones de demand-forecast.service.ts -- mismo criterio que en la
+// Fase 16 ("no se ha borrado nada del backend, solo la pantalla que ya no lo
+// muestra").
 //
 // Gráficos dibujados a mano en SVG, mismo criterio ya establecido en
 // AnalyticsPage.tsx (sin librería nueva, paleta en orden fijo, barras con
@@ -77,7 +96,21 @@ function apiErrorMessage(err: unknown): string {
   return anyErr?.response?.data?.message ?? anyErr?.message ?? "error desconocido";
 }
 
+// Fase 29: segmentación en subventanas dentro de Inicio -- "Resumen" es el
+// panel de indicadores acumulados + mapa que ya existía (Fase 16, sin
+// ventana de fecha), "Análisis por periodo" es AnalyticsPage embebida (antes
+// la pestaña "KPIs" de la extinta AnalyticsHubPage), con sus propios filtros
+// de fecha/almacén/transportista.
+type Tab = "resumen" | "periodo";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "resumen", label: "Resumen" },
+  { id: "periodo", label: "Análisis por periodo" },
+];
+
 export default function DashboardPage() {
+  const [tab, setTab] = useState<Tab>("resumen");
+
   // Fase 16: indicadores acumulados (todo el histórico, sin ventana de
   // fecha) + mapa de clientes. Refetch cada 5 min -- de sobra para datos que,
   // por definición, cambian poco a poco.
@@ -97,8 +130,29 @@ export default function DashboardPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold text-slate-900 mb-1">Inicio</h1>
-      <p className="text-sm text-slate-500 mb-6">Indicadores acumulados del sistema, histórico completo</p>
+      <p className="text-sm text-slate-500 mb-4">
+        Resumen acumulado del sistema y mapa de clientes, o análisis detallado por periodo (coste, OTIF,
+        transportistas, zonas, segmentación de pedidos).
+      </p>
 
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+              tab === t.id ? "bg-brand-600 text-white" : "bg-white border border-slate-200 text-slate-600"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "periodo" && <AnalyticsPage embedded />}
+
+      {tab === "resumen" && (
+        <>
       <SectionTitle>Indicadores acumulados</SectionTitle>
       <p className="text-xs text-slate-400 -mt-2 mb-3">Todo el histórico registrado en el sistema, sin ventana de fecha</p>
       {accumulatedQuery.isError ? (
@@ -193,6 +247,8 @@ export default function DashboardPage() {
             </p>
           </div>
         </Panel>
+      )}
+        </>
       )}
     </div>
   );

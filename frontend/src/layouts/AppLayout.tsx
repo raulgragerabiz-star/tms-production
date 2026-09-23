@@ -2,13 +2,14 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/store/auth-store";
 import bigmatWordmark from "@/assets/bigmat-wordmark.png";
 
+// Fase 29: "Analítica" y "Retornos" desaparecen de aquí -- ver comentario
+// completo en App.tsx sobre dónde ha ido a parar cada uno (Analítica ->
+// segunda pestaña de Inicio; Retornos -> sub-pestaña de Maestros).
 const navItems = [
   { to: "/", label: "Inicio", end: true },
   { to: "/pedidos", label: "Pedidos" },
   { to: "/planificador", label: "Planificador" },
   { to: "/seguimiento", label: "Seguimiento" },
-  { to: "/analitica", label: "Analítica" },
-  { to: "/retornos", label: "Retornos" },
   { to: "/facturacion", label: "Facturación" },
   { to: "/configuracion", label: "Configuración" },
 ];
@@ -28,11 +29,17 @@ const navItems = [
 // Fase 28: "Segmentación" -- umbrales de peso que clasifican un pedido en
 // Paquetería/Paletería/Ligero/Pesado (ver SegmentationRulesPage.tsx). Hasta
 // ahora esta configuración no tenía NINGÚN acceso desde Backoffice.
+// Fase 29: "Retornos" -- petición explícita de Raúl ("elimina la sección
+// Retornos, no es operativa, y traslada la configuración a la subsección
+// Maestros"). Deja de ser un acceso de nivel superior y pasa a vivir aquí,
+// como referencia/gestión de envases-palés pendientes por cliente -- la
+// pantalla (ReturnsPage) no ha cambiado, solo su ubicación en el menú.
 const masterItems = [
   { to: "/maestros/clientes", label: "Clientes" },
   { to: "/maestros/productos", label: "Productos" },
   { to: "/maestros/flota-transportistas", label: "Flota y Transportistas" },
   { to: "/maestros/segmentacion", label: "Segmentación" },
+  { to: "/maestros/retornos", label: "Retornos" },
   { to: "/maestros/usuarios", label: "Usuarios" },
   { to: "/maestros/almacenes", label: "Almacenes" },
 ];

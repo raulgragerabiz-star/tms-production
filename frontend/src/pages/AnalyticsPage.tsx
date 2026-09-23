@@ -229,7 +229,10 @@ interface Props {
   // solo acceso de menú (petición de Raúl: "son muchas pestañas para datos
   // sin demasiada variabilidad") -- mismo patrón "embedded" ya usado en
   // VehiclesPage/InfluenceZonesPage: oculta el título y la descripción
-  // propios cuando esta pantalla se monta como pestaña de AnalyticsHubPage.
+  // propios cuando esta pantalla se monta dentro de otra.
+  // Fase 29: la extinta AnalyticsHubPage desapareció -- ahora quien monta
+  // esta pantalla embebida es la pestaña "Análisis por periodo" de Inicio
+  // (ver DashboardPage.tsx).
   embedded?: boolean;
 }
 
