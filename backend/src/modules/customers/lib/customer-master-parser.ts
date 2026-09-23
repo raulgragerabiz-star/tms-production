@@ -12,7 +12,12 @@
 // resuelva automáticamente (ver orders-excel-import.service.ts).
 import * as XLSX from "xlsx";
 
-function normalizeHeader(raw: string): string {
+// Exportada (no solo para cabeceras): el servicio la reutiliza para
+// comparar el texto de las columnas "circuito"/"Centro" de la plantilla
+// contra los nombres reales de DeliveryZone/Warehouse ya dados de alta, sin
+// que un acento, una mayúscula o un espacio de más impidan encontrar la
+// coincidencia (ver customer-master-import.service.ts).
+export function normalizeHeader(raw: string): string {
   return raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -36,7 +41,36 @@ const HEADER_ALIASES: Record<string, string> = {
   "direccion": "addressRaw",
   "domicilio": "addressRaw",
   "direccion entrega": "addressRaw",
+  // Mejora (2026-09-23): la plantilla real que sube Raúl para volcar el
+  // circuito ya asignado por cliente (ej. exportada de su propia bbdd de
+  // clientes/centros) trae también "circuito", "estado" y "Centro" -- hasta
+  // ahora estas 3 columnas no tenían ningún alias, así que `colMap` las
+  // dejaba en `null` y se descartaban sin avisar (de ahí que "no marca el
+  // circuito que tiene asignado" aunque la plantilla sí lo trajera). Ver
+  // customer-master-import.service.ts para cómo se resuelven estos 3 campos
+  // contra los circuitos/almacenes ya dados de alta.
+  "circuito": "deliveryZoneName",
+  "circuito de reparto": "deliveryZoneName",
+  "ruta": "deliveryZoneName",
+  "estado": "activeRaw",
+  "centro": "warehouseName",
+  "almacen": "warehouseName",
 };
+
+// Valores reconocidos para la columna "estado" -- comparados ya
+// normalizados (sin acentos/mayúsculas, ver normalizeHeader). Cualquier otro
+// valor se ignora (no se toca el estado actual del cliente) y se avisa en el
+// resumen de la importación, en vez de asumir uno de los dos por defecto.
+const ACTIVE_TRUE_VALUES = new Set(["activo", "alta", "si", "s", "true", "1"]);
+const ACTIVE_FALSE_VALUES = new Set(["inactivo", "baja", "no", "n", "false", "0"]);
+
+export function parseActiveText(raw: string | undefined): boolean | undefined {
+  if (!raw) return undefined;
+  const norm = normalizeHeader(raw);
+  if (ACTIVE_TRUE_VALUES.has(norm)) return true;
+  if (ACTIVE_FALSE_VALUES.has(norm)) return false;
+  return undefined;
+}
 
 function cell(value: unknown): string {
   if (value == null) return "";
@@ -102,6 +136,12 @@ export interface ParsedCustomerRow {
   city?: string;
   province?: string;
   postalCode?: string;
+  // Mejora (2026-09-23): circuito/estado/Centro de la plantilla -- texto tal
+  // cual viene en la columna (sin resolver todavía contra ningún id; eso lo
+  // hace customer-master-import.service.ts, que sí tiene acceso a Prisma).
+  deliveryZoneName?: string;
+  activeRaw?: string;
+  warehouseName?: string;
   rowNumber: number;
 }
 
@@ -153,6 +193,9 @@ export function parseCustomersWorkbook(buffer: Buffer): ParseCustomersResult {
       city: parsedAddress.city,
       province: parsedAddress.province,
       postalCode: parsedAddress.postalCode,
+      deliveryZoneName: cell(record.deliveryZoneName) || undefined,
+      activeRaw: cell(record.activeRaw) || undefined,
+      warehouseName: cell(record.warehouseName) || undefined,
       rowNumber: excelRowNumber,
     });
   }
@@ -162,21 +205,25 @@ export function parseCustomersWorkbook(buffer: Buffer): ParseCustomersResult {
 
 // --- Plantilla descargable ---------------------------------------------
 export function buildCustomerMasterTemplate(): Buffer {
-  const headers = ["Código", "Nombre", "Dirección completa"];
+  const headers = ["Código", "Nombre", "Dirección completa", "circuito", "estado", "Centro"];
 
   const example = [
-    ["CLI001", "Ejemplo Construcciones, S.L.", "Calle Mayor 15, 28901 Getafe (Madrid)"],
-    ["CLI002", "Reformas Segundo Ejemplo, S.L.", "Avenida de la Industria 8, 28981 Parla, Madrid"],
+    ["CLI001", "Ejemplo Construcciones, S.L.", "Calle Mayor 15, 28901 Getafe (Madrid)", "MAD1", "Activo", "Getafe"],
+    ["CLI002", "Reformas Segundo Ejemplo, S.L.", "Avenida de la Industria 8, 28981 Parla, Madrid", "", "Activo", ""],
   ];
 
   const instructions = [
     ["Cómo rellenar esta plantilla"],
     [""],
-    ["Sirve para cargar (o completar) la dirección de entrega habitual de cada cliente a partir de su código, cuando el Excel de Pedidos no trae la dirección (esto pasa cuando en el ERP la dirección vive en la ficha del cliente/socio, no en la línea de pedido)."],
+    ["Sirve para cargar (o completar) la dirección de entrega habitual de cada cliente a partir de su código, cuando el Excel de Pedidos no trae la dirección (esto pasa cuando en el ERP la dirección vive en la ficha del cliente/socio, no en la línea de pedido). También permite asignar de golpe el circuito de reparto y el estado de muchos clientes a la vez."],
     [""],
     ["Código: el mismo código de cliente que se usa en el Excel de carga de Pedidos (columna \"Código Cliente\")."],
     ["Nombre: razón social del cliente. Si el código ya existe en el sistema, este campo es opcional (no se pisa el nombre ya guardado si se deja en blanco)."],
     ['Dirección completa: la dirección tal cual la exporta el ERP, en una sola columna (ej. "Calle Mayor 15, 28901 Getafe (Madrid)"). El sistema detecta automáticamente el código postal (5 dígitos) y, cuando puede, la población y la provincia.'],
+    [""],
+    ["circuito (opcional): el nombre EXACTO de un circuito de reparto ya dado de alta en Flota y Transportistas → Rutas / Transportistas (ej. \"MAD1\", \"ALBACETE\", \"PORTU 4\"). No hace falta que coincidan mayúsculas, tildes o espacios de más, pero el nombre debe existir ya en el sistema -- si no se encuentra, esa fila se deja SIN circuito y sale listada en el resumen de la importación como incidencia, para revisarla a mano (así se evita crear sin querer un circuito duplicado por una errata). Si se deja en blanco, no se toca el circuito que ya tuviera el cliente."],
+    ["Centro (opcional): el nombre del almacén desde el que ese cliente usa ESE circuito, cuando recibe entregas desde más de un almacén con circuitos distintos según cuál lo sirva (ver \"Circuito por almacén (excepciones)\" en la ficha del cliente). Si se deja en blanco, el circuito de la columna anterior se guarda como el circuito POR DEFECTO del cliente. Igual que con \"circuito\", el nombre del almacén debe existir ya en Maestros → Almacenes."],
+    ["estado (opcional): \"Activo\" o \"Inactivo\". Si se deja en blanco, o trae un valor distinto de estos dos, no se toca el estado actual del cliente."],
     [""],
     ["Una vez cargado este maestro, la importación de Pedidos usará esta dirección por defecto para cualquier pedido de ese cliente que no traiga su propia dirección de entrega."],
     ["Si un pedido concreto SÍ trae dirección propia en su Excel, esa dirección tiene prioridad sobre la dirección por defecto del cliente."],
@@ -185,7 +232,7 @@ export function buildCustomerMasterTemplate(): Buffer {
 
   const wb = XLSX.utils.book_new();
   const sheetClientes = XLSX.utils.aoa_to_sheet([headers, ...example]);
-  sheetClientes["!cols"] = [{ wch: 14 }, { wch: 34 }, { wch: 50 }];
+  sheetClientes["!cols"] = [{ wch: 14 }, { wch: 34 }, { wch: 50 }, { wch: 16 }, { wch: 12 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(wb, sheetClientes, "Clientes");
 
   const sheetInstrucciones = XLSX.utils.aoa_to_sheet(instructions);

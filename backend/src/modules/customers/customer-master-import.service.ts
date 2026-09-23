@@ -18,7 +18,7 @@
 // maestro de un cliente grande tiene varios miles de filas.
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { parseCustomersWorkbook, type ParsedCustomerRow } from "./lib/customer-master-parser";
+import { parseCustomersWorkbook, parseActiveText, normalizeHeader, type ParsedCustomerRow } from "./lib/customer-master-parser";
 import { geocodeDeliveryPointIfMissing } from "@/modules/delivery-points/delivery-points.service";
 
 export { buildCustomerMasterTemplate } from "./lib/customer-master-parser";
@@ -34,9 +34,95 @@ export interface CustomerMasterImportSummary {
   clientesCreados: number;
   clientesActualizados: number;
   puntosDeEntregaCreados: number;
+  // Mejora (2026-09-23): columnas "circuito"/"estado"/"Centro" de la
+  // plantilla -- ver customer-master-parser.ts (HEADER_ALIASES) y
+  // resolveZoneAssignment más abajo. Un circuito o un centro que no se
+  // encuentre por nombre NO se inventa -- la fila se deja sin ese dato y se
+  // añade a `errores` para revisar a mano (decisión explícita de Raúl).
+  circuitosAsignados: number;
   sinCodigoPostalDetectado: string[];
   erroresParseo: string[];
   errores: CustomerMasterErrorRow[];
+}
+
+// Contexto resuelto UNA VEZ por importación entera (no por fila): traer
+// todos los circuitos/almacenes de la empresa de antemano evita cientos de
+// consultas sueltas a Postgres cuando la plantilla trae miles de filas, y
+// permite comparar el texto de la plantilla contra el nombre real ya
+// normalizado (sin acentos/mayúsculas/espacios de más, ver normalizeHeader).
+interface ZoneAssignmentContext {
+  zoneIdByName: Map<string, string>;
+  warehouseIdByName: Map<string, string>;
+}
+
+async function buildZoneAssignmentContext(companyId: string): Promise<ZoneAssignmentContext> {
+  const [zones, warehouses] = await Promise.all([
+    prisma.deliveryZone.findMany({ where: { companyId }, select: { id: true, name: true } }),
+    prisma.warehouse.findMany({ where: { companyId }, select: { id: true, name: true } }),
+  ]);
+  return {
+    zoneIdByName: new Map(zones.map((z: { id: string; name: string }) => [normalizeHeader(z.name), z.id])),
+    warehouseIdByName: new Map(warehouses.map((w: { id: string; name: string }) => [normalizeHeader(w.name), w.id])),
+  };
+}
+
+// Aplica las columnas "circuito"/"Centro" de una fila ya con el cliente
+// creado/actualizado. Reglas (decisión explícita de Raúl, AskUserQuestion):
+// - Si el nombre de circuito no se encuentra, no se asigna nada y se avisa
+//   en `errores` -- nunca se crea un circuito nuevo al vuelo (evita
+//   duplicados por una errata en el Excel).
+// - Si SÍ se encuentra el circuito, se guarda siempre como circuito POR
+//   DEFECTO del cliente (Customer.deliveryZoneId) -- es lo que muestra la
+//   columna "Circuito" del listado de Maestros > Clientes.
+// - Si además la fila trae "Centro" y ese almacén también se encuentra, se
+//   guarda TAMBIÉN como excepción por almacén (CustomerDeliveryZone, Fase
+//   15) -- para clientes que reciben entregas desde varios almacenes con
+//   circuitos distintos según cuál los sirva. Si el Centro no se encuentra,
+//   el circuito por defecto ya aplicado arriba se mantiene igualmente; solo
+//   se avisa en `errores` que la excepción por almacén no se pudo guardar.
+async function applyZoneAssignment(
+  customerId: string,
+  row: ParsedCustomerRow,
+  context: ZoneAssignmentContext,
+  summary: CustomerMasterImportSummary
+): Promise<void> {
+  if (!row.deliveryZoneName) {
+    if (row.warehouseName) {
+      summary.errores.push({
+        codigo: row.code,
+        motivo: `Se indicó Centro "${row.warehouseName}" sin circuito -- no se ha asignado nada`,
+      });
+    }
+    return;
+  }
+
+  const zoneId = context.zoneIdByName.get(normalizeHeader(row.deliveryZoneName));
+  if (!zoneId) {
+    summary.errores.push({
+      codigo: row.code,
+      motivo: `Circuito "${row.deliveryZoneName}" no encontrado -- da de alta ese circuito en Flota y Transportistas (o corrige el nombre) y vuelve a importar esta fila`,
+    });
+    return;
+  }
+
+  await prisma.customer.update({ where: { id: customerId }, data: { deliveryZoneId: zoneId } });
+  summary.circuitosAsignados += 1;
+
+  if (row.warehouseName) {
+    const warehouseId = context.warehouseIdByName.get(normalizeHeader(row.warehouseName));
+    if (!warehouseId) {
+      summary.errores.push({
+        codigo: row.code,
+        motivo: `Centro "${row.warehouseName}" no encontrado -- se ha guardado igualmente el circuito por defecto, pero revisa el nombre del almacén para la excepción por centro`,
+      });
+      return;
+    }
+    await prisma.customerDeliveryZone.upsert({
+      where: { customerId_warehouseId: { customerId, warehouseId } },
+      create: { customerId, warehouseId, deliveryZoneId: zoneId },
+      update: { deliveryZoneId: zoneId },
+    });
+  }
 }
 
 // Mismo pool de concurrencia fija que orders-excel-import.service.ts --
@@ -95,7 +181,12 @@ async function ensureDeliveryPoint(
   return { created: true, deliveryPointId: created.id };
 }
 
-async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summary: CustomerMasterImportSummary): Promise<void> {
+async function importOneCustomer(
+  companyId: string,
+  row: ParsedCustomerRow,
+  context: ZoneAssignmentContext,
+  summary: CustomerMasterImportSummary
+): Promise<void> {
   try {
     const businessCode = row.code.trim().slice(0, 10);
 
@@ -104,6 +195,16 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
     });
 
     const hasAddress = row.addressRaw.trim().length > 0;
+    // Mejora (2026-09-23): columna "estado" -- undefined si viene en blanco o
+    // con un valor no reconocido (ver parseActiveText), en cuyo caso no se
+    // toca el estado actual del cliente.
+    const activeValue = parseActiveText(row.activeRaw);
+    if (row.activeRaw && activeValue === undefined) {
+      summary.errores.push({
+        codigo: row.code,
+        motivo: `Estado "${row.activeRaw}" no reconocido (usa "Activo" o "Inactivo") -- no se ha cambiado el estado`,
+      });
+    }
     let customerId: string;
 
     if (existing) {
@@ -118,6 +219,7 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
         patch.defaultProvince = row.province ?? null;
         patch.defaultPostalCode = row.postalCode ?? null;
       }
+      if (activeValue !== undefined) patch.active = activeValue;
       if (Object.keys(patch).length > 0) {
         await prisma.customer.update({ where: { id: existing.id }, data: patch });
       }
@@ -136,11 +238,14 @@ async function importOneCustomer(companyId: string, row: ParsedCustomerRow, summ
           defaultCity: row.city,
           defaultProvince: row.province,
           defaultPostalCode: row.postalCode,
+          active: activeValue ?? undefined,
         },
       });
       customerId = created.id;
       summary.clientesCreados += 1;
     }
+
+    await applyZoneAssignment(customerId, row, context, summary);
 
     if (hasAddress) {
       const { created, deliveryPointId } = await ensureDeliveryPoint(customerId, row);
@@ -171,12 +276,17 @@ export async function runCustomerMasterImport(companyId: string, buffer: Buffer)
     clientesCreados: 0,
     clientesActualizados: 0,
     puntosDeEntregaCreados: 0,
+    circuitosAsignados: 0,
     sinCodigoPostalDetectado: [],
     erroresParseo: parseErrors,
     errores: [],
   };
 
-  await runWithConcurrency(customers, IMPORT_CONCURRENCY, (row) => importOneCustomer(companyId, row, summary));
+  // Se resuelve una sola vez para toda la importación -- ver el comentario
+  // de ZoneAssignmentContext más arriba.
+  const context = await buildZoneAssignmentContext(companyId);
+
+  await runWithConcurrency(customers, IMPORT_CONCURRENCY, (row) => importOneCustomer(companyId, row, context, summary));
 
   return summary;
 }

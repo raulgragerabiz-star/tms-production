@@ -33,6 +33,9 @@ interface CustomerMasterImportSummary {
   clientesCreados: number;
   clientesActualizados: number;
   puntosDeEntregaCreados: number;
+  // Mejora (2026-09-23): columnas "circuito"/"estado"/"Centro" -- ver
+  // customer-master-import.service.ts.
+  circuitosAsignados: number;
   sinCodigoPostalDetectado: string[];
   erroresParseo: string[];
   errores: CustomerMasterErrorRow[];
@@ -103,6 +106,13 @@ export default function ImportCustomersModal({ open, onClose, onSuccess, onError
             esta dirección por defecto cuando el Excel de pedidos no traiga la suya propia (habitual cuando el ERP
             exporta el pedido solo con el código de cliente).
           </p>
+          <p className="text-sm text-slate-600">
+            También admite, si las traes, las columnas opcionales <span className="font-medium">circuito</span>,{" "}
+            <span className="font-medium">estado</span> y <span className="font-medium">Centro</span> para asignar de
+            golpe el circuito de reparto (y, si indicas Centro, también la excepción por almacén) y el estado de cada
+            cliente. El nombre del circuito/almacén debe coincidir con uno ya dado de alta -- si no se encuentra, esa
+            fila se deja sin asignar y sale listada abajo como incidencia, en vez de crear uno nuevo por error.
+          </p>
 
           <button
             onClick={() => downloadMutation.mutate()}
@@ -139,7 +149,7 @@ export default function ImportCustomersModal({ open, onClose, onSuccess, onError
 
       {summary && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-center">
             <div className="bg-slate-50 rounded-lg p-3">
               <p className="text-lg font-semibold text-slate-800">{summary.filasLeidas}</p>
               <p className="text-xs text-slate-500">Filas leídas</p>
@@ -151,6 +161,10 @@ export default function ImportCustomersModal({ open, onClose, onSuccess, onError
             <div className="bg-sky-50 rounded-lg p-3">
               <p className="text-lg font-semibold text-sky-700">{summary.clientesActualizados}</p>
               <p className="text-xs text-slate-500">Direcciones actualizadas</p>
+            </div>
+            <div className="bg-violet-50 rounded-lg p-3">
+              <p className="text-lg font-semibold text-violet-700">{summary.circuitosAsignados}</p>
+              <p className="text-xs text-slate-500">Circuitos asignados</p>
             </div>
             <div className="bg-red-50 rounded-lg p-3">
               <p className="text-lg font-semibold text-red-700">{summary.errores.length}</p>
