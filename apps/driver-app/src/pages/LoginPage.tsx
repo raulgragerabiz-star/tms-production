@@ -40,17 +40,32 @@ export default function LoginPage() {
     if (step !== "scanning") return;
     const scanner = new Html5Qrcode("qr-reader-login");
     scannerRef.current = scanner;
+    // Fix: al leer el QR se paraba la cámara aquí mismo y, justo después, al
+    // pasar a `step: "form"` React retira del DOM el <div id="qr-reader-
+    // login">, lo que hacía que la limpieza del efecto (más abajo) intentara
+    // parar la cámara UNA SEGUNDA VEZ sobre un contenedor que ya no existe --
+    // html5-qrcode puede lanzar esa segunda vez de forma síncrona (no como
+    // promesa rechazada), y ese fallo se colaba sin capturar y tumbaba toda
+    // la pantalla en blanco. `stopSafely` asegura que solo se pare una vez, y
+    // reduce cualquier fallo (síncrono o asíncrono) a un simple "no hacer
+    // nada" -- ni al leer el QR ni al desmontar la pantalla debe romper nada.
+    let stopped = false;
+    const stopSafely = async () => {
+      if (stopped) return;
+      stopped = true;
+      try {
+        await scanner.stop();
+      } catch {
+        /* la cámara ya podía estar parada, o el contenedor ya no existir */
+      }
+    };
 
     scanner
       .start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 240 },
         async (decodedText) => {
-          try {
-            await scanner.stop();
-          } catch {
-            /* la cámara ya podía estar parándose */
-          }
+          await stopSafely();
           setToken(decodedText);
           setStep("form");
         },
@@ -64,7 +79,7 @@ export default function LoginPage() {
       });
 
     return () => {
-      scannerRef.current?.stop().catch(() => {});
+      stopSafely();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
