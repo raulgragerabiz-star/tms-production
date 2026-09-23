@@ -292,6 +292,47 @@ dashboardRouter.get(
       .sort((a, b) => b.weightKg - a.weightKg)
       .slice(0, 10);
 
+    // Fase 28: "Segmentación de pedidos" (categoría de la ruta, ya calculada
+    // por segmentation.service.ts) y "Modelo de transporte" (a portes/
+    // dedicado, ver Route.transportModel) -- los dos conceptos nuevos de esta
+    // fase, contados sobre las mismas `routes` del periodo/filtro ya cargadas
+    // arriba, sin ninguna consulta adicional. Orden fijo (nunca alfabético)
+    // para que el gráfico de Analítica no reordene las categorías al
+    // cambiar de periodo -- mismo criterio que el resto de esta pantalla.
+    //
+    // `(r as any).transportModel` -- campo nuevo del esquema, ver el mismo
+    // criterio de `as any` en routes.routes.ts (cliente de Prisma sin
+    // regenerar en este sandbox no es excusa para bloquear el resto del
+    // recálculo).
+    const SERVICE_TYPE_ORDER: { value: string; label: string }[] = [
+      { value: "paqueteria", label: "Paquetería" },
+      { value: "paleteria", label: "Paletería" },
+      { value: "paleteria_pesada", label: "Ligero" },
+      { value: "gran_volumen", label: "Pesado" },
+    ];
+    const serviceTypeCounts = new Map<string, number>();
+    const TRANSPORT_MODEL_ORDER: { value: string; label: string }[] = [
+      { value: "dedicado", label: "Dedicado" },
+      { value: "a_portes", label: "A portes" },
+      { value: "sin_clasificar", label: "Sin clasificar" },
+    ];
+    const transportModelCounts = new Map<string, number>();
+    for (const r of routes) {
+      serviceTypeCounts.set(r.serviceType, (serviceTypeCounts.get(r.serviceType) ?? 0) + 1);
+      const transportModel = (r as any).transportModel ?? "sin_clasificar";
+      transportModelCounts.set(transportModel, (transportModelCounts.get(transportModel) ?? 0) + 1);
+    }
+    const serviceTypeBreakdown = SERVICE_TYPE_ORDER.map(({ value, label }) => ({
+      segment: value,
+      label,
+      routes: serviceTypeCounts.get(value) ?? 0,
+    }));
+    const transportModelBreakdown = TRANSPORT_MODEL_ORDER.map(({ value, label }) => ({
+      model: value,
+      label,
+      routes: transportModelCounts.get(value) ?? 0,
+    }));
+
     // Clasificación ABC: A = clientes cuyo peso acumulado (de mayor a menor)
     // llega hasta el 70% del total movido en el periodo; B hasta el 90%; C
     // hasta el 98%; D el resto -- mismos cortes que muestra el panel de
@@ -416,6 +457,8 @@ dashboardRouter.get(
         .map((c) => ({ ...c, costReal: Math.round(c.costReal * 100) / 100, marginReal: Math.round(c.marginReal * 100) / 100 })),
       topZones,
       customerAbc,
+      serviceTypeBreakdown,
+      transportModelBreakdown,
       customerCompliance,
     });
   })

@@ -89,6 +89,23 @@ interface CustomerComplianceRow {
   otifPct: number;
 }
 
+// Fase 28: los dos conceptos nuevos de esta fase -- "Segmentación de
+// pedidos" (categoría de la ruta según su peso, ver Maestros >
+// Segmentación) y "Modelo de transporte" (a portes/dedicado, ver
+// Configuración > Modelo de transporte). Contados por Nº de rutas del
+// periodo/filtro elegido, igual que el resto de esta pantalla.
+interface ServiceTypeRow {
+  segment: string;
+  label: string;
+  routes: number;
+}
+
+interface TransportModelRow {
+  model: string;
+  label: string;
+  routes: number;
+}
+
 interface HistoryResponse {
   range: { from: string; to: string; groupBy: "day" | "week" | "month" };
   totals: {
@@ -123,6 +140,9 @@ interface HistoryResponse {
   byCarrier: CarrierRow[];
   topZones: ZoneRow[];
   customerAbc: AbcRow[];
+  // Fase 28: ver comentario de ServiceTypeRow/TransportModelRow más arriba.
+  serviceTypeBreakdown: ServiceTypeRow[];
+  transportModelBreakdown: TransportModelRow[];
   customerCompliance: CustomerComplianceRow[];
 }
 
@@ -141,6 +161,23 @@ const ABC_DESCRIPTION: Record<AbcRow["cls"], string> = {
   B: "70-90% peso",
   C: "90-98% peso",
   D: "resto",
+};
+
+// Fase 28: colores fijos por categoría para los dos donuts nuevos --
+// mismo criterio de "orden fijo, nunca ciclado" que el resto de la
+// paleta categórica de esta pantalla (slot1/slot2/slot3 ya usados arriba
+// para coste/OTIF, aquí se reutilizan para no introducir tonos nuevos).
+const SERVICE_TYPE_COLOR: Record<string, string> = {
+  paqueteria: PALETTE.slot2,
+  paleteria: PALETTE.slot1,
+  paleteria_pesada: PALETTE.slot3,
+  gran_volumen: PALETTE.critical,
+};
+
+const TRANSPORT_MODEL_COLOR: Record<string, string> = {
+  dedicado: PALETTE.slot1,
+  a_portes: PALETTE.slot2,
+  sin_clasificar: PALETTE.muted,
 };
 
 interface WarehouseOption {
@@ -395,6 +432,33 @@ export default function AnalyticsPage({ embedded }: Props = {}) {
               </ChartCard>
               <ChartCard title="Segmentación ABC de clientes" subtitle="Clasificación por peso acumulado (Pareto)">
                 <AbcDonutChart rows={data.customerAbc} />
+              </ChartCard>
+            </div>
+          )}
+
+          {data.totals.routes > 0 && (
+            <div className="grid md:grid-cols-2 gap-4 mb-6">
+              <ChartCard title="Segmentación de pedidos" subtitle="Nº de rutas del periodo por categoría de peso -- Maestros > Segmentación">
+                <CategoryDonutChart
+                  unitLabel="rutas"
+                  rows={data.serviceTypeBreakdown.map((r) => ({
+                    key: r.segment,
+                    label: r.label,
+                    value: r.routes,
+                    color: SERVICE_TYPE_COLOR[r.segment] ?? PALETTE.muted,
+                  }))}
+                />
+              </ChartCard>
+              <ChartCard title="Modelo de transporte" subtitle="A portes / dedicado -- Configuración > Modelo de transporte">
+                <CategoryDonutChart
+                  unitLabel="rutas"
+                  rows={data.transportModelBreakdown.map((r) => ({
+                    key: r.model,
+                    label: r.label,
+                    value: r.routes,
+                    color: TRANSPORT_MODEL_COLOR[r.model] ?? PALETTE.muted,
+                  }))}
+                />
               </ChartCard>
             </div>
           )}
@@ -927,6 +991,100 @@ function AbcDonutChart({ rows, asTable }: { rows: AbcRow[]; asTable?: boolean })
             <span className="font-mono font-bold text-slate-700">{r.cls}</span>
             <span className="text-slate-500">{ABC_DESCRIPTION[r.cls]}</span>
             <span className="ml-4 font-mono text-slate-600">{r.customerCount}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface DonutRow {
+  key: string;
+  label: string;
+  value: number;
+  color: string;
+}
+
+// Fase 28: misma dona que AbcDonutChart (arcos con hueco de 2px, leyenda
+// siempre visible con el recuento -- nunca solo color) pero generalizada
+// sobre filas genéricas {key,label,value,color}, para no duplicar el SVG
+// una tercera vez con "Segmentación de pedidos" y "Modelo de transporte".
+function CategoryDonutChart({ rows, unitLabel, asTable }: { rows: DonutRow[]; unitLabel: string; asTable?: boolean }) {
+  const total = rows.reduce((acc, r) => acc + r.value, 0);
+
+  if (asTable) {
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-slate-500">
+            <tr>
+              <th className="text-left py-1 pr-3">Categoría</th>
+              <th className="text-left py-1 pr-3">{unitLabel}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td className="py-1 pr-3 font-medium text-slate-700">{r.label}</td>
+                <td className="py-1 pr-3">{r.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  const size = 160;
+  const strokeWidth = 22;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const gapPx = 2;
+  let offsetAcc = 0;
+
+  return (
+    <div className="flex items-center gap-6 flex-wrap">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+          {total === 0 ? (
+            <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={PALETTE.gridline} strokeWidth={strokeWidth} />
+          ) : (
+            rows
+              .filter((r) => r.value > 0)
+              .map((r) => {
+                const frac = r.value / total;
+                const dash = frac * circumference;
+                const el = (
+                  <circle
+                    key={r.key}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="none"
+                    stroke={r.color}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${Math.max(0, dash - gapPx)} ${circumference - dash + gapPx}`}
+                    strokeDashoffset={-offsetAcc}
+                  />
+                );
+                offsetAcc += dash;
+                return el;
+              })
+          )}
+        </g>
+        <text x={size / 2} y={size / 2 - 4} textAnchor="middle" fontSize={20} fontWeight={700} fill={PALETTE.textPrimary} fontFamily="monospace">
+          {total}
+        </text>
+        <text x={size / 2} y={size / 2 + 14} textAnchor="middle" fontSize={10} fill={PALETTE.muted}>
+          {unitLabel}
+        </text>
+      </svg>
+      <div className="space-y-1.5">
+        {rows.map((r) => (
+          <div key={r.key} className="flex items-center gap-2 text-xs">
+            <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: r.color }} />
+            <span className="text-slate-700">{r.label}</span>
+            <span className="ml-auto font-mono text-slate-600">{r.value}</span>
           </div>
         ))}
       </div>
