@@ -66,6 +66,10 @@ export interface OrdersImportSummary {
   errores: ImportErrorRow[];
   clientesCreados: CreatedCustomerInfo[];
   productosCreadosAutomaticamente: string[];
+  // Fase 30: líneas descartadas porque el ERP ya las da por resueltas
+  // (Estado Documento = Enviado/Cerrado/...) -- no es un error, así que va
+  // aparte de `errores` (ver excel-import-parser.ts, RESOLVED_LINE_STATUS_VALUES).
+  lineasOmitidasPorEstadoErp: number;
 }
 
 // Ejecuta `worker` sobre `items` con como mucho `limit` tareas en paralelo a
@@ -197,17 +201,40 @@ async function resolveOrCreateProduct(
   line: ParsedOrderLine,
   summary: OrdersImportSummary
 ) {
-  let product = await tx.product.findUnique({ where: { sku: line.sku } });
+  // Fase 30: bug real encontrado al analizar la plantilla real de pedidos
+  // del ERP -- su columna "SKU" trae en realidad el CÓDIGO INTERNO del
+  // artículo (el mismo "Código" del catálogo, ver product-master-parser.ts),
+  // NO el EAN. `Product.sku` es el campo que guarda el EAN (Fase 8R) y
+  // `Product.internalCode` el código interno -- buscar solo por `sku` (como
+  // se hacía antes) nunca encontraba el producto real del catálogo, así que
+  // CUALQUIER línea de un pedido real del ERP creaba un producto de prueba
+  // con peso "1kg" en vez de heredar el peso/dimensiones/envase reales ya
+  // cargados en Maestros > Productos -- justo el síntoma que reportó Raúl.
+  // Mismo criterio de búsqueda en dos pasos que ya usa
+  // product-master-import.service.ts al cargar el catálogo: primero por
+  // internalCode (lo que trae de verdad la plantilla de pedidos real), y
+  // solo si no aparece, por sku/EAN (para plantillas manuales o de prueba
+  // que sí escriben directamente el EAN en la columna SKU).
+  let product = await tx.product.findFirst({ where: { companyId, internalCode: line.sku } });
+  if (!product) {
+    product = await tx.product.findUnique({ where: { sku: line.sku } });
+  }
   if (!product) {
     // Producto de prueba mínimo: mismo criterio que ya se aplica a cualquier
     // producto del catálogo sin dimensiones cargadas (import-surtido.ts) --
     // se puede operar con él, y se completa a mano desde Maestros > Productos
     // cuando se conozcan sus datos reales. El peso de 1kg es un valor
     // deliberadamente reconocible como "placeholder", no una estimación.
+    // Se guarda también como internalCode (además de sku provisional) para
+    // que, si más adelante se carga el catálogo real con este mismo código,
+    // product-master-import.service.ts lo encuentre por internalCode y
+    // complete este mismo registro con sus datos reales, en vez de quedar
+    // huérfano con el peso de prueba para siempre.
     product = await tx.product.create({
       data: {
         companyId,
         sku: line.sku,
+        internalCode: line.sku,
         description: line.description || line.sku,
         salesUnit: line.unit,
         unitsPerPallet: 1,
@@ -355,7 +382,7 @@ async function processOrdersImportJob(jobId: string, companyId: string, orders: 
 // un identificador de trabajo en vez de dejar la petición HTTP colgada
 // mientras se procesan potencialmente miles de pedidos.
 export function startOrdersExcelImportJob(companyId: string, buffer: Buffer): { importId: string; totalOrders: number } {
-  const { orders, parseErrors, rowsRead } = parseOrdersWorkbook(buffer);
+  const { orders, parseErrors, rowsRead, linesSkippedDueToStatus } = parseOrdersWorkbook(buffer);
 
   const summary: OrdersImportSummary = {
     filasLeidas: rowsRead,
@@ -366,6 +393,7 @@ export function startOrdersExcelImportJob(companyId: string, buffer: Buffer): { 
     errores: [],
     clientesCreados: [],
     productosCreadosAutomaticamente: [],
+    lineasOmitidasPorEstadoErp: linesSkippedDueToStatus,
   };
 
   const job = createImportJob(orders.length);

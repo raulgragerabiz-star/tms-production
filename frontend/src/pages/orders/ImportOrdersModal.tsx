@@ -47,6 +47,9 @@ interface OrdersImportSummary {
   errores: ImportErrorRow[];
   clientesCreados: CreatedCustomerInfo[];
   productosCreadosAutomaticamente: string[];
+  // Fase 30: líneas ya resueltas en el ERP (Estado Documento = Enviado/
+  // Cerrado/...) que no se importan como pendientes de planificar.
+  lineasOmitidasPorEstadoErp: number;
 }
 
 interface ImportStatusResponse {
@@ -253,6 +256,16 @@ export default function ImportOrdersModal({ open, onClose, onSuccess, onError }:
               </h3>
               <p className="text-xs text-slate-400 break-all">
                 {summary.clientesCreados.map((c) => `${c.businessCode} — ${c.legalName}`).join(" · ")}
+              </p>
+            </div>
+          )}
+
+          {summary.lineasOmitidasPorEstadoErp > 0 && (
+            <div className="border border-slate-200 bg-slate-50 rounded-lg p-3">
+              <p className="text-xs text-slate-600">
+                {summary.lineasOmitidasPorEstadoErp} línea(s) no se han importado porque el ERP ya las marca como
+                "Enviado" o "Cerrado" -- no quedan pendientes de planificar. Si el resto de un pedido seguía
+                pendiente, esa parte se ha importado con normalidad.
               </p>
             </div>
           )}

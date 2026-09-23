@@ -29,7 +29,21 @@ const HEADER_ALIASES: Record<string, string> = {
   "documento": "orderNumber",
   "pedido": "orderNumber",
   "codigo cliente": "customerCode",
-  "codigo": "customerCode",
+  "cod cliente": "customerCode",
+  "codigo socio": "customerCode",
+  // Fase 30 (2026-09-23): la plantilla REAL que exporta el ERP para el
+  // informe de pedidos ("pedidos.xlsx"/"Ejemplo informe Pedidos mes.xlsx")
+  // trae DOS códigos distintos por línea -- "Codigo" (el socio/tienda
+  // "padre", ej. 562000) y "Delegacion Contacto" (la delegación/punto de
+  // entrega concreto, ej. 562004) -- que casi siempre coinciden pero NO
+  // siempre (una misma cadena con varias direcciones de entrega bajo el
+  // mismo socio). El maestro de clientes de Bigmat (customer-master-parser.ts,
+  // columna "Código") usa el código de DELEGACIÓN, no el del socio padre --
+  // así que "Codigo" se ha quitado deliberadamente de aquí (usarlo colaba un
+  // código equivocado siempre que ambos difirieran, resolviendo la dirección
+  // de entrega de un cliente distinto al real) y se resuelve el cliente
+  // exclusivamente por "Delegacion Contacto".
+  "delegacion contacto": "customerCode",
   "cliente": "customerName",
   "contacto": "customerName",
   "razon social": "customerName",
@@ -65,6 +79,12 @@ const HEADER_ALIASES: Record<string, string> = {
   "ventana horaria hasta": "windowTo",
   "hora hasta": "windowTo",
   "hasta": "windowTo",
+  // Fase 30: en la plantilla real del ERP, "SKU" es en realidad el CÓDIGO
+  // INTERNO del artículo (columna "Código" del catálogo, no el EAN) -- ver
+  // el fix correspondiente en orders-excel-import.service.ts
+  // (resolveOrCreateProduct), que ahora busca primero por internalCode y
+  // solo si no aparece prueba por sku (EAN), igual que ya hace
+  // product-master-import.service.ts al cargar el catálogo.
   "sku": "sku",
   "codigo articulo": "sku",
   "referencia": "sku",
@@ -77,7 +97,23 @@ const HEADER_ALIASES: Record<string, string> = {
   "observaciones": "notes",
   "observaciones pedido": "notes",
   "notas": "notes",
+  // Fase 30: "Estado Documento" -- ya resuelto en el ERP (Enviado/Cerrado)
+  // frente a pendiente de envío. Decisión explícita de Raúl: esas líneas NO
+  // se importan como pendientes de planificar (si el resto del pedido sigue
+  // pendiente, esa parte sí se importa con normalidad -- el filtro es por
+  // LÍNEA, no por pedido completo). Ver RESOLVED_LINE_STATUS_VALUES.
+  "estado documento": "lineStatusRaw",
+  "estado": "lineStatusRaw",
 };
+
+// Valores de "Estado Documento" que el ERP ya da por resueltos -- una línea
+// con uno de estos valores no se importa como pendiente de planificar (se
+// cuenta aparte en ParseResult.linesSkippedDueToStatus, no es un error).
+// Cualquier otro valor (incluido "Pendiente de envio", vacío, o un valor
+// nuevo que el ERP no traía todavía) se considera pendiente e importable --
+// deliberadamente "fail open" para no descolgar en silencio pedidos reales
+// solo porque el ERP use una palabra distinta en el futuro.
+const RESOLVED_LINE_STATUS_VALUES = new Set(["enviado", "cerrado", "facturado", "cancelado", "anulado"]);
 
 function parseFlexibleDate(value: unknown): Date | undefined {
   if (value == null || value === "") return undefined;
@@ -150,6 +186,10 @@ export interface ParseResult {
   orders: ParsedOrder[];
   parseErrors: string[];
   rowsRead: number;
+  // Fase 30: líneas con "Estado Documento" ya resuelto en el ERP (Enviado/
+  // Cerrado/...) que se han descartado a propósito -- no es un error de
+  // parseo, así que va aparte de parseErrors (ver RESOLVED_LINE_STATUS_VALUES).
+  linesSkippedDueToStatus: number;
 }
 
 // Lee la primera hoja del libro, tolera cabeceras en cualquier orden y
@@ -158,17 +198,20 @@ export interface ParseResult {
 export function parseOrdersWorkbook(buffer: Buffer): ParseResult {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return { orders: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0 };
+  if (!sheetName)
+    return { orders: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0, linesSkippedDueToStatus: 0 };
 
   const sheet = workbook.Sheets[sheetName];
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
-  if (rows.length === 0) return { orders: [], parseErrors: ["La hoja está vacía"], rowsRead: 0 };
+  if (rows.length === 0)
+    return { orders: [], parseErrors: ["La hoja está vacía"], rowsRead: 0, linesSkippedDueToStatus: 0 };
 
   const headerRow = rows[0].map((h) => cell(h));
   const colMap = headerRow.map((h) => HEADER_ALIASES[normalizeHeader(h)] ?? null);
 
   const parseErrors: string[] = [];
   const groups = new Map<string, ParsedOrder>();
+  let linesSkippedDueToStatus = 0;
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -227,6 +270,18 @@ export function parseOrdersWorkbook(buffer: Buffer): ParseResult {
 
     const sku = cell(record.sku);
     const quantity = cellNumber(record.quantity);
+
+    // Fase 30: línea ya resuelta en el ERP (Enviado/Cerrado/...) -- se
+    // descarta ANTES de comprobar SKU/cantidad, para no confundirla con un
+    // error de datos (ver RESOLVED_LINE_STATUS_VALUES). Si el resto del
+    // pedido tiene líneas pendientes, el pedido se sigue creando igual, solo
+    // sin esta línea.
+    const lineStatusNorm = normalizeHeader(cell(record.lineStatusRaw));
+    if (lineStatusNorm && RESOLVED_LINE_STATUS_VALUES.has(lineStatusNorm)) {
+      linesSkippedDueToStatus += 1;
+      continue;
+    }
+
     if (sku && quantity != null && quantity > 0) {
       group.lines.push({
         sku,
@@ -240,7 +295,15 @@ export function parseOrdersWorkbook(buffer: Buffer): ParseResult {
     }
   }
 
-  return { orders: [...groups.values()], parseErrors, rowsRead: rows.length - 1 };
+  // Fase 30: un pedido cuyas líneas se han quedado todas descartadas (ya sea
+  // porque el ERP las da todas por resueltas, o porque ninguna traía una
+  // cantidad válida -- ver parseErrors más arriba) no tiene nada que
+  // importar. Se filtra aquí en vez de dejar que llegue vacío a
+  // importOneOrder, que lo contaría como un "error" de importación cuando en
+  // realidad, para el caso de Estado Documento, no lo es.
+  const orders = [...groups.values()].filter((o) => o.lines.length > 0);
+
+  return { orders, parseErrors, rowsRead: rows.length - 1, linesSkippedDueToStatus };
 }
 
 export function generateTempPassword(): string {
