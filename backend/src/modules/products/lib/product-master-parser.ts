@@ -76,12 +76,33 @@ export interface ParsedDims {
 // "5x5x22,6" / "26 x 17,2 x 24,2" -> Fondo x Ancho x Alto. Si la celda no
 // tiene exactamente 3 partes separadas por "x", se ignora sin fallar (queda
 // pendiente de rellenar a mano) en vez de rechazar toda la fila.
+//
+// Fase 32 (petición de Raúl al ver que la carga real de "productos_bbdd.xlsx"
+// dejaba en blanco muchas medidas que SÍ estaban en su Excel): al auditar
+// columna a columna el fichero real se confirmó que una parte importante de
+// las filas (varios cientos, sobre todo en "Medidas Palet") no separa las 3
+// medidas con "x" sino con "*" (ej. "120*80*150", "65*37*173h" -- esta última
+// además con una letra suelta pegada al último número para indicar el eje,
+// "h" de "alto"). `parseSpanishNumber` ya descarta cualquier carácter que no
+// sea dígito/coma/punto al final, así que ese sufijo de letra se limpia solo
+// una vez separadas las 3 partes -- lo único que faltaba era intentar también
+// "*" como separador cuando "x" no da exactamente 3 trozos.
+const DIMENSION_SEPARATORS = [/x/i, /\*/];
+
 export function parseDimsCell(raw: string): ParsedDims {
-  const parts = raw.split(/x/i).map((p) => p.trim()).filter(Boolean);
-  if (parts.length !== 3) return {};
-  const [depthCm, widthCm, heightCm] = parts.map(parseSpanishNumber);
-  if (depthCm == null || widthCm == null || heightCm == null) return {};
-  return { depthCm, widthCm, heightCm };
+  for (const separator of DIMENSION_SEPARATORS) {
+    const parts = raw.split(separator).map((p) => p.trim()).filter(Boolean);
+    if (parts.length !== 3) continue;
+    const [depthCm, widthCm, heightCm] = parts.map(parseSpanishNumber);
+    if (depthCm == null || widthCm == null || heightCm == null) continue;
+    return { depthCm, widthCm, heightCm };
+  }
+  // Fila con solo 2 medidas ("23x10", "100X100" -- diámetro x altura, o solo
+  // fondo x ancho sin alto) o con texto libre ("dependerá de la cantidad...",
+  // "20 cms"): se deja pendiente de rellenar a mano en vez de adivinar a qué
+  // eje corresponde cada valor, que podría meter un dato de volumen erróneo
+  // en la planificación de rutas.
+  return {};
 }
 
 export interface ParsedStackability {
@@ -90,17 +111,35 @@ export interface ParsedStackability {
 }
 
 // "si, 3 capas" / "no" / "sí (2 capas)" -> booleano + número de capas.
+//
+// Fase 32 (petición de Raúl al ver que la carga real de "productos_bbdd.xlsx"
+// dejaba en blanco datos que sí estaban en su Excel): en el fichero real casi
+// todos los valores vienen envueltos entre paréntesis -- "(si, 3 capas)" --
+// y el regex anterior exigía que la cadena EMPEZASE por "si"/"no"
+// (`^\s*si\b`), así que el paréntesis inicial hacía que nunca encajara: se
+// perdía el booleano `stackable` en el 100% de las filas que sí traían el
+// dato (el número de capas, al no estar anclado al principio, sí se
+// capturaba ya antes).
 export function parseStackabilityCell(raw: string): ParsedStackability {
   const norm = raw
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
   if (!norm.trim()) return {};
+  const trimmedNorm = norm.trim().replace(/^\(+|\)+$/g, "").trim();
   let stackable: boolean | undefined;
-  if (/^\s*si\b/.test(norm)) stackable = true;
-  else if (/^\s*no\b/.test(norm)) stackable = false;
-  const layersMatch = norm.match(/(\d+)\s*capa/);
-  const stackableLayers = layersMatch ? parseInt(layersMatch[1], 10) : undefined;
+  if (/^si\b/.test(trimmedNorm)) stackable = true;
+  else if (/^no\b/.test(trimmedNorm)) stackable = false;
+  const layersMatch = trimmedNorm.match(/(\d+)\s*capa/);
+  let stackableLayers = layersMatch ? parseInt(layersMatch[1], 10) : undefined;
+  // Fase 32: filas que solo traen el número de capas, sin "si"/"no" delante
+  // (ej. "5" a secas) -- dado que la propia columna es "Apilabilidad
+  // (sí/no, nº capas)", un número de capas anotado implica que el producto
+  // SÍ es apilable.
+  if (stackable === undefined && stackableLayers === undefined && /^\d+$/.test(trimmedNorm)) {
+    stackable = true;
+    stackableLayers = parseInt(trimmedNorm, 10);
+  }
   return { stackable, stackableLayers };
 }
 
