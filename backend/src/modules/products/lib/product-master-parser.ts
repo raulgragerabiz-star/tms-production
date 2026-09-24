@@ -110,6 +110,22 @@ export interface ParsedStackability {
   stackableLayers?: number;
 }
 
+// Fase 33 (petición de Raúl: una "plantilla oficial" con una medida por
+// celda, sin depender de adivinar separadores de texto libre como en el
+// export real del ERP -- ver parseDimsCell/parseStackabilityCell arriba).
+// "Sí"/"No" en una celda propia, sin paréntesis ni número de capas mezclado.
+function parseYesNoCell(raw: string): boolean | undefined {
+  const norm = raw
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+  if (!norm) return undefined;
+  if (/^si\b/.test(norm)) return true;
+  if (/^no\b/.test(norm)) return false;
+  return undefined;
+}
+
 // "si, 3 capas" / "no" / "sí (2 capas)" -> booleano + número de capas.
 //
 // Fase 32 (petición de Raúl al ver que la carga real de "productos_bbdd.xlsx"
@@ -204,6 +220,33 @@ const HEADER_ALIASES: Record<string, string> = {
   "peso caja": "grossWeightKgRaw",
   "peso palet": "fullPalletWeightKgRaw",
   "peso neto": "netWeightKgRaw",
+  // Fase 33: variantes con la unidad en la cabecera, tal cual las lleva la
+  // "plantilla oficial" (una medida por celda) generada para completar a
+  // mano los datos que el export del ERP no trae bien formados.
+  "peso caja kg": "grossWeightKgRaw",
+  "peso palet kg": "fullPalletWeightKgRaw",
+  "peso neto kg": "netWeightKgRaw",
+
+  // Fase 33: columnas de medidas EN CELDAS SEPARADAS (Fondo/Ancho/Alto cada
+  // una con su propia columna), en vez del texto combinado "FxAxA" del
+  // export real del ERP (parseDimsCell arriba). Se usan en la "plantilla
+  // oficial" pensada para rellenar/corregir el catálogo a mano sin ninguna
+  // ambigüedad de separador ("x" vs "*") ni de a qué eje corresponde cada
+  // número -- si una fila trae estas columnas, tienen prioridad sobre el
+  // texto combinado (ver parseProductsWorkbook más abajo).
+  "fondo unidad cm": "unitDepthCmDirect",
+  "ancho unidad cm": "unitWidthCmDirect",
+  "alto unidad cm": "unitHeightCmDirect",
+  "fondo caja cm": "boxDepthCmDirect",
+  "ancho caja cm": "boxWidthCmDirect",
+  "alto caja cm": "boxHeightCmDirect",
+  "fondo palet cm": "palletDepthCmDirect",
+  "ancho palet cm": "palletWidthCmDirect",
+  "alto palet cm": "palletHeightCmDirect",
+  // Fase 33: apilabilidad en dos celdas separadas ("Sí"/"No" + nº de capas),
+  // en vez del texto combinado "(si, 3 capas)" del export real del ERP.
+  "apilable si no": "stackableDirect",
+  "n capas": "stackableLayersDirect",
 };
 
 export interface ParsedProductRow {
@@ -245,9 +288,26 @@ export interface ParseProductsResult {
   rowsRead: number;
 }
 
+// Fase 33: la "plantilla oficial" lleva la hoja de instrucciones ANTES que
+// la de datos, para que se lea primero al abrir el fichero -- si se cogiese
+// siempre la primera hoja del libro (como se hacía hasta ahora, pensado solo
+// para el export del ERP y la plantilla antigua, que traen los datos en la
+// primera hoja) se intentaría parsear la hoja de instrucciones como si fuera
+// el catálogo. Se prioriza una hoja llamada "Catalogo" o "Productos" (sin
+// distinguir mayúsculas/acentos) si existe, y si no se cae al criterio
+// anterior (primera hoja del libro) para no romper ningún fichero real ya
+// soportado.
+function pickProductsSheetName(sheetNames: string[]): string | undefined {
+  const preferred = sheetNames.find((name) => {
+    const normalized = normalizeHeader(name);
+    return normalized === "catalogo" || normalized === "productos";
+  });
+  return preferred ?? sheetNames[0];
+}
+
 export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
-  const sheetName = workbook.SheetNames[0];
+  const sheetName = pickProductsSheetName(workbook.SheetNames);
   if (!sheetName) return { products: [], parseErrors: ["El archivo no contiene ninguna hoja"], rowsRead: 0 };
 
   const sheet = workbook.Sheets[sheetName];
@@ -311,6 +371,24 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
     const palletDims = parseDimsCell(cell(record.palletDimsRaw));
     const stackability = parseStackabilityCell(cell(record.stackabilityRaw));
 
+    // Fase 33: si la fila trae las columnas de "plantilla oficial" (una
+    // medida por celda), esas tienen prioridad sobre lo que se haya podido
+    // sacar del texto combinado -- son inequívocas por construcción, así que
+    // no hace falta adivinar nada. Un export real del ERP nunca trae estas
+    // columnas (colMap las deja todas en `undefined`), así que esto no
+    // cambia nada para ese caso.
+    const unitDepthCm = parseSpanishNumber(cell(record.unitDepthCmDirect)) ?? unitDims.depthCm;
+    const unitWidthCm = parseSpanishNumber(cell(record.unitWidthCmDirect)) ?? unitDims.widthCm;
+    const unitHeightCm = parseSpanishNumber(cell(record.unitHeightCmDirect)) ?? unitDims.heightCm;
+    const boxDepthCm = parseSpanishNumber(cell(record.boxDepthCmDirect)) ?? boxDims.depthCm;
+    const boxWidthCm = parseSpanishNumber(cell(record.boxWidthCmDirect)) ?? boxDims.widthCm;
+    const boxHeightCm = parseSpanishNumber(cell(record.boxHeightCmDirect)) ?? boxDims.heightCm;
+    const palletDepthCm = parseSpanishNumber(cell(record.palletDepthCmDirect)) ?? palletDims.depthCm;
+    const palletWidthCm = parseSpanishNumber(cell(record.palletWidthCmDirect)) ?? palletDims.widthCm;
+    const palletHeightCm = parseSpanishNumber(cell(record.palletHeightCmDirect)) ?? palletDims.heightCm;
+    const stackable = parseYesNoCell(cell(record.stackableDirect)) ?? stackability.stackable;
+    const stackableLayers = parseSpanishInt(cell(record.stackableLayersDirect)) ?? stackability.stackableLayers;
+
     // Fase 28: "Grupo" > "Familia"/"Categoria" > "Subfamilia" -- se combinan
     // en un único texto para el campo `category` (que no se parte en el
     // esquema). Con la plantilla antigua (solo "Familia") esto da
@@ -331,17 +409,17 @@ export function parseProductsWorkbook(buffer: Buffer): ParseProductsResult {
       ean: ean || undefined,
       abcClass: cell(record.abcClass) || undefined,
       measurementUnit: cell(record.measurementUnit) || undefined,
-      unitDepthCm: unitDims.depthCm,
-      unitWidthCm: unitDims.widthCm,
-      unitHeightCm: unitDims.heightCm,
-      boxDepthCm: boxDims.depthCm,
-      boxWidthCm: boxDims.widthCm,
-      boxHeightCm: boxDims.heightCm,
-      palletDepthCm: palletDims.depthCm,
-      palletWidthCm: palletDims.widthCm,
-      palletHeightCm: palletDims.heightCm,
-      stackable: stackability.stackable,
-      stackableLayers: stackability.stackableLayers,
+      unitDepthCm,
+      unitWidthCm,
+      unitHeightCm,
+      boxDepthCm,
+      boxWidthCm,
+      boxHeightCm,
+      palletDepthCm,
+      palletWidthCm,
+      palletHeightCm,
+      stackable,
+      stackableLayers,
       storageConditions: cell(record.storageConditions) || undefined,
       weightUnit: cell(record.weightUnit) || undefined,
       packagingType: cell(record.packagingType) || undefined,
